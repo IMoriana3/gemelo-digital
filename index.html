@@ -776,7 +776,7 @@ function buildTracker(wrap){
   var TR=[{z:-filaZ,xs:0},{z:filaZ,xs:0},                 // bifila CENTRAL (lleva motor/TCU)
           {z:filaZ+6,xs:6},{z:filaZ+12,xs:6},             // bifila DERECHA (+Z), 6 m al norte
           {z:-filaZ-6,xs:6},{z:-filaZ-12,xs:6}];          // bifila IZQUIERDA (-Z), 6 m al norte
-  var filas=[];
+  var filas=[], dampers=[];   /* amortiguadores articulados (se reajustan cada frame en el bucle) */
   for(var ti=0;ti<TR.length;ti++){ var zc=TR[ti].z, xs=TR[ti].xs;
     /* COLUMNA cuadrada + placa base + CUNA en U (forma de C) que cuna el tubo cuadrado */
     for(var pi=0;pi<piersX.length;pi++){var px=piersX[pi]+xs;
@@ -786,16 +786,20 @@ function buildTracker(wrap){
       var brg=new THREE.Mesh(new THREE.CylinderGeometry(0.10,0.10,0.18,18),silver);brg.rotation.z=Math.PI/2;brg.position.set(px,2.0,zc);brg.castShadow=true;sc.add(brg);
       var bo1=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.014,0.14,8),dark2);bo1.position.set(px-0.085,1.94,zc+0.145);sc.add(bo1);
       var bo2=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.014,0.14,8),dark2);bo2.position.set(px+0.085,1.94,zc+0.145);sc.add(bo2);
-      if(piersX[pi]===-24||piersX[pi]===24){   // AMORTIGUADOR en el penúltimo soporte a NORTE (-24) y a SUR (+24) de la fila
-        var dpA=new THREE.Vector3(px,1.08,zc+0.5), dpB=new THREE.Vector3(px,1.92,zc);
-        var dpV=dpB.clone().sub(dpA), dpL=dpV.length(), dpQ=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),dpV.clone().normalize());
-        var rod=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,dpL,10),steel);rod.position.copy(dpA.clone().lerp(dpB,0.5));rod.quaternion.copy(dpQ);sc.add(rod);
-        var bdy=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,dpL*0.55,14),dark2);bdy.position.copy(dpA.clone().lerp(dpB,0.34));bdy.quaternion.copy(dpQ);bdy.castShadow=true;sc.add(bdy);
-        [dpA,dpB].forEach(function(P){var ey=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.05,10),steel);ey.position.copy(P);ey.quaternion.copy(dpQ);sc.add(ey);});
-      }
+      // (el amortiguador articulado se crea más abajo, cuando ya existe el grupo 'g' de la fila)
     }
     var g=new THREE.Group();g.position.set(xs,2,zc);
     var eje=new THREE.Mesh(new THREE.BoxGeometry(span,0.12,0.12),steel);g.add(eje);   // TUBO/VIGA DE TORSIÓN CUADRADO 120 mm
+    /* AMORTIGUADOR articulado en el penúltimo soporte a NORTE (-24) y a SUR (+24): un extremo FIJO al
+       soporte, el otro a un lateral de la viga (hijo de 'g' -> gira con el tubo) => se alarga/acorta */
+    [-24,24].forEach(function(pbx){ if(piersX.indexOf(pbx)<0)return; var pxx=pbx+xs, dy0=-0.17, dz0=0.11;
+      var Bp=new THREE.Vector3(pxx,1.12,zc+0.52);                                                  // extremo FIJO al soporte
+      var body=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,1,14),dark2);body.castShadow=true;sc.add(body);
+      var rodd=new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,1,10),silver);sc.add(rodd);
+      var eB=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eB.position.copy(Bp);sc.add(eB);     // rótula fija
+      var eT=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eT.position.set(pbx,dy0,dz0);g.add(eT); // rótula en la viga (gira con el tubo)
+      dampers.push({px:pxx,zc:zc,dy0:dy0,dz0:dz0,B:Bp,body:body,rod:rodd});
+    });
     /* CORREAS = travesaños PERPENDICULARES sobre el tubo, uno por módulo (el módulo apoya encima) */
     var purlY=0.085, purlZ=modH*0.96;   /* correas APOYADAS sobre la viga de torsión (antes flotaban) */
     /* CORREAS en los HUECOS entre módulos (en los bordes): N+1 por ala (una más que
@@ -892,7 +896,7 @@ function buildTracker(wrap){
 
   var cam_t=new THREE.Vector3(0,1.0,0);
   ZL=orbit(rnd.domElement,cam,cam_t,70,12,240);
-  L={sc:sc,cam:cam,rnd:rnd,wrap:wrap,pg:pg,pg2:pg2,filas:filas,sun:sun,hl:hl,tcuBox:box,windGrp:windGrp,
+  L={sc:sc,cam:cam,rnd:rnd,wrap:wrap,pg:pg,pg2:pg2,filas:filas,dampers:dampers,sun:sun,hl:hl,tcuBox:box,windGrp:windGrp,
      rain:rainGrp,snow:snowGrp,snowMat:snowMat,snowCaps:snowCaps,snowGround:snowGround,WX:WX,WH:WH};
 }
 
@@ -1409,6 +1413,15 @@ function loop(now){
   /* left tracker */
   if(L.rnd){
     var ar=s.angle*Math.PI/180; if(L.filas)for(var fi2=0;fi2<L.filas.length;fi2++)L.filas[fi2].rotation.x=ar; // todas las filas giran
+    if(L.dampers){var _c=Math.cos(ar),_sn=Math.sin(ar),_up=new THREE.Vector3(0,1,0);   // amortiguador: reengancha B(fijo)->T(en la viga) y se alarga/acorta
+      for(var _di=0;_di<L.dampers.length;_di++){var _D=L.dampers[_di];
+        var _T=new THREE.Vector3(_D.px, 2+_D.dy0*_c-_D.dz0*_sn, _D.zc+_D.dy0*_sn+_D.dz0*_c);
+        var _dir=_T.clone().sub(_D.B), _len=_dir.length(), _mid=_D.B.clone().lerp(_T,0.5);
+        var _q=new THREE.Quaternion().setFromUnitVectors(_up,_dir.clone().normalize());
+        _D.body.position.copy(_mid);_D.body.quaternion.copy(_q);_D.body.scale.y=_len*0.62;
+        _D.rod.position.copy(_mid);_D.rod.quaternion.copy(_q);_D.rod.scale.y=_len;
+      }
+    }
     /* SOL real: el seguidor bascula en el plano Z (gira sobre X = eje N-S), así que la
        componente ESTE-OESTE del sol (sin az) va en Z y la N-S (cos az) en X. Sin clamp
        de altura -> al amanecer/atardecer baja y la sombra se proyecta y alarga. */
