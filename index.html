@@ -792,9 +792,8 @@ function buildTracker(wrap){
     var eje=new THREE.Mesh(new THREE.BoxGeometry(span,0.12,0.12),steel);g.add(eje);   // TUBO/VIGA DE TORSIÓN CUADRADO 120 mm
     /* AMORTIGUADOR articulado en el penúltimo soporte a NORTE (-24) y a SUR (+24): un extremo FIJO al
        soporte, el otro a un lateral de la viga (hijo de 'g' -> gira con el tubo) => se alarga/acorta */
-    [-24,24].forEach(function(pbx){ if(piersX.indexOf(pbx)<0)return; var pxx=pbx+xs, dy0=-0.17, dz0=0.11;
-      var Bp=new THREE.Vector3(pxx,1.12,zc+0.52);                                                  // extremo FIJO al soporte
-      var brkt=new THREE.Mesh(new THREE.BoxGeometry(0.08,0.08,0.50),silver);brkt.position.set(pxx,1.12,zc+0.27);brkt.castShadow=true;sc.add(brkt);   // ménsula del poste que fija el PIE del amortiguador
+    [-24,24].forEach(function(pbx){ if(piersX.indexOf(pbx)<0)return; var pxx=pbx+xs, dy0=-0.15, dz0=0.28;
+      var Bp=new THREE.Vector3(pxx,1.05,zc+0.10);                                                  // PIE anclado al POSTE (soporte)
       var body=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,1,14),dark2);body.castShadow=true;sc.add(body);
       var rodd=new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,1,10),silver);sc.add(rodd);
       var eB=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eB.position.copy(Bp);sc.add(eB);     // rótula fija
