@@ -135,8 +135,11 @@
       <input type="range" id="dia" min="1" max="365" step="1" value="172">
       <span class="val" id="diaVal">21 jun</span>
       <label>Hora local</label>
-      <input type="range" id="hora" min="0" max="24" step="0.25" value="9">
+      <input type="range" id="hora" min="0" max="24" step="0.0166667" value="9">
       <span class="val" id="horaVal">09:00</span>
+      <button id="btnPlay" style="background:var(--card);border:1px solid var(--line2);color:var(--tx);border-radius:8px;padding:6px 11px;font:600 13px var(--sans);cursor:pointer">▶ Play</button>
+      <input type="range" id="vel" min="1" max="120" step="1" value="30" title="Velocidad de reproducción (min de simulación por segundo real)" style="max-width:90px">
+      <span class="val" id="velVal">30 min/s</span>
       <label>Nubes</label>
       <input type="range" id="nubes" min="0" max="100" step="1" value="0">
       <span class="val" id="nubesVal">despejado</span>
@@ -267,7 +270,7 @@ function isDay(h){return solarPos(h).el>0;}
 function elev(h){return Math.max(0,Math.sin(solarPos(h).el));}     /* brillo proxy 0..1 */
 function fmt(n,d){return n.toFixed(d).replace('.',',')}
 
-var mode='auto', jog=0, wind=0, manSet=0, btOn=true;     /* jog: -1 Este (hacia -55), +1 Oeste (hacia +55); btOn=backtracking */
+var mode='auto', jog=0, wind=0, manSet=0, btOn=true, playing=false;     /* jog: -1 Este (hacia -55), +1 Oeste (hacia +55); btOn=backtracking */
 var cloud=0, cloudTimer=0, cloudGust=0, cloudSmooth=0, skyT=1; /* meteo: nubosidad 0-100% + nubes que pasan; skyT=transmitancia */
 var precip='none', snowAcc=0;                            /* precipitación: 'none'|'rain'|'snow'; snowAcc=nieve acumulada 0..1 */
 function setModeUI(){var man=(mode==='manual'),b=el('btnMode');
@@ -277,6 +280,8 @@ function setModeUI(){var man=(mode==='manual'),b=el('btnMode');
 function dateLabel(N){var md=[31,28,31,30,31,30,31,31,30,31,30,31],mn=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];var n=Math.max(1,N),mi=0;while(mi<11&&n>md[mi]){n-=md[mi];mi++;}return n+' '+mn[mi];}
 function snapIfAuto(){if(mode==='auto')s.angle=trackAngle(s.hour).R;}   /* el slider SALTA el seguidor en auto */
 el('hora').oninput=function(){s.hour=parseFloat(this.value);snapIfAuto();};
+el('vel').oninput=function(){el('velVal').textContent=this.value+' min/s';};
+el('btnPlay').onclick=function(){playing=!playing;this.textContent=playing?'⏸ Pausa':'▶ Play';this.style.borderColor=playing?'var(--accent)':'var(--line2)';this.style.color=playing?'var(--accent)':'var(--tx)';};
 el('dia').oninput =function(){dayN=parseInt(this.value,10);el('diaVal').textContent=dateLabel(dayN);snapIfAuto();};
 var windDir=0, bruDown=false;                 /* dirección del viento (grados, 0=N, horario) */
 function dirCardinal(d){return ['N','NE','E','SE','S','SO','O','NO'][Math.round((((d%360)+360)%360)/45)%8];}
@@ -357,6 +362,13 @@ function trackAngle(h){
 }
 
 function step(dt){
+  /* --- reproducción temporal continua: avanza la hora simulada (y el día al cruzar medianoche) --- */
+  if(playing && !live.connected){
+    var vps=(parseFloat(el('vel').value)||30)/60;          // min/s -> horas/s
+    s.hour+=vps*dt;
+    if(s.hour>=24){ s.hour-=24; dayN=(dayN%365)+1; el('dia').value=dayN; el('diaVal').textContent=dateLabel(dayN); }
+    el('hora').value=s.hour;                                 // el thumb del slider sigue la reproducción
+  }
   /* re-arm SCADA poll each tick (cheap, ignores in-flight) + refresh badge */
   pollLive(); setConn(live.connected);
 
