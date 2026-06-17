@@ -698,7 +698,7 @@ function buildTracker(wrap){
       var e2=new THREE.Mesh(new THREE.BoxGeometry(0.04,0.17,0.22),silver);e2.position.set(px+0.12,2.06,zc);sc.add(e2);
     }
     var g=new THREE.Group();g.position.set(xs,2,zc);
-    var eje=new THREE.Mesh(new THREE.BoxGeometry(span,0.16,0.16),steel);g.add(eje);   // TUBO DE TORSIÓN CUADRADO
+    var eje=new THREE.Mesh(new THREE.BoxGeometry(span,0.12,0.12),steel);g.add(eje);   // TUBO/VIGA DE TORSIÓN CUADRADO 120 mm
     /* CORREAS = travesaños PERPENDICULARES sobre el tubo, uno por módulo (el módulo apoya encima) */
     var purlY=0.135, purlZ=modH*0.96;
     /* CORREAS en los HUECOS entre módulos (en los bordes): N+1 por ala (una más que
@@ -738,11 +738,23 @@ function buildTracker(wrap){
      (+X), lejos del motor central; cartel FACTIUN mirando al SUELO */
   var tcuMat=new THREE.MeshStandardMaterial({color:0x232f3b,roughness:0.5,metalness:0.3});
   var xN=1.4;                                                                           // junto al motor (donde indica la imagen)
-  var brk=new THREE.Mesh(new THREE.BoxGeometry(0.46,0.07,0.30),silver);brk.position.set(xN,-0.05,0);pg.add(brk);        // abrazadera a la viga
-  var box=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.26,0.36),tcuMat);box.position.set(xN,-0.22,0);pg.add(box);         // TCU colgando del tubo
+  var brk=new THREE.Mesh(new THREE.BoxGeometry(0.46,0.07,0.30),silver);brk.position.set(xN,-0.05,0);pg2.add(brk);        // abrazadera a la viga OESTE
+  var box=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.26,0.36),tcuMat);box.position.set(xN,-0.22,0);pg2.add(box);         // TCU colgando de la viga OESTE (+Z)
   var sign=new THREE.Mesh(new THREE.PlaneGeometry(0.46,0.2),new THREE.MeshBasicMaterial({map:factiunTex()}));
-  sign.rotation.x=Math.PI/2;sign.position.set(xN,-0.351,0);pg.add(sign);                                                 // cara inferior, al suelo
-  var hl=sprite(0x2f86d6,0.7);hl.position.set(xN,-0.22,0);pg.add(hl);
+  sign.rotation.x=Math.PI/2;sign.position.set(xN,-0.351,0);pg2.add(sign);                                                 // cara inferior, al suelo
+  var hl=sprite(0x2f86d6,0.7);hl.position.set(xN,-0.22,0);pg2.add(hl);
+  /* MISMAS PIEZAS PARA LAS DOS BIFILAS LATERALES: eje de transmisión (une sus dos filas)
+     + TCU colgada de su viga OESTE (+Z), hija de la fila -> gira con el panel. */
+  [{w:3,e:2},{w:4,e:5}].forEach(function(p){
+    var wf=filas[p.w], wz=wf.position.z, ez=filas[p.e].position.z, fx=wf.position.x;
+    var et=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,Math.abs(wz-ez),12),steel);
+    et.rotation.x=Math.PI/2;et.position.set(fx,2,(wz+ez)/2);sc.add(et);                                                    // eje de transmisión
+    var b1=new THREE.Mesh(new THREE.BoxGeometry(0.46,0.07,0.30),silver);b1.position.set(xN,-0.05,0);wf.add(b1);            // abrazadera
+    var b2=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.26,0.36),tcuMat);b2.position.set(xN,-0.22,0);wf.add(b2);             // TCU
+    var s2=new THREE.Mesh(new THREE.PlaneGeometry(0.46,0.2),new THREE.MeshBasicMaterial({map:factiunTex()}));
+    s2.rotation.x=Math.PI/2;s2.position.set(xN,-0.351,0);wf.add(s2);                                                       // cartel FACTIUN al suelo
+    var h2=sprite(0x2f86d6,0.7);h2.position.set(xN,-0.22,0);wf.add(h2);                                                    // glow
+  });
   /* flecha de VIENTO (visual): flota sobre el campo, gira con la brújula y cambia
      de color/tamaño con la velocidad. No altera la consigna (la hora decide el lado). */
   var windGrp=new THREE.Group(); windGrp.position.set(0,24,0); windGrp.visible=false; sc.add(windGrp);
