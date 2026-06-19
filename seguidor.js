@@ -105,8 +105,11 @@
 
     /* --- TUBO DE PAR (bascula) --- */
     var tubeLen = medio ? D.span * D.medioFactor : D.span;
-    push('tube', 'steel', true, true,
-      function (TH){ return new TH.BoxGeometry(tubeLen, D.tube, D.tube); }, mT(THREE, 0,0,0));
+    // viga de torsión PARTIDA en dos medias-vigas (N=+X, S=-X) que se unen en el actuador (X=0):
+    // permite el "tracker quebrado" (cada mitad drapea con su pendiente, rótula en el centro).
+    var halfTube = function (TH){ return new TH.BoxGeometry(tubeLen/2, D.tube, D.tube); };
+    push('tube', 'steel', true, true, halfTube, mT(THREE,  tubeLen/4, 0, 0));
+    push('tube', 'steel', true, true, halfTube, mT(THREE, -tubeLen/4, 0, 0));
     // TAPAS NEGRAS en cada extremo de la viga de torsión
     var capX = tubeLen/2 - 0.025, capGeom = function (TH){ return new TH.BoxGeometry(0.06, 0.135, 0.135); };
     push('tubecap', 'jbox', true, true, capGeom, mT(THREE,  capX, 0, 0));
@@ -290,6 +293,6 @@
     return order.map(function (k){ return byType[k]; });
   };
 
-  S.VERSION = '0.4.5';
+  S.VERSION = '0.4.6';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);
