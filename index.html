@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="seguidor.js?v=1"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
+<script src="seguidor.js?v=2"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -801,14 +801,14 @@ function buildTracker(wrap){
     /* capa de NIEVE por módulo (de los centros que devuelve la fuente) */
     for(var mc=0;mc<beam.modCols.length;mc++){var cc=beam.modCols[mc];
       var cap=new THREE.Mesh(new THREE.BoxGeometry(modW-0.04,0.05,modH-0.04),snowMat);cap.position.set(cc.x,off+0.03,cc.z);cap.castShadow=true;cap.visible=false;g.add(cap);snowCaps.push(cap);}
-    /* AMORTIGUADOR articulado en ±24: pie FIJO al poste, otro extremo en la viga (gira con 'g') => se alarga/acorta */
-    [-24,24].forEach(function(pbx){ if(piersX.indexOf(pbx)<0)return; var pxx=pbx+xs, dy0=-0.15, dz0=0.28;
-      var Bp=new THREE.Vector3(pxx,1.05,zc+0.10);
+    /* AMORTIGUADORES desde la FUENTE ÚNICA (seguidor.js): pie FIJO al poste (a), otro extremo en la viga (b, gira con 'g') => se alarga/acorta. Mismo render (body+rod) y bucle de siempre. */
+    beam.dampers.forEach(function(d){ var pbx=d.b[0], pxx=pbx+xs;
+      var Bp=new THREE.Vector3(xs+d.a[0],2+d.a[1],zc+d.a[2]);
       var body=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,1,14),dark2);body.castShadow=true;sc.add(body);
       var rodd=new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,1,10),silver);sc.add(rodd);
       var eB=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eB.position.copy(Bp);sc.add(eB);
-      var eT=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eT.position.set(pbx,dy0,dz0);g.add(eT);
-      dampers.push({px:pxx,zc:zc,dy0:dy0,dz0:dz0,B:Bp,body:body,rod:rodd});
+      var eT=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eT.position.set(pbx,d.b[1],d.b[2]);g.add(eT);
+      dampers.push({px:pxx,zc:zc,dy0:d.b[1],dz0:d.b[2],B:Bp,body:body,rod:rodd});
     });
     if(west&&ti===0){ hl=sprite(0x2f86d6,0.7); hl.position.set(1.4,-0.22,0); g.add(hl); box=beam.spin; }   // glow azul para el pulso del bucle
     sc.add(g);filas.push(g);
