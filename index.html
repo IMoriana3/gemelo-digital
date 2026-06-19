@@ -1202,14 +1202,15 @@ function buildTCU(wrap){
               if(src&&src.name==='mat_1'){mm.color=new THREE.Color(0xcc1417);mm.metalness=0.1;mm.roughness=0.5;}   // la SETA: roja
               mm.needsUpdate=true; o.material=mm; });
             var wrap=new THREE.Group(); wrap.add(cl); wrap.applyMatrix4(TM); g.add(wrap);
-            if(connNat){ var cG=connNat.clone().sub(ctr).applyMatrix4(TM);        // conector dorado en el frame de la viga (bascula con g)
-              /* ANTENA real: cable coax FINO que sale del conector y CUELGA, rematado en antena "rubber-duck" con ferrita. SIN tramo rígido perpendicular. */
+            if(connNat){ var cG=connNat.clone().sub(ctr).applyMatrix4(TM);        // conector dorado (en el frame de la viga)
+              /* ANTENA real: cable coax que sale del conector y CUELGA SIEMPRE vertical (grupo anclado al conector que se CONTRARROTA cada frame), rematado en rubber-duck con ferrita. */
+              var antGrp=new THREE.Group(); antGrp.position.copy(cG); g.add(antGrp);
               var cabLen=0.13, ferLen=0.022, duckLen=0.075;
-              var cab=new THREE.Mesh(new THREE.CylinderGeometry(0.0026,0.0026,cabLen,8),antMat); cab.position.set(cG.x,cG.y-cabLen/2,cG.z); g.add(cab);   // cable coax que cuelga del conector
-              var by=cG.y-cabLen;
-              var fer=new THREE.Mesh(new THREE.CylinderGeometry(0.008,0.008,ferLen,12),antMat); fer.position.set(cG.x,by-ferLen/2,cG.z); g.add(fer);   // ferrita / termorretráctil en la base de la antena
-              var duck=new THREE.Mesh(new THREE.CylinderGeometry(0.006,0.005,duckLen,12),antMat); duck.castShadow=true; duck.position.set(cG.x,by-ferLen-duckLen/2,cG.z); g.add(duck);   // antena rubber-duck (~Ø12 mm, 7 cm)
-              var dtip=new THREE.Mesh(new THREE.SphereGeometry(0.005,10,8),antMat); dtip.position.set(cG.x,by-ferLen-duckLen,cG.z); g.add(dtip); }
+              var cab=new THREE.Mesh(new THREE.CylinderGeometry(0.0026,0.0026,cabLen,8),antMat); cab.position.set(0,-cabLen/2,0); antGrp.add(cab);   // cable coax
+              var fer=new THREE.Mesh(new THREE.CylinderGeometry(0.008,0.008,ferLen,12),antMat); fer.position.set(0,-cabLen-ferLen/2,0); antGrp.add(fer);   // ferrita / termorretráctil
+              var duck=new THREE.Mesh(new THREE.CylinderGeometry(0.006,0.005,duckLen,12),antMat); duck.castShadow=true; duck.position.set(0,-cabLen-ferLen-duckLen/2,0); antGrp.add(duck);   // antena rubber-duck
+              var dtip=new THREE.Mesh(new THREE.SphereGeometry(0.005,10,8),antMat); dtip.position.set(0,-cabLen-ferLen-duckLen,0); antGrp.add(dtip);
+              if(!L.antennas)L.antennas=[]; L.antennas.push(antGrp); }
           });
         })();
         var s=3.2/maxd; m.scale.setScalar(s);                                    // STEP en mm -> escena
@@ -1403,6 +1404,7 @@ function loop(now){
   /* left tracker */
   if(L.rnd){
     var ar=s.angle*Math.PI/180; if(L.filas)for(var fi2=0;fi2<L.filas.length;fi2++)L.filas[fi2].rotation.x=ar; // todas las filas giran
+    if(L.antennas)for(var ai=0;ai<L.antennas.length;ai++)L.antennas[ai].rotation.x=-ar;   // la antena cuelga SIEMPRE vertical (contrarresta la basculación de su viga)
     if(L.dampers){var _c=Math.cos(ar),_sn=Math.sin(ar),_up=new THREE.Vector3(0,1,0);   // amortiguador: reengancha B(fijo)->T(en la viga) y se alarga/acorta
       for(var _di=0;_di<L.dampers.length;_di++){var _D=L.dampers[_di];
         var _T=new THREE.Vector3(_D.px, 2+_D.dy0*_c-_D.dz0*_sn, _D.zc+_D.dy0*_sn+_D.dz0*_c);
