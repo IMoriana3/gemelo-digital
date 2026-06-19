@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="seguidor.js?v=3"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
+<script src="seguidor.js?v=4"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -1187,9 +1187,10 @@ function buildTCU(wrap){
         if(!isFinite(maxd)||maxd<=0){cadMsg('· CAD: glb vacío/sin geometría — sigue el modelo aprox.');return;}
         /* TCU REAL (tcu.glb) en las vigas del MOTOR, a escala NATIVA (como cobertura): clon centrado +
            orientado (_TCUMOUNT) + recoloreado (metalness baja, seta roja), hijo de la viga -> bascula con el tubo.
-           + ANTENA: del conector dorado (malla 14) sale recta, codo 90º y varilla HACIA EL SUELO. */
+           + ANTENA: del conector DORADO real sale recta, codo 90º y varilla HACIA EL SUELO. */
         (function(){ if(!L.filas)return; m.updateMatrixWorld(true); var ctr=box.getCenter(new THREE.Vector3());
-          var connNat=null,_mi=0; m.traverse(function(o){ if(!o.isMesh)return; if(_mi===14){var bb=new THREE.Box3().setFromObject(o);connNat=bb.getCenter(new THREE.Vector3());} _mi++; });   // conector dorado de antena
+          var connNat=null; m.traverse(function(o){ if(!o.isMesh||!o.material||!o.material.color||connNat)return; var c=o.material.color;
+            if(c.r>0.6&&c.g>0.30&&c.b<0.6&&(c.r-c.b)>0.35&&c.g<c.r){var bb=new THREE.Box3().setFromObject(o);connNat=bb.getCenter(new THREE.Vector3());} });   // conector de ANTENA = material DORADO (mat_14 ~[1,0.62,0.21]), único en el glb
           var TM=new THREE.Matrix4().makeRotationY(Math.PI/2); TM.multiply(new THREE.Matrix4().makeRotationX(Math.PI)); TM.setPosition(1.4,-0.14,0);
           var antMat=new THREE.MeshStandardMaterial({color:0x101316,metalness:0.35,roughness:0.45});
           [0,3,4].forEach(function(fi){ var g=L.filas[fi]; if(!g)return;
@@ -1202,7 +1203,7 @@ function buildTCU(wrap){
               mm.needsUpdate=true; o.material=mm; });
             var wrap=new THREE.Group(); wrap.add(cl); wrap.applyMatrix4(TM); g.add(wrap);
             if(connNat){ var cG=connNat.clone().sub(ctr).applyMatrix4(TM);        // conector en el frame de la viga (bascula con g)
-              var out=new THREE.Vector3(cG.x-1.4,0,cG.z); if(out.lengthSq()<1e-5)out.set(0,0,1); out.normalize();
+              var out=cG.clone().sub(new THREE.Vector3(1.4,-0.14,0)); out.y*=0.35; if(out.lengthSq()<1e-5)out.set(0,0,1); out.normalize();   // normal de salida del conector (radial desde el centro, aplastada en Y -> sale recta y el codo baja)
               var L1=0.04,L2=0.20,rB=0.009,rR=0.0055, knee=cG.clone().add(out.clone().multiplyScalar(L1));
               var stub=new THREE.Mesh(new THREE.CylinderGeometry(rB,rB,L1,10),antMat); stub.castShadow=true;
               stub.position.copy(cG).lerp(knee,0.5); stub.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),out); g.add(stub);   // tramo recto del conector (codo)

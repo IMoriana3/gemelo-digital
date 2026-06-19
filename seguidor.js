@@ -214,7 +214,7 @@
     dampXs.forEach(function (dx) {
       out.push({ key:'damper', mat:'motor', spin:false, cast:true, damperLink:true,
         a:[dx,-0.95,0.10], b:[dx,-0.15,0.28],
-        geom:function (TH){ return new TH.CylinderGeometry(0.045,0.045,1,12); }, m:mT(THREE, 0,0,0) });
+        geom:function (TH){ return new TH.CylinderGeometry(0.022,0.022,1,10); }, m:mT(THREE, 0,0,0) });   // = vástago FINO; la app le añade un cuerpo más grueso (body+rod, como el gemelo)
     });
 
     return out;
@@ -290,6 +290,6 @@
     return order.map(function (k){ return byType[k]; });
   };
 
-  S.VERSION = '0.4.2';
+  S.VERSION = '0.4.3';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);
