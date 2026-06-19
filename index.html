@@ -803,7 +803,7 @@ function buildTracker(wrap){
       var cap=new THREE.Mesh(new THREE.BoxGeometry(modW-0.04,0.05,modH-0.04),snowMat);cap.position.set(cc.x,off+0.03,cc.z);cap.castShadow=true;cap.visible=false;g.add(cap);snowCaps.push(cap);}
     /* AMORTIGUADORES desde la FUENTE ÚNICA (seguidor.js): pie FIJO al poste (a), otro extremo en la viga (b, gira con 'g') => se alarga/acorta. Mismo render (body+rod) y bucle de siempre. */
     beam.dampers.forEach(function(d){ var pbx=d.b[0], pxx=pbx+xs;
-      var Bp=new THREE.Vector3(xs+d.a[0],2+d.a[1],zc+d.a[2]);
+      var Bp=new THREE.Vector3(xs+d.a[0],0.40,zc+d.a[2]);   // pie a 40 cm del suelo (suelo plano y=0) -> el amortiguador mide desde ahí hasta la viga de torsión
       var body=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,1,14),dark2);body.castShadow=true;sc.add(body);
       var rodd=new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,1,10),silver);sc.add(rodd);
       var eB=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eB.position.copy(Bp);sc.add(eB);
@@ -1186,9 +1186,12 @@ function buildTCU(wrap){
         var maxd=Math.max(sz.x,sz.y,sz.z);
         if(!isFinite(maxd)||maxd<=0){cadMsg('· CAD: glb vacío/sin geometría — sigue el modelo aprox.');return;}
         /* TCU REAL (tcu.glb) en las vigas del MOTOR, a escala NATIVA (como cobertura): clon centrado +
-           orientado (_TCUMOUNT) + recoloreado (metalness baja, seta roja), hijo de la viga -> bascula con el tubo. */
-        (function(){ if(!L.filas)return; var ctr=box.getCenter(new THREE.Vector3());
+           orientado (_TCUMOUNT) + recoloreado (metalness baja, seta roja), hijo de la viga -> bascula con el tubo.
+           + ANTENA: del conector dorado (malla 14) sale recta, codo 90º y varilla HACIA EL SUELO. */
+        (function(){ if(!L.filas)return; m.updateMatrixWorld(true); var ctr=box.getCenter(new THREE.Vector3());
+          var connNat=null,_mi=0; m.traverse(function(o){ if(!o.isMesh)return; if(_mi===14){var bb=new THREE.Box3().setFromObject(o);connNat=bb.getCenter(new THREE.Vector3());} _mi++; });   // conector dorado de antena
           var TM=new THREE.Matrix4().makeRotationY(Math.PI/2); TM.multiply(new THREE.Matrix4().makeRotationX(Math.PI)); TM.setPosition(1.4,-0.14,0);
+          var antMat=new THREE.MeshStandardMaterial({color:0x101316,metalness:0.35,roughness:0.45});
           [0,3,4].forEach(function(fi){ var g=L.filas[fi]; if(!g)return;
             var cl=m.clone(true); cl.position.sub(ctr);                          // clon a escala nativa, centrado en su bbox
             cl.traverse(function(o){ if(!o.isMesh)return; o.castShadow=false; o.receiveShadow=true;
@@ -1197,7 +1200,16 @@ function buildTCU(wrap){
               if(mm.roughness==null||mm.roughness<0.45)mm.roughness=0.6;
               if(src&&src.name==='mat_1'){mm.color=new THREE.Color(0xcc1417);mm.metalness=0.1;mm.roughness=0.5;}   // la SETA: roja
               mm.needsUpdate=true; o.material=mm; });
-            var wrap=new THREE.Group(); wrap.add(cl); wrap.applyMatrix4(TM); g.add(wrap); });
+            var wrap=new THREE.Group(); wrap.add(cl); wrap.applyMatrix4(TM); g.add(wrap);
+            if(connNat){ var cG=connNat.clone().sub(ctr).applyMatrix4(TM);        // conector en el frame de la viga (bascula con g)
+              var out=new THREE.Vector3(cG.x-1.4,0,cG.z); if(out.lengthSq()<1e-5)out.set(0,0,1); out.normalize();
+              var L1=0.04,L2=0.20,rB=0.009,rR=0.0055, knee=cG.clone().add(out.clone().multiplyScalar(L1));
+              var stub=new THREE.Mesh(new THREE.CylinderGeometry(rB,rB,L1,10),antMat); stub.castShadow=true;
+              stub.position.copy(cG).lerp(knee,0.5); stub.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),out); g.add(stub);   // tramo recto del conector (codo)
+              var kn=new THREE.Mesh(new THREE.SphereGeometry(rB*1.25,10,8),antMat); kn.position.copy(knee); g.add(kn);               // codo 90º
+              var rod=new THREE.Mesh(new THREE.CylinderGeometry(rR,rR,L2,10),antMat); rod.castShadow=true; rod.position.set(knee.x,knee.y-L2/2,knee.z); g.add(rod);   // varilla hacia el suelo
+              var tip=new THREE.Mesh(new THREE.SphereGeometry(rR*1.4,8,6),antMat); tip.position.set(knee.x,knee.y-L2,knee.z); g.add(tip); }
+          });
         })();
         var s=3.2/maxd; m.scale.setScalar(s);                                    // STEP en mm -> escena
         box.setFromObject(m);var c=new THREE.Vector3();box.getCenter(c);m.position.sub(c);
