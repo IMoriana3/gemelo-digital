@@ -207,10 +207,11 @@
       a:[0,-0.06,-0.40], b:[D.tcuX-0.165,-0.11,0.045],
       geom:function (TH){ return new TH.CylinderGeometry(0.0035,0.0035,1,6); }, m:mT(THREE, 0,0,0) });
 
-    // AMORTIGUADORES (2 por viga): pie FIJO al poste (a), otro extremo en la viga (b, bascula). Cruzan spin/estático
-    // -> la app los orienta por frame entre 'a' y 'b' (se alargan/acortan al bascular). 'a','b' relativos al centro del tubo.
-    var dampX = Math.min(24, tubeLen/2 - 5);
-    [-dampX, dampX].forEach(function (dx) {
+    // AMORTIGUADORES (2 por viga): pie FIJO al PENÚLTIMO poste (N y S), otro extremo en la viga (bascula). Cruzan
+    // spin/estático -> la app los orienta por frame entre 'a' y 'b'. La X de los postes la pone CADA app (sus retículas
+    // difieren) vía opts.damperX = [xNorte, xSur]; si no se pasa, se estima a partir del largo del tubo.
+    var dampXs = opts.damperX; if (!dampXs) { var dd = Math.min(24, tubeLen/2 - 5); dampXs = [-dd, dd]; }
+    dampXs.forEach(function (dx) {
       out.push({ key:'damper', mat:'motor', spin:false, cast:true, damperLink:true,
         a:[dx,-0.95,0.10], b:[dx,-0.15,0.28],
         geom:function (TH){ return new TH.CylinderGeometry(0.045,0.045,1,12); }, m:mT(THREE, 0,0,0) });
@@ -289,6 +290,6 @@
     return order.map(function (k){ return byType[k]; });
   };
 
-  S.VERSION = '0.4.1';
+  S.VERSION = '0.4.2';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);
