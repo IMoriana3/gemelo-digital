@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="seguidor.js?v=5"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
+<script src="seguidor.js?v=6"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -795,7 +795,7 @@ function buildTracker(wrap){
     }
     var g=new THREE.Group();g.position.set(xs,2,zc);
     /* piezas que BASCULAN (spin) -> hijas de 'g'; slew FIJO -> grupo aparte. Sin soporte/bracket (los postes ya sujetan) ni antena (pendiente per-frame). */
-    var beam=Seguidor.buildBeam(THREE,{west:west,materials:SG,detail:'full',skip:{soporte:1,bracket:1,antena:1,antenatip:1,tcu:1,tcuchapa:1,tcuabarcon:1}});
+    var beam=Seguidor.buildBeam(THREE,{west:west,materials:SG,detail:'full',skip:{soporte:1,bracket:1,antena:1,antenatip:1,tcu:1,tcuchapa:1}});
     g.add(beam.spin);
     var slew=new THREE.Group();slew.position.set(xs,2,zc);slew.add(beam.static);sc.add(slew);
     /* capa de NIEVE por módulo (de los centros que devuelve la fuente) */
@@ -1207,7 +1207,7 @@ function buildTCU(wrap){
         (function(){ if(!L.filas)return; m.updateMatrixWorld(true); var ctr=box.getCenter(new THREE.Vector3());
           var connNat=null; m.traverse(function(o){ if(!o.isMesh||!o.material||!o.material.color||connNat)return; var c=o.material.color;
             if(c.r>0.6&&c.g>0.30&&c.b<0.6&&(c.r-c.b)>0.35&&c.g<c.r){var bb=new THREE.Box3().setFromObject(o);connNat=bb.getCenter(new THREE.Vector3());} });   // conector de ANTENA = material DORADO (mat_14 ~[1,0.62,0.21]), único en el glb
-          var TM=new THREE.Matrix4().makeRotationY(Math.PI/2); TM.multiply(new THREE.Matrix4().makeRotationX(Math.PI)); TM.setPosition(1.4,-0.14,0);
+          var TM=new THREE.Matrix4().makeRotationY(Math.PI/2); TM.multiply(new THREE.Matrix4().makeRotationX(Math.PI)); TM.setPosition(1.4,-0.16,0);   // -0.16 (antes -0.14): baja la TCU para que la chapa superior no se meta en el tubo cuadrado
           var antMat=new THREE.MeshStandardMaterial({color:0x101316,metalness:0.35,roughness:0.45});
           [0,3,4].forEach(function(fi){ var g=L.filas[fi]; if(!g)return;
             var cl=m.clone(true); cl.position.sub(ctr);                          // clon a escala nativa, centrado en su bbox

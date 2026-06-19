@@ -172,8 +172,8 @@
     var tcuChapa = function (TH){ return new TH.BoxGeometry(0.05, 0.012, 0.21); };
     push('tcuchapa', 'steel', true, true, tcuChapa, mT(THREE, D.tcuX-0.13, -0.067, 0));
     push('tcuchapa', 'steel', true, true, tcuChapa, mT(THREE, D.tcuX+0.13, -0.067, 0));
-    push('tcuabarcon', 'silver', true, false, abarconTcuGeom, mT(THREE, D.tcuX-0.135, 0, 0));   // DOS abarcones M8 (∩ sobre la viga) que entran por las pestañas REALES del glb (asimétricas: lado conectores y el otro)
-    push('tcuabarcon', 'silver', true, false, abarconTcuGeom, mT(THREE, D.tcuX+0.047, 0, 0));
+    push('tcuabarcon', 'silver', true, false, abarconTcuGeom, mT(THREE, D.tcuX-0.16, 0, 0));   // DOS abarcones (∩ sobre el tubo cuadrado) que entran por los agujeros de las chapas del glb. POSICIÓN ESTIMADA (la placa del glb no expone agujeros parseables) -> afinar con feedback
+    push('tcuabarcon', 'silver', true, false, abarconTcuGeom, mT(THREE, D.tcuX+0.16, 0, 0));
 
     /* --- SLEW DRIVE en el centro del tubo (FIJO: no bascula; el tubo gira dentro) --- */
     out.push({ key:'corona', mat:'blue', spin:false, cast:true, twin:true,   // corona slew; TWIN: también en la viga GEMELA (la del eje de transmisión, sin motor)
@@ -290,6 +290,6 @@
     return order.map(function (k){ return byType[k]; });
   };
 
-  S.VERSION = '0.4.4';
+  S.VERSION = '0.4.5';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);
