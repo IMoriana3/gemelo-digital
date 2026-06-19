@@ -777,7 +777,7 @@ function buildTracker(wrap){
   var TR=[{z:-filaZ,xs:0},{z:filaZ,xs:0},                 // bifila CENTRAL (lleva motor/TCU)
           {z:filaZ+6,xs:6},{z:filaZ+12,xs:6},             // bifila DERECHA (+Z), 6 m al norte
           {z:-filaZ-6,xs:6},{z:-filaZ-12,xs:6}];          // bifila IZQUIERDA (-Z), 6 m al norte
-  var filas=[], dampers=[];   /* amortiguadores articulados (se reajustan cada frame en el bucle) */
+  var filas=[], dampers=[], motorCables=[];   /* amortiguadores + cable de motor (tramo flexible se reajusta cada frame) */
   /* SEGUIDOR desde la FUENTE ÚNICA (seguidor.js, compartida con Cobertura 3D): módulos bifaciales,
      correas omega + abarcón, 3 cajas + leapfrog, slew con corona twin en ambas vigas, TCU + chapas. */
   var SG=Seguidor.materials(THREE);
@@ -810,6 +810,22 @@ function buildTracker(wrap){
       var eT=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eT.position.set(pbx,d.b[1],d.b[2]);g.add(eT);
       dampers.push({px:pxx,zc:zc,dy0:d.b[1],dz0:d.b[2],B:Bp,body:body,rod:rodd});
     });
+    if(west){
+      /* === CABLE DE MOTOR: nace de un CONECTOR en el motor (círculo azul, FIJO) y va EMBRIDADO por la viga
+         hasta el conector de motor de la TCU, con bridas de plástico tipo Unex. El motor NO bascula (slew):
+         tramo del conector FIJO + tramo a lo largo de la VIGA (bascula con g) + cable recto fijo↔viga por frame. */
+      var _cabM=new THREE.MeshStandardMaterial({color:0x0b0c0f,roughness:0.62,metalness:0.15});
+      var _cnM=new THREE.MeshStandardMaterial({color:0x2f6fb3,roughness:0.5,metalness:0.45});   // conector azul
+      var _glM=new THREE.MeshStandardMaterial({color:0x14161a,roughness:0.55,metalness:0.4});
+      var _brM=new THREE.MeshStandardMaterial({color:0x1c2025,roughness:0.78,metalness:0.05});   // brida Unex (negra)
+      var _cb=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.05,0.06),_cnM);_cb.position.set(0,0.04,-0.60);_cb.castShadow=true;slew.add(_cb);          // cuerpo del conector sobre el motor (junto a la tapa azul)
+      var _gl=new THREE.Mesh(new THREE.CylinderGeometry(0.016,0.016,0.045,10),_glM);_gl.position.set(0,0.075,-0.60);slew.add(_gl);                  // prensaestopas
+      slew.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0,0.085,-0.60),new THREE.Vector3(0,0.15,-0.50),new THREE.Vector3(0,0.16,-0.42)]),16,0.008,7,false),_cabM));   // tramo FIJO (sale del conector)
+      g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0.18,0.085,0),new THREE.Vector3(0.42,0.092,0.02),new THREE.Vector3(0.72,0.092,0.02),new THREE.Vector3(0.98,0.05,0.035),new THREE.Vector3(1.18,-0.04,0.045),new THREE.Vector3(1.235,-0.11,0.045)]),44,0.008,8,false),_cabM));   // tramo EMBRIDADO por la viga hasta la TCU
+      [0.32,0.6,0.88].forEach(function(_bx){var _br=new THREE.Mesh(new THREE.TorusGeometry(0.086,0.006,8,16),_brM);_br.rotation.y=Math.PI/2;_br.position.set(_bx,0,0);g.add(_br);});   // BRIDAS tipo Unex (anillos viga+cable)
+      var _flex=new THREE.Mesh(new THREE.CylinderGeometry(0.008,0.008,1,8),_cabM);sc.add(_flex);                                                    // tramo flexible FIJO->VIGA (recto, se reorienta por frame)
+      motorCables.push({Ax:xs,Ay:2.16,Az:zc-0.42,Bx:0.18,By:0.085,Bz:0,xs:xs,zc:zc,mesh:_flex});
+    }
     if(west&&ti===0){ hl=sprite(0x2f86d6,0.7); hl.position.set(1.4,-0.22,0); g.add(hl); box=beam.spin; }   // glow azul para el pulso del bucle
     sc.add(g);filas.push(g);
   }
@@ -859,7 +875,7 @@ function buildTracker(wrap){
 
   var cam_t=new THREE.Vector3(0,1.0,0);
   ZL=orbit(rnd.domElement,cam,cam_t,70,0.8,240);
-  L={sc:sc,cam:cam,rnd:rnd,wrap:wrap,pg:pg,pg2:pg2,filas:filas,dampers:dampers,sun:sun,hl:hl,tcuBox:box,windGrp:windGrp,
+  L={sc:sc,cam:cam,rnd:rnd,wrap:wrap,pg:pg,pg2:pg2,filas:filas,dampers:dampers,motorCables:motorCables,sun:sun,hl:hl,tcuBox:box,windGrp:windGrp,
      rain:rainGrp,snow:snowGrp,snowMat:snowMat,snowCaps:snowCaps,snowGround:snowGround,WX:WX,WH:WH};
 }
 
@@ -1405,6 +1421,13 @@ function loop(now){
   if(L.rnd){
     var ar=s.angle*Math.PI/180; if(L.filas)for(var fi2=0;fi2<L.filas.length;fi2++)L.filas[fi2].rotation.x=ar; // todas las filas giran
     if(L.antennas)for(var ai=0;ai<L.antennas.length;ai++)L.antennas[ai].rotation.x=-ar;   // la antena cuelga SIEMPRE vertical (contrarresta la basculación de su viga)
+    if(L.motorCables){var _mco=Math.cos(ar),_msi=Math.sin(ar),_upm=new THREE.Vector3(0,1,0);   // cable de motor: el tramo flexible reengancha el conector FIJO (A) con el cable de la viga (B, bascula)
+      for(var _ci=0;_ci<L.motorCables.length;_ci++){var _M=L.motorCables[_ci];
+        var _Bw=new THREE.Vector3(_M.xs+_M.Bx,2+_M.By*_mco-_M.Bz*_msi,_M.zc+_M.By*_msi+_M.Bz*_mco);
+        var _Aw=new THREE.Vector3(_M.Ax,_M.Ay,_M.Az),_dd=_Bw.clone().sub(_Aw),_ll=_dd.length()||1e-4;
+        _M.mesh.position.copy(_Aw).lerp(_Bw,0.5);_M.mesh.quaternion.setFromUnitVectors(_upm,_dd.normalize());_M.mesh.scale.y=_ll;
+      }
+    }
     if(L.dampers){var _c=Math.cos(ar),_sn=Math.sin(ar),_up=new THREE.Vector3(0,1,0);   // amortiguador: reengancha B(fijo)->T(en la viga) y se alarga/acorta
       for(var _di=0;_di<L.dampers.length;_di++){var _D=L.dampers[_di];
         var _T=new THREE.Vector3(_D.px, 2+_D.dy0*_c-_D.dz0*_sn, _D.zc+_D.dy0*_sn+_D.dz0*_c);
