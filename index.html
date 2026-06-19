@@ -858,7 +858,7 @@ function buildTracker(wrap){
   snowGrp.userData.vel=svel;snowGrp.userData.ph=sph;snowGrp.visible=false;snowGrp.frustumCulled=false;sc.add(snowGrp);
 
   var cam_t=new THREE.Vector3(0,1.0,0);
-  ZL=orbit(rnd.domElement,cam,cam_t,70,12,240);
+  ZL=orbit(rnd.domElement,cam,cam_t,70,0.8,240);
   L={sc:sc,cam:cam,rnd:rnd,wrap:wrap,pg:pg,pg2:pg2,filas:filas,dampers:dampers,sun:sun,hl:hl,tcuBox:box,windGrp:windGrp,
      rain:rainGrp,snow:snowGrp,snowMat:snowMat,snowCaps:snowCaps,snowGround:snowGround,WX:WX,WH:WH};
 }
