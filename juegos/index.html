@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0F14">
+<link rel="icon" href="../favicon.svg">
+<title>Arena Solar — Juegos internos · Factiun</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B0F14;--panel-2:#0F151D;--text:#E7EEF4;--muted:#8093A4;
+    --card:#0F151D;--card2:#15212d;--line:#23303D;--line2:#32485d;
+    --accent:#36D399;--tx:var(--text);--tx2:var(--muted);--tx3:#5e7388;
+    --sans:'IBM Plex Sans',system-ui,sans-serif;--display:'Space Grotesk',var(--sans);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(120% 90% at 50% -10%,#16263a 0%,#0b0f14 55%);
+    color:var(--tx);font-family:var(--sans);min-height:100vh}
+  .wrap{max-width:1040px;margin:0 auto;padding:34px 20px 60px}
+  .logo{font:700 13px var(--display);color:var(--accent);letter-spacing:.18em;text-transform:uppercase}
+  h1{font:700 36px/1.05 var(--display);margin:8px 0 6px}
+  .sub{color:var(--tx2);font-size:15px;max-width:640px;margin-bottom:30px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+  .game{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:20px;text-decoration:none;color:inherit;transition:.16s;position:relative;overflow:hidden;min-height:182px}
+  .game.live:hover{border-color:var(--accent);transform:translateY(-3px);box-shadow:0 14px 40px rgba(0,0,0,.4)}
+  .game .ic{font-size:34px;margin-bottom:12px}
+  .game h2{font:700 18px var(--display);margin:0 0 6px}
+  .game p{color:var(--tx2);font-size:13px;line-height:1.45;margin:0;flex:1}
+  .tag{align-self:flex-start;margin-top:14px;font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.05em;
+    padding:5px 10px;border-radius:999px}
+  .tag.on{background:rgba(54,211,153,.16);color:var(--accent);border:1px solid var(--accent)}
+  .tag.soon{background:#15212d;color:var(--tx3);border:1px solid var(--line2)}
+  .game.soon{opacity:.62}
+  .phase{grid-column:1/-1;font:600 12px var(--sans);text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);
+    margin:20px 0 -4px;display:flex;align-items:center;gap:10px}
+  .phase::after{content:"";flex:1;height:1px;background:var(--line)}
+  .foot{margin-top:40px;color:var(--tx3);font-size:12.5px}
+  .foot a{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">Factiun · Juegos internos</div>
+    <h1>🎮 Arena Solar</h1>
+    <div class="sub">Juegos para formación, team building y ferias — construidos sobre nuestro gemelo digital y datos de planta reales. Más juegos en camino.</div>
+
+    <div class="grid">
+      <div class="phase">Disponible</div>
+      <a class="game live" href="tycoon.html">
+        <div class="ic">☀</div>
+        <h2>Solar Tycoon</h2>
+        <p>Gestiona una planta de seguidores durante un día acelerado: maximiza producción, repara averías y protege la planta del viento. Con ranking por equipos.</p>
+        <span class="tag on">● Jugar</span>
+      </a>
+
+      <div class="phase">Próximamente</div>
+      <div class="game soon">
+        <div class="ic">🧩</div>
+        <h2>Ensambla el Tracker</h2>
+        <p>Monta un seguidor pieza a pieza en el orden correcto y contrarreloj. Reutiliza el modelo 3D del gemelo.</p>
+        <span class="tag soon">Fase 1</span>
+      </div>
+      <div class="game soon">
+        <div class="ic">🔍</div>
+        <h2>Caza-fallos</h2>
+        <p>Detecta el error de montaje en un seguidor: par de apriete, pieza invertida, secuencia incorrecta.</p>
+        <span class="tag soon">Fase 1</span>
+      </div>
+      <div class="game soon">
+        <div class="ic">📱</div>
+        <h2>Tracker en AR</h2>
+        <p>Ve el seguidor a escala real sobre la mesa con el móvil, sin instalar nada. Ideal para el stand.</p>
+        <span class="tag soon">Fase 1</span>
+      </div>
+      <div class="game soon">
+        <div class="ic">🛠️</div>
+        <h2>Mantenimiento AR</h2>
+        <p>Apunta a un componente y ve instrucciones superpuestas paso a paso. Formación de O&amp;M.</p>
+        <span class="tag soon">Fase 1</span>
+      </div>
+      <div class="game soon">
+        <div class="ic">🧠</div>
+        <h2>Trivial Solar</h2>
+        <p>Quiz por equipos con preguntas generadas por SolarGPT. Ranking en pantalla estilo Kahoot.</p>
+        <span class="tag soon">Fase 0</span>
+      </div>
+      <div class="game soon">
+        <div class="ic">🔓</div>
+        <h2>Escape Room Solar</h2>
+        <p>Acertijos técnicos de fotovoltaica para resolver en equipo, físico o digital.</p>
+        <span class="tag soon">Fase 3</span>
+      </div>
+    </div>
+
+    <div class="foot">Hecho con el Gemelo Digital · <a href="https://imoriana3.github.io/proyectos/">Panel de Proyectos</a></div>
+  </div>
+</body>
+</html>
