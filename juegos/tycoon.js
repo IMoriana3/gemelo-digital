@@ -136,7 +136,7 @@
 
   /* ===================== Three.js ===================== */
   var THREE = window.THREE;
-  var renderer, scene, camera, sun, sunSprite, field, ground;
+  var renderer, scene, camera, sun, sunSprite, field, ground, HERO = [];
   var ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   var dummy, COL = {}, GLOW = null, _faultTex = {};
   var SKY_NIGHT = new THREE.Color(0x0a1422), SKY_DUSK = new THREE.Color(0x8a5236), SKY_DAY = new THREE.Color(0x6f93b8), SKY_OVC = new THREE.Color(0x8a929b);
@@ -186,6 +186,37 @@
     bindCamera(renderer.domElement);
   }
 
+  function grassTex() {
+    var c = document.createElement('canvas'); c.width = c.height = 256; var x = c.getContext('2d');
+    x.fillStyle = '#3c6b2c'; x.fillRect(0, 0, 256, 256);
+    for (var i = 0; i < 5000; i++) { var gx = Math.random() * 256, gy = Math.random() * 256, l = 2 + Math.random() * 7, dx = (Math.random() - 0.5) * 3; x.strokeStyle = 'hsl(' + (92 + Math.random() * 34) + ',' + (40 + Math.random() * 25) + '%,' + (20 + Math.random() * 34) + '%)'; x.lineWidth = 0.8 + Math.random() * 1.1; x.beginPath(); x.moveTo(gx, gy); x.lineTo(gx + dx, gy - l); x.stroke(); }
+    var t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+  }
+  function panelTexT() {
+    var W = 96, H = 192, c = document.createElement('canvas'); c.width = W; c.height = H; var x = c.getContext('2d');
+    x.fillStyle = '#0a1019'; x.fillRect(0, 0, W, H); var nx = 6, ny = 12, cw = W / nx, ch = H / ny, g = 1.3;
+    for (var iy = 0; iy < ny; iy++) for (var ix = 0; ix < nx; ix++) { x.fillStyle = 'hsl(214,48%,' + (7.5 + Math.random() * 3.5).toFixed(1) + '%)'; x.fillRect(ix * cw + g, iy * ch + g, cw - 2 * g, ch - 2 * g); }
+    var t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; return t;
+  }
+  // fila de seguidores con render DETALLADO (gemelo) en primer plano, para el "wow"
+  function buildHero(P) {
+    for (var h = 0; h < HERO.length; h++) HERO[h].objs.forEach(function (o) { scene.remove(o); });
+    HERO = [];
+    if (typeof Seguidor === 'undefined') return;
+    var SGh = Seguidor.materials(THREE), pt = panelTexT();
+    SGh.glass.map = pt; SGh.glass.emissiveMap = pt; SGh.glass.emissive = new THREE.Color(0x2b333d); SGh.glass.emissiveIntensity = 0.3; SGh.glass.needsUpdate = true;
+    var steel = new THREE.MeshStandardMaterial({ color: 0x9aa3ac, roughness: 0.45, metalness: 0.65 });
+    var heroZ = P.h / 2 + 48, xs = [-58, 0, 58];
+    for (var k = 0; k < xs.length; k++) {
+      var beam = Seguidor.buildBeam(THREE, { west: true, materials: SGh, detail: 'full', skip: { soporte: 1, bracket: 1, antena: 1, antenatip: 1 } });
+      var wrap = new THREE.Group(); wrap.position.set(xs[k], 2, heroZ); wrap.rotation.y = -Math.PI / 2; wrap.add(beam.spin); scene.add(wrap);
+      var slewG = new THREE.Group(); slewG.position.set(xs[k], 2, heroZ); slewG.rotation.y = -Math.PI / 2; slewG.add(beam.static); scene.add(slewG);
+      var objs = [wrap, slewG];
+      for (var px = -28; px <= 28; px += 9) { var col = new THREE.Mesh(new THREE.BoxGeometry(0.13, 2, 0.13), steel); col.position.set(xs[k], 1, heroZ + px); col.castShadow = true; scene.add(col); objs.push(col); }
+      HERO.push({ spin: beam.spin, objs: objs });
+    }
+  }
+
   function loadPlant(key) {
     var P = (window.PLANTAS && window.PLANTAS[key]) || window.PLANTAS.burgo;
     var loc = PLANT_LOC[key] || PLANT_LOC.burgo; LAT = loc.lat * D2R; LON = loc.lon;
@@ -197,7 +228,8 @@
     var N = P.trackers.length;
     // suelo
     var gw = Math.max(P.w, P.h) * 1.4;
-    ground = new THREE.Mesh(new THREE.PlaneGeometry(gw, gw), new THREE.MeshStandardMaterial({ color: 0x6f7d52, roughness: 1 }));
+    var gtex = grassTex(); gtex.repeat.set(Math.max(40, gw / 6), Math.max(40, gw / 6));
+    ground = new THREE.Mesh(new THREE.PlaneGeometry(gw, gw), new THREE.MeshStandardMaterial({ map: gtex, color: 0xc2d0b2, roughness: 1 }));
     ground.rotation.x = -Math.PI / 2; ground.position.y = 0; ground.receiveShadow = true; scene.add(ground);
     // sombra del sol cubre el campo
     var shc = sun.shadow.camera; var hw = Math.max(P.w, P.h) * 0.62;
@@ -220,6 +252,7 @@
       field.setColorAt(i, COL.ok);
     }
     field.instanceColor.needsUpdate = true;
+    buildHero(P);
     // encuadre de cámara
     view.radius = Math.max(P.w, P.h) * 0.95; view.tx = 0; view.tz = 0; view.theta = 0.85; view.phi = 0.72;
     applyCam();
@@ -440,6 +473,7 @@
 
     // seguidores: ángulo + desgaste + timers + matriz + color
     var baseR = _trk.R * D2R, realKW = 0;
+    for (var hh = 0; hh < HERO.length; hh++) HERO[hh].spin.rotation.x = baseR;
     for (var i = 0; i < trackers.length; i++) {
       var t = trackers[i], f = t.fault ? FAULTS[t.fault] : null;
       var tgt = (f && !f.tracks) ? t.frozen : (DAY.safety ? 0 : baseR);
