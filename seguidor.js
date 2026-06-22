@@ -40,6 +40,8 @@
   D.span   = 2 * D.strLen + D.gapDrive;     // tubo completo (largo)
   D.mesaC  = D.gapDrive / 2 + D.strLen / 2; // centro de cada ala
   S.DIMS = D;
+  // nº de módulos por ALA según la planta (El Burgo/Ayora = 28 → 64,7 m; San José = 32 → 74 m, su "medio" 2x32 ≈ 37 m). Recalcula los derivados.
+  S.setModsPerStr = function (n) { D.modsPerStr = n; D.strLen = n * D.pitch; D.span = 2 * D.strLen + D.gapDrive; D.mesaC = D.gapDrive / 2 + D.strLen / 2; };
 
   /* ---------- MATERIALES (cada app crea los suyos con su THREE) ---------- */
   S.materials = function (THREE) {
@@ -293,6 +295,6 @@
     return order.map(function (k){ return byType[k]; });
   };
 
-  S.VERSION = '0.4.8';
+  S.VERSION = '0.4.9';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);
