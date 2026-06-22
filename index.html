@@ -6,14 +6,12 @@
 <meta name="theme-color" content="#0B0F14">
 <link rel="icon" href="favicon.svg">
 <title>Gemelo Digital TCU — Seguidor + TCU</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<!-- sin fuentes de Google: offline (fuentes del sistema) -->
+<script src="lib/three.min.js"></script><!-- librerías LOCALES (sin CDN): offline -->
+<script src="lib/GLTFLoader.js"></script>
 <script src="seguidor.js?v=12"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="lib/leaflet.css">
+<script src="lib/leaflet.js"></script>
 <style>
   :root{
     /* Estándar de la casa Factiun */
@@ -103,7 +101,7 @@
 </head>
 <body>
 <div class="app">
-  <header class="app-bar"><a class="back" href="https://imoriana3.github.io/proyectos/">← Panel</a><h1>Gemelo Digital TCU</h1><span class="sub">Seguidor 1V bífila + TCU SUNNER</span><span class="brand">Factiun</span></header>
+  <header class="app-bar"><a class="back" href="https://imoriana3.github.io/proyectos/">← Panel</a><h1>Gemelo Digital TCU</h1><span class="sub">Seguidor 1V bífila + TCU SUNNER</span><button id="offBtn" title="Modo sin conexión: no descarga mapas ni CDN (cero llamadas externas)" style="background:#1a2330;color:#9bb0c6;border:1px solid var(--line2);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer"></button><span class="brand">Factiun</span></header>
   <nav>
     <span class="brand"><span class="dot"></span>D<b>Twin</b></span>
     <select id="equipo"></select>
@@ -217,6 +215,10 @@ var SCADA_TCU = null;
    sin el fichero) y la ruta relativa da "Failed to fetch". */
 var TCU_GLB=(new URLSearchParams(location.search).get('tcu'))||'tcu.glb';
 var CDN_GLB='https://cdn.jsdelivr.net/gh/IMoriana3/gemelo-digital@main/tcu.glb';  // <-- ajusta OWNER/REPO si lo nombras distinto
+/* modo offline (ciberseguridad): cero llamadas externas. Por defecto sigue al navegador;
+   el usuario lo fija con el botón de la cabecera (persistente en localStorage). En offline
+   NO se baja el mapa CARTO ni el glb por CDN: el tcu.glb local del repo basta. */
+var OFFLINE=(function(){try{var s=localStorage.getItem('cobertura_offline');return s===null?!navigator.onLine:s==='1';}catch(e){return !navigator.onLine;}})();
 (function(){ try{
   var q = new URLSearchParams(location.search);
   if (q.get('scada')) SCADA_URL = q.get('scada');
@@ -382,7 +384,7 @@ function ensureEmap(){
   if(!window.L)return;
   if(!emap){
     emap=L.map('emplazMap',{worldCopyJump:true}).setView([LOC.lat,LOC.lon],4);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:18,attribution:'© OpenStreetMap · © CARTO'}).addTo(emap);
+    if(!OFFLINE)L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:18,attribution:'© OpenStreetMap · © CARTO'}).addTo(emap);   // OFFLINE: sin mapa base (cero llamadas externas)
     emarker=L.marker([LOC.lat,LOC.lon]).addTo(emap);
     emap.on('click',function(e){setPick(e.latlng.lat,e.latlng.lng,'('+e.latlng.lat.toFixed(4)+', '+e.latlng.lng.toFixed(4)+')');});
   }
@@ -393,6 +395,7 @@ function openEmplaz(){el('emplazModal').style.display='flex'; ensureEmap();}
 function closeEmplaz(){el('emplazModal').style.display='none';}
 function doSearch(){
   var q=(el('emplazSearch').value||'').trim(); if(!q)return;
+  if(OFFLINE){el('emplazResults').innerHTML='<span style="color:var(--muted)">⛌ Búsqueda no disponible sin conexión. Introduce las coordenadas o pulsa en el mapa.</span>';return;}   // OFFLINE: sin geocoder externo (cero llamadas)
   el('emplazResults').textContent='Buscando…';
   fetch('https://nominatim.openstreetmap.org/search?format=json&limit=6&q='+encodeURIComponent(q))
     .then(function(r){return r.json();})
@@ -1387,7 +1390,8 @@ function buildTCU(wrap){
         });
       };
       // 1º ruta dada (relativa, instantánea en Pages); si falla, 2º el mismo glb por CDN
-      tryGlb(TCU_GLB, TCU_GLB!==CDN_GLB);
+      // OFFLINE: sin fallback a CDN — el tcu.glb local del repo es suficiente
+      tryGlb(TCU_GLB, !OFFLINE && TCU_GLB!==CDN_GLB);
     }
   }catch(e){cadMsg('· CAD: error '+(e&&e.message||e));}
 }
@@ -1515,6 +1519,10 @@ function loop(now){
 
 function clock(){el('clock').textContent=new Date().toTimeString().slice(0,8);}
 setInterval(clock,1000);clock();
+
+/* botón online/offline: persiste la preferencia y recarga (toda llamada externa
+   queda gateada por OFFLINE: mapa CARTO y glb por CDN). */
+(function(){var b=el('offBtn');if(!b)return;b.textContent=OFFLINE?'⛌ Sin conexión':'◑ Online';b.style.color=OFFLINE?'#F6A623':'#9bb0c6';b.onclick=function(){try{localStorage.setItem('cobertura_offline',OFFLINE?'0':'1');}catch(e){}location.reload();};})();
 
 if(typeof THREE==='undefined'){
   document.getElementById('cvL').innerHTML='<div class="fallback">No se pudo cargar Three.js (sin conexión o CSP).</div>';
