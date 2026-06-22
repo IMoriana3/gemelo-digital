@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="seguidor.js?v=8"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
+<script src="seguidor.js?v=9"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -803,7 +803,7 @@ function buildTracker(wrap){
       var cap=new THREE.Mesh(new THREE.BoxGeometry(modW-0.04,0.05,modH-0.04),snowMat);cap.position.set(cc.x,off+0.03,cc.z);cap.castShadow=true;cap.visible=false;g.add(cap);snowCaps.push(cap);}
     /* AMORTIGUADORES desde la FUENTE ÚNICA (seguidor.js): pie FIJO al poste (a), otro extremo en la viga (b, gira con 'g') => se alarga/acorta. Mismo render (body+rod) y bucle de siempre. */
     beam.dampers.forEach(function(d){ var pbx=d.b[0], pxx=pbx+xs;
-      var Bp=new THREE.Vector3(xs+d.a[0],0.40,zc+d.a[2]);   // pie a 40 cm del suelo (suelo plano y=0) -> el amortiguador mide desde ahí hasta la viga de torsión
+      var Bp=new THREE.Vector3(xs+d.a[0],2+d.a[1],zc+d.a[2]);   // pie FIJO en el rodamiento, justo BAJO la viga de torsión (tubo a y=2) -> amortiguador CORTO (no baja al suelo)
       var body=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,1,14),dark2);body.castShadow=true;sc.add(body);
       var rodd=new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,1,10),silver);sc.add(rodd);
       var eB=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eB.position.copy(Bp);sc.add(eB);

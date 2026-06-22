@@ -210,13 +210,14 @@
       a:[0,-0.06,-0.40], b:[D.tcuX-0.165,-0.11,0.045],
       geom:function (TH){ return new TH.CylinderGeometry(0.0035,0.0035,1,6); }, m:mT(THREE, 0,0,0) });
 
-    // AMORTIGUADORES (2 por viga): pie FIJO al PENÚLTIMO poste (N y S), otro extremo en la viga (bascula). Cruzan
-    // spin/estático -> la app los orienta por frame entre 'a' y 'b'. La X de los postes la pone CADA app (sus retículas
-    // difieren) vía opts.damperX = [xNorte, xSur]; si no se pasa, se estima a partir del largo del tubo.
+    // AMORTIGUADORES (2 por viga): CORTO, en el RODAMIENTO. Extremo fijo 'a' en la pila/soporte justo BAJO la viga
+    // de torsión (≈40 cm por debajo del tubo, NO baja al suelo); extremo 'b' en una manivela del tubo (bascula).
+    // Cruzan spin/estático -> la app los orienta por frame entre 'a' (sin Rx) y 'b' (con Rx). La X (poste) la pone
+    // CADA app vía opts.damperX = [xNorte, xSur]; si no se pasa, se estima a partir del largo del tubo.
     var dampXs = opts.damperX; if (!dampXs) { var dd = Math.min(24, tubeLen/2 - 5); dampXs = [-dd, dd]; }
     dampXs.forEach(function (dx) {
       out.push({ key:'damper', mat:'motor', spin:false, cast:true, damperLink:true,
-        a:[dx,-0.95,0.10], b:[dx,-0.15,0.28],
+        a:[dx,-0.40,0.02], b:[dx,-0.12,0.24],   // a = soporte fijo en la pila bajo el rodamiento; b = manivela en el tubo (≈36 cm de carrera)
         geom:function (TH){ return new TH.CylinderGeometry(0.022,0.022,1,10); }, m:mT(THREE, 0,0,0) });   // = vástago FINO; la app le añade un cuerpo más grueso (body+rod, como el gemelo)
     });
 
@@ -293,6 +294,6 @@
     return order.map(function (k){ return byType[k]; });
   };
 
-  S.VERSION = '0.4.6';
+  S.VERSION = '0.4.7';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);
