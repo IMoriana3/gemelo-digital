@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0B0F14">
+<title>Planta instanciada (prueba) · Factiun</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Sky.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/environments/RoomEnvironment.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/SMAAPass.js"></script>
+<script src="../seguidor.js?v=7"></script>
+<script src="plantas.js"></script>
+<script src="escena.js"></script>
+<style>
+  *{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden}
+  body{background:#0B0F14;color:#E7EEF4;font-family:'IBM Plex Sans',system-ui,sans-serif}
+  #cv{position:fixed;inset:0}#cv canvas{display:block;width:100%;height:100%}
+  .bar{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:12px;padding:10px 14px;z-index:10;
+    background:linear-gradient(180deg,rgba(11,15,20,.75),transparent);pointer-events:none}
+  .bar b{font:700 14px 'Space Grotesk',sans-serif;color:#36D399}
+  .bar span{font-size:12.5px;color:#a9bccc}
+  .pick{position:fixed;top:46px;left:14px;z-index:10;display:flex;gap:8px}
+  .pick button{pointer-events:auto;background:rgba(13,19,26,.8);border:1px solid #32485d;color:#E7EEF4;border-radius:9px;padding:8px 12px;font:600 13px sans-serif;cursor:pointer}
+  .pick button.on{border-color:#36D399;color:#36D399}
+  .hint{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:10;color:#8093A4;font-size:12px;text-shadow:0 1px 3px #000}
+</style>
+</head>
+<body>
+  <div id="cv"></div>
+  <div class="bar"><b>🏭 Planta instanciada — PRUEBA</b><span id="info">cargando…</span></div>
+  <div class="pick"><button id="bBurgo" class="on">El Burgo (219)</button><button id="bParamo">Páramo (396)</button></div>
+  <div class="hint">Arrastra = girar · 2 dedos / clic derecho = mover · rueda = zoom · el día corre solo</div>
+  <script>
+  (function(){
+    var ESC=null, last=0, mount=document.getElementById('cv');
+    function load(key){
+      if(ESC){ try{ESC.renderer.dispose();}catch(e){} mount.innerHTML=''; }
+      var P=window.PLANTAS[key];
+      var positions=P.trackers.map(function(t){return {x:t.x, z:t.y};});
+      var loc=key==='burgo'?{lat:41.576,lon:-0.798,tz:1,dst:true}:{lat:41.99,lon:-5.5,tz:1,dst:true};
+      ESC=Escena.createPlant(THREE, mount, {positions:positions, dayN:172, hour:8.5, autoDay:true, daySeconds:70, loc:loc});
+      document.getElementById('info').textContent=P.name+' · '+P.count+' seguidores · '+P.ncus+' NCU';
+    }
+    function loop(now){ requestAnimationFrame(loop); var dt=last?Math.min(0.05,(now-last)/1000):0; last=now; if(ESC)ESC.frame(now,dt); }
+    document.getElementById('bBurgo').onclick=function(){this.classList.add('on');document.getElementById('bParamo').classList.remove('on');load('burgo');};
+    document.getElementById('bParamo').onclick=function(){this.classList.add('on');document.getElementById('bBurgo').classList.remove('on');load('paramo');};
+    addEventListener('resize',function(){if(ESC)ESC.resize();});
+    load('burgo'); requestAnimationFrame(loop);
+  })();
+  </script>
+</body>
+</html>

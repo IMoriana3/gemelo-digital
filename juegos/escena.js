@@ -268,5 +268,135 @@
     return ESC;
   };
 
+  /* ====================================================================
+   * MODO PLANTA: campo de N seguidores con InstancedMesh (Seguidor.instancePlan),
+   * misma escena/materiales/cielo/post que create(). Un InstancedMesh por tipo de
+   * pieza. Tubo a lo largo de Z (Ry -90°); basculación = Rx(ángulo). Mismo render.
+   *   var ESC = Escena.createPlant(THREE, mount, {positions:[{x,z}], dayN, hour, autoDay});
+   *   ESC.tiltDeg / ESC.override[i]   ESC.hour   ESC.frame(now,dt)
+   *   ESC.hitboxes   ESC.onTap=function(i){}   ESC.markerPos(i)->Vector3
+   * ==================================================================== */
+  E.createPlant = function (THREE_, mount, opts) {
+    THREE = THREE_; opts = opts || {};
+    if (opts.loc) { LOC = opts.loc; LAT = LOC.lat * D2R; LON = LOC.lon; }
+    dayN = opts.dayN || 172;
+    var positions = opts.positions || [], N = positions.length;
+    var ESC = { trackers: N, tiltDeg: 0, override: {}, hour: opts.hour != null ? opts.hour : 12, autoDay: !!opts.autoDay, daySeconds: opts.daySeconds || 120, autoOrbit: !!opts.autoOrbit, onTap: null, hitboxes: [] };
+
+    var sc = new THREE.Scene();
+    var cam = new THREE.PerspectiveCamera(48, 1, 1, 9000);
+    var rnd = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    rnd.setPixelRatio(Math.min(devicePixelRatio, 2));
+    if (THREE.sRGBEncoding) rnd.outputEncoding = THREE.sRGBEncoding;
+    if (THREE.ACESFilmicToneMapping) { rnd.toneMapping = THREE.ACESFilmicToneMapping; rnd.toneMappingExposure = 1.0; }
+    if ('physicallyCorrectLights' in rnd) rnd.physicallyCorrectLights = true;
+    rnd.shadowMap.enabled = true; rnd.shadowMap.type = THREE.PCFSoftShadowMap;
+    mount.appendChild(rnd.domElement);
+    try { if (THREE.RoomEnvironment && THREE.PMREMGenerator) { var pm = new THREE.PMREMGenerator(rnd); sc.environment = pm.fromScene(new THREE.RoomEnvironment(), 0.04).texture; } } catch (e) {}
+    var sky = null, skyU = null;
+    try { if (THREE.Sky) { sky = new THREE.Sky(); sky.scale.setScalar(12000); sc.add(sky); skyU = sky.material.uniforms; skyU.turbidity.value = 5; skyU.rayleigh.value = 1.8; skyU.mieCoefficient.value = 0.006; skyU.mieDirectionalG.value = 0.82; } } catch (e) {}
+    if (!sky) sc.background = new THREE.Color(0x7aa0c4);
+    sc.add(new THREE.AmbientLight(0xbcd0e6, 0.20));
+    sc.add(new THREE.HemisphereLight(0xbcd6f5, 0x4a5236, 0.35));
+    var sun = new THREE.DirectionalLight(0xfff4e2, 2.6); sc.add(sun); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+    var bx = 1; positions.forEach(function (p) { bx = Math.max(bx, Math.abs(p.x), Math.abs(p.z)); });
+    var hw = Math.min(360, bx * 1.05) + 50, shc = sun.shadow.camera; shc.left = -hw; shc.right = hw; shc.top = hw; shc.bottom = -hw; shc.near = 1; shc.far = 3000; shc.updateProjectionMatrix(); sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02; sc.add(sun.target);
+    var gw = Math.max(240, bx * 2.6), gtex = grassTex(); gtex.repeat.set(Math.max(40, gw / 6), Math.max(40, gw / 6));
+    var ground = new THREE.Mesh(new THREE.PlaneGeometry(gw, gw), new THREE.MeshStandardMaterial({ map: gtex, color: 0xbed0a8, roughness: 0.95 }));
+    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; sc.add(ground);
+
+    var SG = Seguidor.materials(THREE), ptex = panelTex();
+    SG.glass.map = ptex; SG.glass.roughness = 0.10; SG.glass.metalness = 0.0; SG.glass.envMapIntensity = 1.7; SG.glass.emissive = new THREE.Color(0x101a2a); SG.glass.emissiveIntensity = 0.12; SG.glass.needsUpdate = true;
+    SG.frame.metalness = 0.85; SG.frame.roughness = 0.32; SG.steel.metalness = 0.9; SG.steel.roughness = 0.42; SG.silver.metalness = 0.92; SG.silver.roughness = 0.28;
+    ['blue', 'motor', 'correa', 'tcu', 'jbox', 'cable'].forEach(function (k) { if (SG[k]) SG[k].envMapIntensity = 0.9; });
+    ESC.materials = SG;
+
+    var composer = null;
+    try { if (THREE.EffectComposer && THREE.RenderPass) { composer = new THREE.EffectComposer(rnd); composer.addPass(new THREE.RenderPass(sc, cam)); if (THREE.UnrealBloomPass) composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.4, 0.55, 0.92)); if (THREE.SMAAPass) composer.addPass(new THREE.SMAAPass(256, 256)); } } catch (e) { composer = null; }
+
+    // ---- campo instanciado ----
+    var KEEP = { tube: 1, tubecap: 1, mesa: 1, correa: 1, cable: 1, jbox: 1, corona: 1, reductora: 1, cuello: 1, motor: 1, tapa: 1 };
+    var plan = Seguidor.instancePlan(THREE, { detail: 'mass', size: 'largo' }).filter(function (p) { return KEEP[p.key]; });
+    var Ry = new THREE.Matrix4().makeRotationY(-Math.PI / 2);
+    var groups = [];
+    plan.forEach(function (pt) {
+      var L = pt.locals.length, mesh = new THREE.InstancedMesh(pt.geom(THREE), SG[pt.mat], N * L);
+      mesh.castShadow = !!pt.cast; mesh.receiveShadow = true; mesh.frustumCulled = false; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      sc.add(mesh); groups.push({ mesh: mesh, spin: pt.spin, locals: pt.locals, L: L });
+    });
+    // postes simples (2 por seguidor)
+    var postGeo = new THREE.BoxGeometry(0.14, 2.0, 0.14), post = new THREE.InstancedMesh(postGeo, SG.steel, N * 2), pdm = new THREE.Object3D();
+    post.castShadow = true; sc.add(post);
+    for (var pti = 0; pti < N; pti++) { for (var pk = 0; pk < 2; pk++) { pdm.position.set(positions[pti].x, 1.0, positions[pti].z + (pk ? 18 : -18)); pdm.updateMatrix(); post.setMatrixAt(pti * 2 + pk, pdm.matrix); } }
+    post.instanceMatrix.needsUpdate = true;
+
+    var tmpA = new THREE.Matrix4(), tmpB = new THREE.Matrix4(), tmpM = new THREE.Matrix4();
+    function fillGroup(rec, useAngle) {
+      var L = rec.L, RyRx = tmpA.copy(Ry); if (rec.spin) RyRx.multiply(tmpB.makeRotationX((useAngle || 0) * D2R));
+      var Ml = []; for (var l = 0; l < L; l++) Ml[l] = new THREE.Matrix4().copy(RyRx).multiply(rec.locals[l]);
+      for (var t = 0; t < N; t++) {
+        var ang = rec.spin ? (ESC.override[t] != null ? ESC.override[t] : ESC.tiltDeg) : 0, src;
+        if (rec.spin && ESC.override[t] != null) { var RR = new THREE.Matrix4().copy(Ry).multiply(new THREE.Matrix4().makeRotationX(ang * D2R)); }
+        for (var l2 = 0; l2 < L; l2++) {
+          if (rec.spin && ESC.override[t] != null) { tmpM.copy(Ry).multiply(tmpB.makeRotationX(ang * D2R)).multiply(rec.locals[l2]); }
+          else { tmpM.copy(Ml[l2]); }
+          tmpM.elements[12] += positions[t].x; tmpM.elements[13] += 2; tmpM.elements[14] += positions[t].z;
+          rec.mesh.setMatrixAt(t * L + l2, tmpM);
+        }
+      }
+      rec.mesh.instanceMatrix.needsUpdate = true;
+    }
+    function rebuildSpin() { for (var i = 0; i < groups.length; i++) if (groups[i].spin) fillGroup(groups[i], ESC.tiltDeg); }
+    function buildStatic() { for (var i = 0; i < groups.length; i++) if (!groups[i].spin) fillGroup(groups[i], 0); }
+    buildStatic(); rebuildSpin();
+
+    // hitboxes por seguidor (para tap)
+    var hbGeo = new THREE.BoxGeometry(5, 3, 64), hbMat = new THREE.MeshBasicMaterial({ visible: false });
+    for (var hi = 0; hi < N; hi++) { var hb = new THREE.Mesh(hbGeo, hbMat); hb.position.set(positions[hi].x, 2, positions[hi].z); hb.userData.idx = hi; sc.add(hb); ESC.hitboxes.push(hb); }
+    ESC.markerPos = function (i) { return new THREE.Vector3(positions[i].x, 4.5, positions[i].z); };
+
+    // ---- cámara: órbita + paneo + zoom + tap ----
+    var view = { theta: 0.85, phi: 0.66, radius: Math.max(120, bx * 1.3), tx: 0, tz: 0 };
+    var ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+    function applyCam() { var sp = Math.sin(view.phi), cp = Math.cos(view.phi); cam.position.set(view.tx + view.radius * sp * Math.sin(view.theta), view.radius * cp, view.tz + view.radius * sp * Math.cos(view.theta)); cam.lookAt(view.tx, 0, view.tz); }
+    (function (dom) {
+      var ptrs = {}, down = null, pinchD = 0, mode = null, lastMid = null;
+      dom.style.touchAction = 'none';
+      function npt() { return Object.keys(ptrs).length; }
+      function pdist() { var k = Object.keys(ptrs); if (k.length < 2) return 0; var a = ptrs[k[0]], b = ptrs[k[1]]; return Math.hypot(a.x - b.x, a.y - b.y); }
+      function pmid() { var k = Object.keys(ptrs); var a = ptrs[k[0]], b = ptrs[k[1]]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+      function panBy(dx, dy) { var s = view.radius * 0.0016, a = view.theta; view.tx -= (dx * Math.cos(a) - dy * Math.sin(a)) * s; view.tz -= (dx * Math.sin(a) + dy * Math.cos(a)) * s; applyCam(); }
+      dom.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      dom.addEventListener('pointerdown', function (e) { ptrs[e.pointerId] = { x: e.clientX, y: e.clientY }; try { dom.setPointerCapture(e.pointerId); } catch (_) {} if (npt() === 1) { down = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false }; mode = (e.button === 2 || e.shiftKey) ? 'pan' : 'rot'; } else if (npt() === 2) { down = null; mode = 'multi'; pinchD = pdist(); lastMid = pmid(); } });
+      dom.addEventListener('pointermove', function (e) { var prev = ptrs[e.pointerId]; if (!prev) return; var dx = e.clientX - prev.x, dy = e.clientY - prev.y; ptrs[e.pointerId] = { x: e.clientX, y: e.clientY }; if (mode === 'multi' && npt() >= 2) { var d = pdist(); if (pinchD > 0 && d > 0) view.radius = clamp(view.radius * pinchD / d, 40, 1400); pinchD = d; var m = pmid(); if (lastMid) panBy(m.x - lastMid.x, m.y - lastMid.y); lastMid = m; applyCam(); return; } if (down && (Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 9)) down.moved = true; if (mode === 'pan') panBy(dx, dy); else { view.theta -= dx * 0.005; view.phi = clamp(view.phi - dy * 0.005, 0.18, 1.4); applyCam(); } });
+      function endp(e) { var single = npt() === 1; if (down && !down.moved && single && (performance.now() - down.t) < 450) tapAt(down.x, down.y); delete ptrs[e.pointerId]; try { dom.releasePointerCapture(e.pointerId); } catch (_) {} if (npt() === 0) { down = null; mode = null; pinchD = 0; lastMid = null; } }
+      dom.addEventListener('pointerup', endp); dom.addEventListener('pointercancel', endp);
+      dom.addEventListener('wheel', function (e) { e.preventDefault(); view.radius = clamp(view.radius * (1 + Math.sign(e.deltaY) * 0.1), 40, 1400); applyCam(); }, { passive: false });
+    })(rnd.domElement);
+    function tapAt(cx, cy) { if (!ESC.onTap) return; var r = rnd.domElement.getBoundingClientRect(); ndc.x = ((cx - r.left) / r.width) * 2 - 1; ndc.y = -((cy - r.top) / r.height) * 2 + 1; ray.setFromCamera(ndc, cam); var h = ray.intersectObjects(ESC.hitboxes, false); if (h.length) ESC.onTap(h[0].object.userData.idx); }
+    applyCam();
+
+    ESC.scene = sc; ESC.camera = cam; ESC.renderer = rnd; ESC.sun = sun; ESC.view = view; ESC.applyCam = applyCam;
+    ESC.rebuildSpin = rebuildSpin;
+    var lastTilt = null, lastOv = '';
+    ESC.frame = function (now, dt) {
+      if (ESC.autoDay) { ESC.hour += dt * (24 / ESC.daySeconds); if (ESC.hour >= 24) ESC.hour -= 24; ESC.tiltDeg = trackAngle(ESC.hour); }
+      var ovKey = ESC.tiltDeg.toFixed(2) + '|' + Object.keys(ESC.override).join(',');
+      if (ovKey !== lastOv) { rebuildSpin(); lastOv = ovKey; }
+      var P = solarPos(ESC.hour), el = P.el, ce = Math.cos(Math.max(el, -0.05));
+      var dir = new THREE.Vector3(Math.cos(P.az) * ce, Math.sin(el), Math.sin(P.az) * ce);
+      if (skyU) skyU.sunPosition.value.copy(dir);
+      sun.position.copy(dir.clone().multiplyScalar(300)); sun.target.position.set(0, 2, 0); sun.target.updateMatrixWorld();
+      var day = Math.max(0, Math.sin(el)); sun.intensity = 0.15 + day * 3.1; sun.color.setHex(el > 0 && el < 0.25 ? 0xffcaa0 : 0xfff4e2);
+      rnd.toneMappingExposure = 0.42 + 0.7 * Math.min(1, day * 1.35);
+      if (!sky) sc.background.setHSL(0.58, 0.4, 0.18 + 0.45 * clamp(day * 1.6, 0, 1));
+      if (ESC.autoOrbit) { view.theta += dt * 0.05; applyCam(); }
+      if (composer) composer.render(); else rnd.render(sc, cam);
+    };
+    ESC.resize = function () { var w = mount.clientWidth || innerWidth, h = mount.clientHeight || innerHeight; if (w < 2 || h < 2) return; rnd.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); if (composer) composer.setSize(w, h); };
+    ESC.resize();
+    return ESC;
+  };
+
   root.Escena = E;
 })(typeof window !== 'undefined' ? window : this);
