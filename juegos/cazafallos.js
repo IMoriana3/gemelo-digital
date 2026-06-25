@@ -12,12 +12,12 @@
 
   /* puntos en coordenadas LOCALES del seguidor (hijos del grupo que bascula / del slew) */
   var HOTSPOTS = [
-    { key: 'modulo', on: 'spin', pos: [14, 0.25, 0] },
-    { key: 'correa', on: 'spin', pos: [-8, 0.16, 0] },
-    { key: 'cableado', on: 'spin', pos: [9, 0.05, 0.1] },
-    { key: 'tcu', on: 'spin', pos: [1.4, -0.18, 0] },
-    { key: 'amortiguador', on: 'spin', pos: [-20, -0.2, 0.3] },
-    { key: 'motor', on: 'slew', pos: [0, -0.04, -0.55] }
+    { key: 'modulo', on: 'spin', pos: [14, 0.25, 0], lbl: 'Módulo' },
+    { key: 'correa', on: 'spin', pos: [-8, 0.16, 0], lbl: 'Correa' },
+    { key: 'cableado', on: 'spin', pos: [9, 0.05, 0.1], lbl: 'Cableado' },
+    { key: 'tcu', on: 'spin', pos: [1.4, -0.18, 0], lbl: 'TCU' },
+    { key: 'amortiguador', on: 'spin', pos: [-20, -0.2, 0.3], lbl: 'Amortiguador' },
+    { key: 'motor', on: 'slew', pos: [0, -0.04, -0.55], lbl: 'Motor' }
   ];
   var DEFECTS = {
     modulo: { label: 'Módulo / string', sym: 'Una rama produce mucho menos de lo normal y se aprecia una zona más oscura en los paneles.', exp: 'Módulo o string dañado (microgrietas / punto caliente).' },
@@ -27,15 +27,26 @@
     amortiguador: { label: 'Amortiguador', sym: 'Con rachas de viento la viga oscila demasiado y no se estabiliza.', exp: 'Amortiguador roto: riesgo estructural; corrígelo antes del viento.' },
     motor: { label: 'Accionamiento (motor)', sym: 'El seguidor no acompaña al sol y el motor calienta y consume de más.', exp: 'Sobrecorriente o avería en el accionamiento (slew / motor).' }
   };
-  var ROUNDS = 8, RTIME = 18;
+  var ROUNDS = HOTSPOTS.length, RTIME = 18;   // una ronda por componente (sin repetir)
 
-  var ESC, ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), hitboxes = [], dots = {};
+  var ESC, ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), hitboxes = [], dots = {}, labels = {};
 
   function ringTex() {
     var c = document.createElement('canvas'); c.width = c.height = 64; var x = c.getContext('2d');
     x.clearRect(0, 0, 64, 64); x.strokeStyle = '#fff'; x.lineWidth = 7; x.beginPath(); x.arc(32, 32, 22, 0, 6.2832); x.stroke();
     x.globalAlpha = 0.3; x.fillStyle = '#fff'; x.beginPath(); x.arc(32, 32, 18, 0, 6.2832); x.fill(); return new THREE.CanvasTexture(c);
   }
+  function rr(x, a, b, w, h, r) { x.beginPath(); x.moveTo(a + r, b); x.arcTo(a + w, b, a + w, b + h, r); x.arcTo(a + w, b + h, a, b + h, r); x.arcTo(a, b + h, a, b, r); x.arcTo(a, b, a + w, b, r); x.closePath(); }
+  function labelSprite(txt) {
+    var f = 38, pad = 18, mc = document.createElement('canvas').getContext('2d'); mc.font = '600 ' + f + 'px sans-serif';
+    var w = Math.ceil(mc.measureText(txt).width) + pad * 2, h = f + pad * 2;
+    var c = document.createElement('canvas'); c.width = w; c.height = h; var x = c.getContext('2d');
+    x.fillStyle = 'rgba(11,15,20,.85)'; rr(x, 1.5, 1.5, w - 3, h - 3, 16); x.fill(); x.strokeStyle = '#36D399'; x.lineWidth = 3; rr(x, 1.5, 1.5, w - 3, h - 3, 16); x.stroke();
+    x.fillStyle = '#eaf3f0'; x.font = '600 ' + f + 'px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(txt, w / 2, h / 2 + 1);
+    var t = new THREE.CanvasTexture(c); var s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthTest: false, depthWrite: false }));
+    var sc = 1.7; s.scale.set(sc * w / h, sc, 1); s.renderOrder = 12; return s;
+  }
+  function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = (Math.random() * (i + 1)) | 0, t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
 
   function build() {
     ESC = Escena.create(THREE, el('cv'), { layout: 'single', detail: 'full', autoDay: false, autoOrbit: false, hour: 9.5 });
@@ -45,7 +56,8 @@
       var hb = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.0, 2.2), new THREE.MeshBasicMaterial({ visible: false }));
       hb.position.set(hs.pos[0], hs.pos[1], hs.pos[2]); hb.userData.key = hs.key; parent.add(hb); hitboxes.push(hb);
       var d = new THREE.Sprite(new THREE.SpriteMaterial({ map: RING, color: 0x36d399, transparent: true, depthTest: false, depthWrite: false }));
-      d.scale.set(2.2, 2.2, 1); d.position.set(hs.pos[0], hs.pos[1], hs.pos[2]); d.userData.p = Math.random() * 6.28; d.visible = false; parent.add(d); dots[hs.key] = d;
+      d.scale.set(2.2, 2.2, 1); d.position.set(hs.pos[0], hs.pos[1], hs.pos[2]); d.userData.p = Math.random() * 6.28; d.visible = false; d.renderOrder = 11; parent.add(d); dots[hs.key] = d;
+      var lab = labelSprite(hs.lbl); lab.position.set(hs.pos[0], hs.pos[1] + 1.6, hs.pos[2]); lab.visible = false; parent.add(lab); labels[hs.key] = lab;
     });
     // detección de toque (además de la órbita de escena.js)
     var dom = ESC.renderer.domElement, down = null;
@@ -66,18 +78,18 @@
 
   var G = null;
   function start() {
-    G = { idx: 0, score: 0, ok: 0, running: true, answered: false, defect: null, endAt: 0 };
+    var order = shuffle(HOTSPOTS.map(function (h) { return h.key; }));   // cada componente una vez, sin repetir
+    G = { idx: 0, score: 0, ok: 0, running: true, answered: false, defect: null, endAt: 0, order: order };
     el('start').classList.remove('show'); el('end').classList.remove('show'); el('hud').classList.add('show'); el('panel').classList.add('show');
     newRound();
   }
   function newRound() {
     G.answered = false;
-    var keys = HOTSPOTS.map(function (h) { return h.key; });
-    G.defect = keys[(Math.random() * keys.length) | 0];
+    G.defect = G.order[G.idx % G.order.length];
     el('rNum').textContent = (G.idx + 1) + ' / ' + ROUNDS; el('rScore').textContent = G.score;
     el('sym').textContent = DEFECTS[G.defect].sym;
     el('reveal').className = 'reveal'; el('reveal').innerHTML = ''; el('btnNext').style.visibility = 'hidden';
-    HOTSPOTS.forEach(function (h) { var d = dots[h.key]; d.visible = true; d.material.color.setHex(0x36d399); d.material.opacity = 1; });
+    HOTSPOTS.forEach(function (h) { var d = dots[h.key]; d.visible = true; d.material.color.setHex(0x36d399); d.material.opacity = 1; labels[h.key].visible = true; labels[h.key].material.opacity = 1; });
     G.endAt = performance.now() + RTIME * 1000;
   }
   function evaluate(key) {
@@ -94,7 +106,7 @@
   function next() { G.idx++; if (G.idx >= ROUNDS) end(); else newRound(); }
   function end() {
     G.running = false; el('panel').classList.remove('show');
-    HOTSPOTS.forEach(function (h) { dots[h.key].visible = false; });
+    HOTSPOTS.forEach(function (h) { dots[h.key].visible = false; labels[h.key].visible = false; });
     el('endStats').innerHTML = '<div class="big">' + G.score + '</div><div class="muted" style="text-align:center">puntos</div><div class="muted" style="text-align:center;margin-top:8px">Aciertos: <b style="color:var(--tx)">' + G.ok + ' / ' + ROUNDS + '</b></div>';
     el('end').classList.add('show');
   }
