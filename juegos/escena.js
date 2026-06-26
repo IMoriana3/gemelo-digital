@@ -263,7 +263,8 @@
     ESC.materials = SG; ESC.panelTex = function () { return ptex; };
 
     var TR = [];
-    if (layout === 'field') TR = [{ z: -10, xs: 0 }, { z: 0, xs: 0 }, { z: 10, xs: 0 }];
+    // pitch entre seguidores = 12 m (= 2 filas × 6 m, pitch real GCR) → filas uniformes a 6 m
+    if (layout === 'field') TR = [{ z: -12, xs: 0 }, { z: 0, xs: 0 }, { z: 12, xs: 0 }];
     else if (layout === 'single') TR = [{ z: 0, xs: 0 }];
     for (var ti = 0; ti < TR.length; ti++) ESC.trackers.push(buildBifila(sc, SG, TR[ti].xs, TR[ti].z, detail));   // un seguidor = bífila (mismo render que la planta)
 

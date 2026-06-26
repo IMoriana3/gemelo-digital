@@ -41,7 +41,9 @@
   <script>
   (function(){
     var ESC=null, last=0, mount=document.getElementById('cv');
-    function grid(rows, cols){ var p=[]; for(var r=0;r<rows;r++)for(var c=0;c<cols;c++)p.push({x:(r-(rows-1)/2)*78, z:(c-(cols-1)/2)*9}); return p; }
+    // pitch entre seguidores = 12 m (= 2 filas × 6 m de pitch real GCR). Como la bífila
+    // ocupa 6 m (vigas a ±3), así TODAS las filas quedan uniformes a 6 m, como El Burgo.
+    function grid(rows, cols){ var p=[]; for(var r=0;r<rows;r++)for(var c=0;c<cols;c++)p.push({x:(r-(rows-1)/2)*78, z:(c-(cols-1)/2)*12}); return p; }
     function load(n){
       if(ESC){ try{ESC.renderer.forceContextLoss();ESC.renderer.dispose();}catch(e){} mount.innerHTML=''; }
       var positions = n===8 ? grid(2,4) : grid(2,7);
