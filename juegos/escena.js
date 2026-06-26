@@ -98,11 +98,13 @@
     _tcuTried = true;
     try { new THREE.GLTFLoader().load(TCU_GLB, function (g) { _tcuGltf = g.scene; var q = _tcuCbs; _tcuCbs = []; q.forEach(function (f) { try { f(_tcuGltf); } catch (e) {} }); }, undefined, function () { }); } catch (e) {}
   }
-  function loadRealTCU(parent, fallback) {
+  function loadRealTCU(parent, fallback, antennas) {
     _getTCU(function (scene) {
       var box = new THREE.Box3().setFromObject(scene), sz = box.getSize(new THREE.Vector3());
       if (!isFinite(Math.max(sz.x, sz.y, sz.z)) || Math.max(sz.x, sz.y, sz.z) <= 0) return;
       var ctr = box.getCenter(new THREE.Vector3());
+      // conector DORADO del glb (mat_14) = salida de antena
+      var connNat = null; scene.traverse(function (o) { if (!o.isMesh || !o.material || !o.material.color || connNat) return; var c = o.material.color; if (c.r > 0.6 && c.g > 0.30 && c.b < 0.6 && (c.r - c.b) > 0.35 && c.g < c.r) { connNat = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()); } });
       var cl = scene.clone(true); cl.position.sub(ctr);                        // escala nativa, centrado en su bbox
       cl.traverse(function (o) {
         if (!o.isMesh) return; o.castShadow = false; o.receiveShadow = true;
@@ -114,6 +116,18 @@
       });
       var TM = new THREE.Matrix4().makeRotationY(Math.PI / 2); TM.multiply(new THREE.Matrix4().makeRotationX(Math.PI)); TM.setPosition(Seguidor.DIMS.tcuX, -0.16, 0);
       var wrap = new THREE.Group(); wrap.add(cl); wrap.applyMatrix4(TM); parent.add(wrap);
+      // ANTENA: coax que sale del conector dorado y CUELGA vertical (como el gemelo)
+      if (connNat && antennas) {
+        var cG = connNat.clone().sub(ctr).applyMatrix4(TM);
+        var aM = new THREE.MeshStandardMaterial({ color: 0x101316, metalness: 0.35, roughness: 0.45 });
+        var antGrp = new THREE.Group(); antGrp.position.copy(cG); parent.add(antGrp);
+        var cabLen = 0.85, ferLen = 0.022, duckLen = 0.075;
+        var cab = new THREE.Mesh(new THREE.CylinderGeometry(0.0026, 0.0026, cabLen, 8), aM); cab.position.set(0, -cabLen / 2, 0); antGrp.add(cab);
+        var fer = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, ferLen, 12), aM); fer.position.set(0, -cabLen - ferLen / 2, 0); antGrp.add(fer);
+        var duck = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.005, duckLen, 12), aM); duck.castShadow = true; duck.position.set(0, -cabLen - ferLen - duckLen / 2, 0); antGrp.add(duck);
+        var dtip = new THREE.Mesh(new THREE.SphereGeometry(0.005, 10, 8), aM); dtip.position.set(0, -cabLen - ferLen - duckLen, 0); antGrp.add(dtip);
+        antennas.push(antGrp);
+      }
       if (fallback) fallback.visible = false;
     });
   }
@@ -134,7 +148,7 @@
 
   /* ---- un seguidor completo (porta buildTracker del gemelo) ---- */
   function buildOne(scene, SG, xs, zc, west, detail) {
-    var dampers = [], motorCables = [], steel = SG.steel, silver = SG.silver, dark2 = SG.jbox;
+    var dampers = [], motorCables = [], antennas = [], steel = SG.steel, silver = SG.silver, dark2 = SG.jbox;
     var piersX = []; for (var px = -30; px <= 30; px += 6) piersX.push(px);
     for (var pi = 0; pi < piersX.length; pi++) {
       var pxv = piersX[pi] + xs;
@@ -144,7 +158,7 @@
     }
     var beam = Seguidor.buildBeam(THREE, { west: west, materials: SG, detail: detail || 'full', skip: { soporte: 1, bracket: 1, antena: 1, antenatip: 1, tcu: 1 } });
     var g = new THREE.Group(); g.position.set(xs, 2, zc); g.add(beam.spin); scene.add(g);
-    if (west) { var tcu = buildTCU(); tcu.position.set(Seguidor.DIMS.tcuX, -0.22, 0); g.add(tcu); loadRealTCU(g, tcu); }
+    if (west) { var tcu = buildTCU(); tcu.position.set(Seguidor.DIMS.tcuX, -0.22, 0); g.add(tcu); loadRealTCU(g, tcu, antennas); }
     var slew = new THREE.Group(); slew.position.set(xs, 2, zc); slew.add(beam.static); scene.add(slew);
     beam.dampers.forEach(function (d) {
       var pbx = d.b[0], Bp = new THREE.Vector3(xs + d.a[0], 0.40, zc + d.a[2]);
@@ -163,7 +177,7 @@
       var _flex = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 1, 8), _cabM); scene.add(_flex);
       motorCables.push({ Ax: xs, Ay: 2.16, Az: zc - 0.42, Bx: 0.18, By: 0.085, Bz: 0, xs: xs, zc: zc, mesh: _flex });
     }
-    return { spin: g, slew: slew, xs: xs, zc: zc, dampers: dampers, motorCables: motorCables };
+    return { spin: g, slew: slew, xs: xs, zc: zc, dampers: dampers, motorCables: motorCables, antennas: antennas };
   }
 
   // Un SEGUIDOR real = bífila: dos vigas (motor + gemela) a zc±filaZ unidas por
@@ -175,7 +189,7 @@
     var B = buildOne(scene, SG, xs, zc + filaZ, false, detail);   // viga GEMELA
     var et = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 2 * filaZ, 14), SG.steel);
     et.rotation.x = Math.PI / 2; et.position.set(xs, 2, zc); et.castShadow = true; scene.add(et);
-    return { spin: A.spin, slew: A.slew, spinGroups: [A.spin, B.spin], xs: xs, zc: zc, dampers: A.dampers.concat(B.dampers), motorCables: A.motorCables.concat(B.motorCables), ang: 0 };
+    return { spin: A.spin, slew: A.slew, spinGroups: [A.spin, B.spin], xs: xs, zc: zc, dampers: A.dampers.concat(B.dampers), motorCables: A.motorCables.concat(B.motorCables), antennas: A.antennas, ang: 0 };
   }
 
   // Actualiza basculación + amortiguadores + cable de motor de cada seguidor (cada T usa su T.ang en grados)
@@ -186,6 +200,7 @@
       var gs = T.spinGroups || [T.spin]; for (var gi = 0; gi < gs.length; gi++) gs[gi].rotation.x = ar;
       var di; for (di = 0; di < T.dampers.length; di++) { var Dp = T.dampers[di]; var _T = new THREE.Vector3(Dp.px, 2 + Dp.dy0 * _c - Dp.dz0 * _sn, Dp.zc + Dp.dy0 * _sn + Dp.dz0 * _c); var _dir = _T.clone().sub(Dp.B), _len = _dir.length(), _mid = Dp.B.clone().lerp(_T, 0.5); var _q = new THREE.Quaternion().setFromUnitVectors(up, _dir.clone().normalize()); Dp.body.position.copy(_mid); Dp.body.quaternion.copy(_q); Dp.body.scale.y = _len * 0.62; Dp.rod.position.copy(_mid); Dp.rod.quaternion.copy(_q); Dp.rod.scale.y = _len; }
       var mi; for (mi = 0; mi < T.motorCables.length; mi++) { var M = T.motorCables[mi]; var _Bw = new THREE.Vector3(M.xs + M.Bx, 2 + M.By * _c - M.Bz * _sn, M.zc + M.By * _sn + M.Bz * _c); var _Aw = new THREE.Vector3(M.Ax, M.Ay, M.Az), _dd = _Bw.clone().sub(_Aw), _ll = _dd.length() || 1e-4; M.mesh.position.copy(_Aw).lerp(_Bw, 0.5); M.mesh.quaternion.setFromUnitVectors(up, _dd.normalize()); M.mesh.scale.y = _ll; }
+      var an; if (T.antennas) for (an = 0; an < T.antennas.length; an++) T.antennas[an].rotation.x = -ar;   // la antena cuelga SIEMPRE vertical
     }
   }
 
