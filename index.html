@@ -9,7 +9,7 @@
 <!-- sin fuentes de Google: offline (fuentes del sistema) -->
 <script src="lib/three.min.js"></script><!-- librerías LOCALES (sin CDN): offline -->
 <script src="lib/GLTFLoader.js"></script>
-<script src="seguidor.js?v=12"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
+<script src="seguidor.js?v=13"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
 <link rel="stylesheet" href="lib/leaflet.css">
 <script src="lib/leaflet.js"></script>
 <style>
@@ -769,6 +769,38 @@ function buildTracker(wrap){
   var modsPerStr=28, pitchX=modW+gapMod, strLen=modsPerStr*pitchX, off=0.14;  /* módulos justo sobre las correas (bajados con ellas a la viga) */
   var span=2*strLen+gapDrive, filaZ=3.0;
   var piersX=[]; for(var x=-30;x<=30;x+=6) piersX.push(x);
+  /* ===== UNIÓN VIGA↔POSTE: MISMO render que Cobertura 3D (terreno.html) — perfil C 140×70 con el canal
+     al EXTERIOR del tracker, TAMBOR negro ranurado (casquillo) estático con ojo redondo (r 0,088 ≥
+     semidiagonal de la viga 0,12), MANGUITO interior de boca cuadrada que GIRA con la viga, HORQUILLA
+     PRE01 (cuna+orejetas+cartelas+base+tornillos) y VIROLA. Proporciones derivadas del render del
+     fabricante (sin cotas), idénticas a las del visor de cobertura. ===== */
+  var hdpeM=new THREE.MeshStandardMaterial({color:0x0e0f10,roughness:.85,metalness:.05});
+  var _postH=2-0.253;   // del suelo a la BASE de la horquilla (eje del tubo a y=2): el poste ya no se hunde en el tambor
+  var _cpS=new THREE.Shape();_cpS.moveTo(-0.07,0.035);_cpS.lineTo(-0.07,-0.035);_cpS.lineTo(0.07,-0.035);_cpS.lineTo(0.07,0.035);_cpS.lineTo(0.055,0.035);_cpS.lineTo(0.055,-0.027);_cpS.lineTo(-0.055,-0.027);_cpS.lineTo(-0.055,0.035);_cpS.closePath();
+  var _cpG=new THREE.ExtrudeGeometry(_cpS,{depth:_postH,bevelEnabled:false});_cpG.translate(0,0,-_postH/2);_cpG.rotateX(-Math.PI/2);_cpG.rotateY(Math.PI/2);   // canal abierto a −X (norte de este mundo); el semieje sur va girado 180° por malla
+  var _cjS=new THREE.Shape();_cjS.absarc(0,0,0.115,0,Math.PI*2,false);
+  var _cjH=new THREE.Path();_cjH.absarc(0,0,0.088,0,Math.PI*2,true);_cjS.holes.push(_cjH);
+  for(var _sl=0;_sl<12;_sl++){var _a0=(_sl*30+8)*Math.PI/180,_a1=(_sl*30+24)*Math.PI/180,_shp=new THREE.Path();
+    _shp.moveTo(0.108*Math.cos(_a1),0.108*Math.sin(_a1));_shp.absarc(0,0,0.108,_a1,_a0,true);_shp.lineTo(0.093*Math.cos(_a0),0.093*Math.sin(_a0));_shp.absarc(0,0,0.093,_a0,_a1,false);_shp.closePath();_cjS.holes.push(_shp);}
+  var _cjG=new THREE.ExtrudeGeometry(_cjS,{depth:0.17,bevelEnabled:false,curveSegments:24});_cjG.translate(0,0,-0.085);_cjG.rotateY(Math.PI/2);   // ojo a lo largo de la viga (X)
+  function _mrg(gs){var P=[],Nn=[],U=[],I=[],o=0;for(var g0=0;g0<gs.length;g0++){var g2=gs[g0],p=g2.attributes.position,n=g2.attributes.normal,u=g2.attributes.uv,ix=g2.index,c=p.count,j;
+    for(j=0;j<c;j++){P.push(p.getX(j),p.getY(j),p.getZ(j));Nn.push(n.getX(j),n.getY(j),n.getZ(j));U.push(u?u.getX(j):0,u?u.getY(j):0);}
+    if(ix)for(j=0;j<ix.count;j++)I.push(ix.getX(j)+o);else for(j=0;j<c;j++)I.push(j+o);o+=c;}
+    var G=new THREE.BufferGeometry();G.setAttribute('position',new THREE.Float32BufferAttribute(P,3));G.setAttribute('normal',new THREE.Float32BufferAttribute(Nn,3));G.setAttribute('uv',new THREE.Float32BufferAttribute(U,2));G.setIndex(I);return G;}
+  var _fkS=new THREE.Shape();_fkS.moveTo(-0.05,-0.44);_fkS.lineTo(0.05,-0.44);_fkS.lineTo(0.15,-0.20);_fkS.lineTo(0.15,0.03);_fkS.lineTo(0.1131,0.03);
+  _fkS.absarc(0,0,0.117,0.2594,2.8822,true);_fkS.lineTo(-0.15,0.03);_fkS.lineTo(-0.15,-0.20);_fkS.closePath();
+  var _fkP=new THREE.ExtrudeGeometry(_fkS,{depth:0.012,bevelEnabled:false,curveSegments:20});_fkP.translate(0,0,-0.006);
+  var _blt=function(bx,by){return new THREE.CylinderGeometry(0.013,0.013,0.20,6).rotateX(Math.PI/2).translate(bx,by,0);};
+  var _fkG=_mrg([_fkP.clone().translate(0,0,0.082),_fkP.translate(0,0,-0.082),
+    new THREE.BoxGeometry(0.024,0.20,0.152).translate(0.138,-0.14,0),new THREE.BoxGeometry(0.024,0.20,0.152).translate(-0.138,-0.14,0),
+    new THREE.BoxGeometry(0.30,0.016,0.176).translate(0,-0.245,0),
+    _blt(0.1315,-0.005),_blt(-0.1315,-0.005),_blt(0,-0.30),_blt(0,-0.38)]);_fkG.rotateY(Math.PI/2);
+  var _viS=new THREE.Shape();_viS.moveTo(0.131*Math.cos(-0.2618),0.131*Math.sin(-0.2618));_viS.absarc(0,0,0.131,-0.2618,3.4034,false);
+  _viS.lineTo(0.117*Math.cos(3.4034),0.117*Math.sin(3.4034));_viS.absarc(0,0,0.117,3.4034,-0.2618,true);_viS.closePath();
+  var _viG=new THREE.ExtrudeGeometry(_viS,{depth:0.15,bevelEnabled:false,curveSegments:22});_viG.translate(0,0,-0.075);_viG.rotateY(Math.PI/2);
+  var _buS=new THREE.Shape();_buS.absarc(0,0,0.0865,0,Math.PI*2,false);
+  var _buH=new THREE.Path();_buH.moveTo(0.0608,0.0608);_buH.lineTo(0.0608,-0.0608);_buH.lineTo(-0.0608,-0.0608);_buH.lineTo(-0.0608,0.0608);_buH.closePath();_buS.holes.push(_buH);
+  var _buG=new THREE.ExtrudeGeometry(_buS,{depth:0.19,bevelEnabled:false,curveSegments:24});_buG.translate(0,0,-0.095);_buG.rotateY(Math.PI/2);
   var dark2=new THREE.MeshStandardMaterial({color:0x1a1c20,roughness:0.5,metalness:0.55});
   /* NIEVE sobre los paneles: una capa fina blanca por módulo, compartiendo material;
      su opacidad/escala la mueve el bucle según snowAcc y la inclinación (resbala si
@@ -788,15 +820,16 @@ function buildTracker(wrap){
   var WEST={0:1,3:1,4:1};                                                                      // vigas del MOTOR (oeste): central[0] + una de cada par lateral
   var hl=null, box=null;
   for(var ti=0;ti<TR.length;ti++){ var zc=TR[ti].z, xs=TR[ti].xs, west=!!WEST[ti];
-    /* COLUMNA + pillow-block (rodamiento) por poste */
-    for(var pi=0;pi<piersX.length;pi++){var px=piersX[pi]+xs;
-      var col=new THREE.Mesh(new THREE.BoxGeometry(0.13,2.0,0.13),steel);col.position.set(px,1.0,zc);col.castShadow=true;sc.add(col);
-      var ped=new THREE.Mesh(new THREE.BoxGeometry(0.22,0.12,0.30),silver);ped.position.set(px,1.94,zc);ped.castShadow=true;sc.add(ped);
-      var brg=new THREE.Mesh(new THREE.CylinderGeometry(0.10,0.10,0.18,18),silver);brg.rotation.z=Math.PI/2;brg.position.set(px,2.0,zc);brg.castShadow=true;sc.add(brg);
-      var bo1=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.014,0.14,8),dark2);bo1.position.set(px-0.085,1.94,zc+0.145);sc.add(bo1);
-      var bo2=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.014,0.14,8),dark2);bo2.position.set(px+0.085,1.94,zc+0.145);sc.add(bo2);
-    }
     var g=new THREE.Group();g.position.set(xs,2,zc);
+    /* POSTE + UNIÓN por apoyo, como Cobertura 3D: perfil C (canal al exterior), tambor negro, horquilla,
+       virola y manguito interior (hijo de 'g': GIRA con la viga, la boca cuadrada abraza el tubo) */
+    for(var pi=0;pi<piersX.length;pi++){var px=piersX[pi]+xs;
+      var col=new THREE.Mesh(_cpG,steel);col.position.set(px,_postH/2,zc);if(piersX[pi]>0)col.rotation.y=Math.PI;col.castShadow=true;sc.add(col);
+      var drum=new THREE.Mesh(_cjG,hdpeM);drum.position.set(px,2,zc);drum.castShadow=true;sc.add(drum);
+      var fork=new THREE.Mesh(_fkG,steel);fork.position.set(px,2,zc);fork.castShadow=true;sc.add(fork);
+      var vir=new THREE.Mesh(_viG,steel);vir.position.set(px,2,zc);vir.castShadow=true;sc.add(vir);
+      var bush=new THREE.Mesh(_buG,hdpeM);bush.position.set(piersX[pi],0,0);g.add(bush);
+    }
     /* piezas que BASCULAN (spin) -> hijas de 'g'; slew FIJO -> grupo aparte. Sin soporte/bracket (los postes ya sujetan) ni antena (pendiente per-frame). */
     var beam=Seguidor.buildBeam(THREE,{west:west,materials:SG,detail:'full',skip:{soporte:1,bracket:1,antena:1,antenatip:1,tcu:1,tcuchapa:1}});
     g.add(beam.spin);
@@ -804,14 +837,20 @@ function buildTracker(wrap){
     /* capa de NIEVE por módulo (de los centros que devuelve la fuente) */
     for(var mc=0;mc<beam.modCols.length;mc++){var cc=beam.modCols[mc];
       var cap=new THREE.Mesh(new THREE.BoxGeometry(modW-0.04,0.05,modH-0.04),snowMat);cap.position.set(cc.x,off+0.03,cc.z);cap.castShadow=true;cap.visible=false;g.add(cap);snowCaps.push(cap);}
-    /* AMORTIGUADORES desde la FUENTE ÚNICA (seguidor.js): pie FIJO al poste (a), otro extremo en la viga (b, gira con 'g') => se alarga/acorta. Mismo render (body+rod) y bucle de siempre. */
-    beam.dampers.forEach(function(d){ var pbx=d.b[0], pxx=pbx+xs;
-      var Bp=new THREE.Vector3(xs+d.a[0],2+d.a[1],zc+d.a[2]);   // pie FIJO en el rodamiento, justo BAJO la viga de torsión (tubo a y=2) -> amortiguador CORTO (no baja al suelo)
+    /* AMORTIGUADORES como en Cobertura 3D (terreno.html v5.44-47): LARGO — pie a 30 cm del SUELO, 30 cm
+       del poste hacia el motor y 13 cm transversal (luz clara con el poste), MÉNSULA fija poste→pie, y
+       CIMA en la ESQUINA INFERIOR de la viga vía OREJETA-CHAPA que gira con ella (no el corto antiguo). */
+    beam.dampers.forEach(function(d){ var sgn=d.b[0]>0?1:-1, dxl=d.b[0]-sgn*0.30, pxx=dxl+xs;
+      var Bp=new THREE.Vector3(xs+dxl,0.30,zc+0.13);
       var body=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,1,14),dark2);body.castShadow=true;sc.add(body);
       var rodd=new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,1,10),silver);sc.add(rodd);
+      var men=new THREE.Mesh(new THREE.CylinderGeometry(0.016,0.016,1,8),steel);sc.add(men);
+      (function(){var A=new THREE.Vector3(xs+d.b[0],0.30,zc),dv=Bp.clone().sub(A),ln=dv.length();
+        men.scale.y=ln;men.position.copy(A).addScaledVector(dv,0.5);men.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dv.normalize());})();
       var eB=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eB.position.copy(Bp);sc.add(eB);
-      var eT=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.06,10),steel);eT.position.set(pbx,d.b[1],d.b[2]);g.add(eT);
-      dampers.push({px:pxx,zc:zc,dy0:d.b[1],dz0:d.b[2],B:Bp,body:body,rod:rodd});
+      var ore=new THREE.Mesh(new THREE.BoxGeometry(0.10,0.173,0.02),steel);
+      ore.position.set(dxl,-0.0375,0.0425);ore.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),new THREE.Vector3(0,-0.075,0.085).normalize());g.add(ore);
+      dampers.push({px:pxx,zc:zc,dy0:-0.075,dz0:0.085,B:Bp,body:body,rod:rodd});
     });
     if(west){
       /* === CABLE DE MOTOR: nace de un CONECTOR en el motor (círculo azul, FIJO) y va EMBRIDADO por la viga
