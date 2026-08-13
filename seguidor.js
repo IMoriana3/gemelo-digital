@@ -1,8 +1,3 @@
-/* SINCRONIZADO 2026-08-12. Este fichero es COPIA EXACTA de cobertura-zigbee/seguidor.js.
- * Las dos copias llegaron a decir las dos VERSION 0.4.16 siendo distintas, que es peor que
- * llevar versiones distintas: el gemelo se quedo con el cristal proyectando sombra ademas del
- * marco, asi que cada fila salia con DOBLE sombra. Al tocar una, copiar la otra ENTERA y subir
- * la version en las dos; si divergen otra vez, el numero deja de servir para nada. */
 /* ============================================================================
  * seguidor.js — FUENTE ÚNICA del seguidor solar (cotas + piezas + materiales)
  * ----------------------------------------------------------------------------
@@ -40,13 +35,19 @@
     antHang: 0.50, antTip: 0.07,   // la antena CUELGA 50 cm vertical desde el conector; la antena en sí (gruesa) mide 7 cm
     medioFactor: 0.504    // el seguidor "Medio" mide ~la mitad
   };
-  D.pitch  = D.modW + D.gapMod;
-  D.strLen = D.modsPerStr * D.pitch;        // largo de UN ala
-  D.span   = 2 * D.strLen + D.gapDrive;     // tubo completo (largo)
-  D.mesaC  = D.gapDrive / 2 + D.strLen / 2; // centro de cada ala
+  D.pitch  = D.modW + D.gapMod;             // paso de MÓDULO a lo largo del tubo
+  // Fórmulas de proyecto (definición del cliente, 2026-07):
+  //   MESA = ancho_módulo × N + (N−1) × gap_módulos    ← N−1 gaps, no N
+  //   FILA = 2 × MESA + gap_motor
+  // Antes era `modsPerStr * pitch`, que mete un gap DE MÁS (el de detrás del
+  // último módulo): 12 mm por mesa, 24 mm por fila. El layout ya usaba N−1, así
+  // que el modelo y el layout discrepaban en el largo de la viga.
+  D.strLen = D.modsPerStr * D.modW + (D.modsPerStr - 1) * D.gapMod;   // MESA
+  D.span   = 2 * D.strLen + D.gapDrive;     // FILA = 2 mesas + gap motor
+  D.mesaC  = D.gapDrive / 2 + D.strLen / 2; // centro de cada mesa
   S.DIMS = D;
   // nº de módulos por ALA según la planta (El Burgo/Ayora = 28 → 64,7 m; San José = 32 → 74 m, su "medio" 2x32 ≈ 37 m). Recalcula los derivados.
-  S.setModsPerStr = function (n) { D.modsPerStr = n; D.strLen = n * D.pitch; D.span = 2 * D.strLen + D.gapDrive; D.mesaC = D.gapDrive / 2 + D.strLen / 2; };
+  S.setModsPerStr = function (n) { D.modsPerStr = n; D.strLen = n * D.modW + (n - 1) * D.gapMod; D.span = 2 * D.strLen + D.gapDrive; D.mesaC = D.gapDrive / 2 + D.strLen / 2; };
 
   /* ---------- MATERIALES (cada app crea los suyos con su THREE) ---------- */
   S.materials = function (THREE) {
@@ -169,7 +170,7 @@
         /* 'mass': 1 MESA por ala (textura de células) + correas repr. + canaleta + cajas */
         push('mesa', 'glass', true, true,
           function (TH){ var g = new TH.BoxGeometry(w.len, 0.05, D.modH);
-            var uv = g.attributes.uv, rep = w.len / D.modW;              // RETRATO: un módulo (tex 256×512) por cada modW a lo largo del ala — sin esto la textura se estiraba a toda el ala y los módulos salían "en modo paisaje"
+            var uv = g.attributes.uv, rep = Math.max(1, Math.round(w.len / D.pitch));   // un TILE por MÓDULO REAL (paso modW+gap): con w.len/modW la cuenta salía fraccionaria (p.ej. 30.51 con 30 módulos y gap 20 mm) y el último módulo aparecía CORTADO en el borde de la mesa
             for (var q = 0; q < uv.count; q++) uv.setX(q, uv.getX(q) * rep);
             return g; }, mT(THREE, wingC, D.off, 0));
         var NPUR = 8;                                       // correas representativas por ala
@@ -336,6 +337,6 @@
     return order.map(function (k){ return byType[k]; });
   };
 
-  S.VERSION = '0.4.17';
+  S.VERSION = '0.4.19';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);
