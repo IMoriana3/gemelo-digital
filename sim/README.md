@@ -16,7 +16,7 @@ De más a menos prioritaria. La regla que gana es la que fija el ángulo objetiv
 
 | # | Regla | Qué la dispara | Dónde se ve |
 |---|---|---|---|
-| 0 | **Seta de emergencia** | pulsador local o seta del armario de la NCU | 30002.4 · NCU 30100.13 · motor inhibido |
+| — | **Seta de emergencia** | pulsador local, seta del armario o cable cortado | no decide el objetivo: **corta el motor**. 30002.4 · NCU 30100.13 · 30006.11 |
 | 1 | **SP1 viento** | nivel de viento de cualquier HSU o `force_sp_1` al grupo | 30001 bits 15:13 = 1 |
 | 2 | **SP3 nieve** | alarma de nieve o `force_sp_3` | 30001 bits 15:13 = 3 |
 | 3 | **SP4 limpieza** | interruptor de limpieza del grupo (NCU 30100 bits 12:3) o `force_sp_4` | 30001 bits 15:13 = 4 |
@@ -26,6 +26,44 @@ De más a menos prioritaria. La regla que gana es la que fija el ángulo objetiv
 | 7 | **Auto** | seguimiento solar con backtracking; de noche, posición nocturna | 30001 bits 9:8 = 2, bit 0 = backtracking |
 
 El viento manda sobre manual, que es como se comporta el equipo real. El abanderamiento sigue la estrategia canónica **B2**: parcial a partir de 40 km/h (±30° mínimo, cara al sol), total a partir de 60 km/h (±55°), y **una hora de histéresis** antes de desabanderar — el `DESTOW_HOLD_H` canónico, que tampoco se escribe aquí.
+
+## Las dos entradas físicas
+
+Las entradas que mandan sobre el seguidor no se parecen en nada, y modelarlas igual era lo que impedía representar los fallos que más se ven en planta.
+
+### Inclinómetro — entrada analógica
+
+El TCU **no sabe dónde está la mesa**: sabe lo que mide. La simulación mantiene las dos cosas por separado:
+
+```
+anguloReal    la mesa. Solo la sabe el simulador (y el operario con el nivel)
+angulo        = real + desajuste de montaje − offset(41058) + deriva térmica + ruido,
+              cuantizado a 34,7 pulsos/° y filtrado
+```
+
+**El lazo se cierra sobre la medida, y los registros publican la medida.** De ahí sale el defecto que no se ve en pantalla: pon 3° de desajuste sin compensar en 41058 y el TCU publicará que está clavado en su objetivo mientras la mesa está 3° torcida — con el SCADA en verde y la producción sin aparecer. Es justo lo que persigue el ensayo **D.1.1** del Anexo 4 con instrumento externo, y por eso ese ensayo necesita instrumento externo.
+
+La cuantización sale del propio mapa: `41037/41038` dan ±1910 pulsos para ±55°. Y los **deadbands también están en pulsos**: `41060/41061` = 45 (1,3°) y `41063` = 90 (2,6°) cuando hay alarma de baja capacidad — el propio firmware engorda el lazo cuando va justo de batería.
+
+### Seta — entrada binaria
+
+No es una regla de la jerarquía: es una **línea de contacto que corta la alimentación del puente en H**. Modelada como tal:
+
+- **Antirrebote**: un pulso de 20 ms no dispara nada.
+- **Normalmente cerrado**: un cable cortado se lee como pulsada. Un lazo de seguridad que fallara al revés no sería un lazo de seguridad.
+- **Enclavada**: soltarla **no** rearma el motor. Hay que limpiar la alarma con `40007` bit 13 — el botón «LIMPIAR ALARMAS» de la toolbox. Y como la seta del armario alcanza a toda la planta, hay que limpiar la flota entera, no el equipo que estés mirando.
+- **El algoritmo sigue calculando por debajo**: la consigna se mueve con el sol y `30110` (objetivo − real) se va abriendo. Eso es lo que ve el operario, y con la seta modelada como una decisión no pasaba.
+
+### El eje: la avería es física, la alarma se deduce
+
+Dos averías distintas que el equipo distingue por caminos distintos:
+
+| Avería | Qué pasa | Cómo se entera el TCU |
+|---|---|---|
+| **Eje calado** | no gira y el motor pega corriente de calado | salta la **sobrecorriente software** (`41040`, 7000 mA) casi al instante → `30003.5` |
+| **Eje duro** | gira, pero arrastrándose, sin llegar al disparo | por la vía lenta: ventana de `41039` (5 s), `41065` reintentos (3) → **eje bloqueado** `30003.8` |
+
+Ninguna de las dos se declara: el firmware simulado las **deduce** comparando lo que manda mover con lo que el inclinómetro dice que se ha movido. Escribir bien esa comparación tiene su miga — hacerla contra la velocidad máxima en vez de contra el paso mandado hace que cualquier corrección pequeña se diagnostique como eje bloqueado.
 
 ## Alimentación y gestión de batería
 
@@ -85,7 +123,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `planta.js` | el motor: física, jerarquía y generación de la imagen de registros. Sin DOM — se ejecuta igual en Node |
 | `modbus-map.js` | **generado**, no se toca a mano: 515 direcciones del mapa canónico |
 | `fisica.js` | **generado**, no se toca a mano: perfiles, constantes medidas, políticas y curvas de carga |
-| `prueba.mjs` | prueba de humo: 76 comprobaciones sobre un día de planta |
+| `prueba.mjs` | prueba de humo: 108 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
 | `../tools/extrae_fisica.mjs` | regenera `fisica.js` desde SolarGPT y `bateria.html`, contrastando las fuentes |

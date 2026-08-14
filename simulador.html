@@ -281,11 +281,28 @@
       </div>
 
       <div class="grp">
+        <h3>Inclinómetro del TCU seleccionado</h3>
+        <div class="note" style="margin-top:0">Entrada <b>analógica</b>: el TCU no sabe dónde está la mesa, sabe lo que mide.</div>
+        <div class="fld"><label>Desajuste de montaje (real) <span class="rv" id="desajV">0,0°</span></label>
+          <input type="range" id="desaj" min="-8" max="8" step="0.1" value="0"></div>
+        <div class="fld"><label>Offset configurado · 41058 <span class="rv" id="offsetV">0,0°</span></label>
+          <input type="range" id="offset" min="-8" max="8" step="0.1" value="0"></div>
+        <div class="fld"><label>Ruido del sensor <span class="rv" id="ruidoV">0,04° RMS</span></label>
+          <input type="range" id="ruido" min="0" max="50" value="4"></div>
+        <label class="sw"><input type="checkbox" id="avAccel"><span>Acelerómetro averiado (30004.5)</span></label>
+        <div class="note" id="mentiraNota"></div>
+      </div>
+
+      <div class="grp">
         <h3>Averías del TCU seleccionado</h3>
         <div class="note" style="margin-top:0">Actúan sobre <b id="selNota">TCU 1</b>.</div>
-        <label class="sw"><input type="checkbox" id="avEje"><span>Eje bloqueado</span></label>
+        <label class="sw"><input type="checkbox" id="avAtasco"><span>Eje calado (rotor bloqueado)</span></label>
+        <label class="sw"><input type="checkbox" id="avDuro"><span>Eje duro (fricción alta)</span></label>
         <label class="sw"><input type="checkbox" id="avOff"><span>Sin comunicación (Zigbee)</span></label>
         <label class="sw"><input type="checkbox" id="avSeta"><span>Seta local pulsada</span></label>
+        <label class="sw"><input type="checkbox" id="avCable"><span>Cable de la seta cortado (lazo NC)</span></label>
+        <button class="btn sec" id="btnLimpiar">🔓 Limpiar alarmas · 40007.13</button>
+        <div class="note">La seta va <b>enclavada</b>: soltarla no rearma el motor. Y como la del armario alcanza a toda la planta, esto limpia <b>la flota entera</b>, igual que la toolbox por rango.</div>
         <div class="fld"><label>SoC forzado <span class="rv" id="socV">—</span></label>
           <input type="range" id="socSet" min="0" max="100" value="80"></div>
         <div class="fld"><label>Consigna manual <span class="rv" id="manV">0°</span></label>
@@ -566,7 +583,7 @@ function pintaFlota() {
     h += '<div class="mesa ' + s + (t.id === sel ? ' sel' : '') + '" data-id="' + t.id + '">' +
       '<div class="id">' + (t.repetidor ? 'R' : '#') + t.id + '<span class="pip"></span></div>' +
       '<div class="g">G' + t.grupo + ' · ' + t.modoTxt() + ' · ' + num(t.soc, 0) + '%</div>' +
-      '<div class="ang"><em></em><i style="transform:rotate(' + (-t.angulo).toFixed(1) + 'deg)"></i></div>' +
+      '<div class="ang"><em></em><i style="transform:rotate(' + (-t.anguloReal).toFixed(1) + 'deg)"></i></div>' +
       '<div class="st">' + t.estadoTxt() + '</div></div>';
   }
   $('flota').innerHTML = h;
@@ -806,7 +823,12 @@ function pintaDetalle() {
     chip((t.repetidor ? 'Repetidor ' : 'TCU ') + t.id, t.salud().toUpperCase(),
       t.salud() === 'ok' ? 'ok' : (t.salud() === 'alarma' ? 'bad' : 'warn'), 'grupo ' + t.grupo) +
     chip('Modo', t.modoTxt(), '', 'criterio: ' + SIM.CRIT_TXT[t.criterio]) +
-    chip('Inclinación', num(t.angulo, 1) + '°', 'blue', 'objetivo ' + num(t.objetivo, 1) + '°') +
+    chip('Mide el TCU', num(t.angulo, 2) + '°', 'blue', 'objetivo ' + num(t.objetivo, 1) + '°') +
+    chip('Está la mesa', num(t.anguloReal, 2) + '°',
+      Math.abs(t.anguloReal - t.angulo) > 1 ? 'bad' : '',
+      Math.abs(t.anguloReal - t.angulo) > 0.5
+        ? 'MIENTE ' + num(t.angulo - t.anguloReal, 2) + '°'
+        : 'medida fiel') +
     chip('Desviación', num(t.desviacion(), 2) + '°', t.desviacion() > 5 ? 'warn' : 'ok', t.moviendo ? 'moviendo' : 'parado') +
     chip('SoC', num(t.soc, 1) + ' %', t.soc < 25 ? 'bad' : (t.soc < 50 ? 'warn' : 'ok'), 'SoH ' + num(t.soh, 0) + ' %') +
     chip('Batería', num(t.vBat, 2) + ' V', '', num(t.iBat, 0) + ' mA · ' + num(t.tBat, 1) + ' °C') +
@@ -814,8 +836,18 @@ function pintaDetalle() {
       num(t.vPanel / 1000, 1) + ' V', t.sinAlimentacion ? 'bad' : '', num(t.iPanel, 0) + ' mA') +
     chip('Motor', num(t.iMotor, 0) + ' mA', t.moviendo ? 'blue' : '', 'pico ' + num(t.iMotorPico, 0) + ' mA');
 
+  var err = t.angulo - t.anguloReal;
+  $('mentiraNota').innerHTML = Math.abs(err) > 0.5
+    ? '⚠ El TCU está publicando <b>' + num(t.angulo, 2) + '°</b> con la mesa a <b>' + num(t.anguloReal, 2) +
+      '°</b>. El SCADA no puede ver esto: es el fallo que persigue el ensayo D.1.1 con instrumento externo.'
+    : 'Con el desajuste compensado en 41058, lo que publica y donde está coinciden.';
+
   var reglas = [
-    ['0 · Seta de emergencia', e.seta, t.criterio === SIM.CRIT.INHIBIDO && e.seta, 'motor inhibido'],
+    /* la seta ya no decide el objetivo: corta el motor. Por eso nunca sale en verde
+       —no gana la decisión— pero sí en ámbar, y con el motor marcado abajo. */
+    ['0 · Seta / motor (entrada de hardware)', !t.motorHabilitado, false,
+      t.seta ? 'SETA pulsada · motor cortado'
+             : (t.alarmaMotorEnclavada ? 'alarma enclavada · limpiar con 40007.13' : 'motor habilitado')],
     ['1 · SP1 viento', t.stow > 0 || e.forzado === 1, t.sp === 1, t.stow === 2 ? 'total ±55°' : (t.stow === 1 ? 'parcial ≥30°' : (e.forzado === 1 ? 'forzado' : '—'))],
     ['2 · SP3 nieve', e.nieve || e.forzado === 3, t.sp === 3, e.nieve ? 'alarma de nieve' : (e.forzado === 3 ? 'forzado' : '—')],
     ['3 · SP4 limpieza', e.limpieza || e.forzado === 4, t.sp === 4, e.limpieza ? 'interruptor del grupo ' + t.grupo : (e.forzado === 4 ? 'forzado' : '—')],
@@ -840,6 +872,12 @@ function pintaDetalle() {
     kv('Sol', t.solar.dia ? ('elev. ' + num(90 - t.solar.zen, 1) + '° · az. ' + num(t.solar.az, 1) + '°') : 'bajo el horizonte') +
     kv('True tracking', num(t.solar.real, 2) + '°') +
     kv('Backtracking calculado', num(t.solar.bt, 2) + '°') +
+    kv('Ángulo real de la mesa', num(t.anguloReal, 3) + '°') +
+    kv('Medida del inclinómetro', num(t.angulo, 3) + '° · cruda ' + num(t.sensor.crudo, 3) + '°') +
+    kv('Error de la medida', num(t.angulo - t.anguloReal, 3) + '°') +
+    kv('Resolución', num(t.sensor.pulsosGrado, 1) + ' pulsos/° (' + num(1 / t.sensor.pulsosGrado, 3) + '°)') +
+    kv('Motor', t.motorHabilitado ? 'habilitado' : 'CORTADO' +
+      (t.seta ? ' · seta pulsada' : (t.alarmaMotorEnclavada ? ' · alarma enclavada' : ''))) +
     kv('Alimentación', TIPO_TXT[t.perfil.tipo]) +
     kv('Perfil', t.perfil.n) +
     kv('Capacidad', t.ah ? num(t.ah, 1) + ' Ah (' + num(t.perfil.wh, 1) + ' Wh)' : 'sin batería') +
@@ -995,11 +1033,32 @@ $('nGrup').oninput = function () { $('nGrupV').textContent = this.value; };
 function sincronizaAverias() {
   var t = tcuSel();
   $('selNota').textContent = (t.repetidor ? 'Repetidor ' : 'TCU ') + t.id;
-  $('avEje').checked = t.ejeBloqueado; $('avOff').checked = !t.online; $('avSeta').checked = t.setaLocal;
+  $('avAtasco').checked = t.ejeAtascado; $('avDuro').checked = t.ejeDuro;
+  $('avOff').checked = !t.online; $('avSeta').checked = t.setaLocal;
+  $('avCable').checked = t.cableSetaCortado; $('avAccel').checked = !t.sensor.ok;
+  $('desaj').value = t.sensor.desajuste; $('desajV').textContent = num(t.sensor.desajuste, 1) + '°';
+  $('offset').value = t.sensor.offsetCfg; $('offsetV').textContent = num(t.sensor.offsetCfg, 1) + '°';
+  $('ruido').value = Math.round(t.sensor.ruidoRms * 100);
+  $('ruidoV').textContent = num(t.sensor.ruidoRms, 2) + '° RMS';
   $('socSet').value = Math.round(t.soc); $('socV').textContent = num(t.soc, 0) + ' %';
   $('manSet').value = Math.round(t.manual); $('manV').textContent = num(t.manual, 0) + '°';
 }
-$('avEje').onchange = function () { tcuSel().ejeBloqueado = this.checked; toca(); };
+$('avAtasco').onchange = function () { tcuSel().ejeAtascado = this.checked; toca(); };
+$('avDuro').onchange = function () { tcuSel().ejeDuro = this.checked; toca(); };
+$('avCable').onchange = function () { tcuSel().cableSetaCortado = this.checked; toca(); };
+$('avAccel').onchange = function () { tcuSel().sensor.ok = !this.checked; toca(); };
+$('btnLimpiar').onclick = function () { P.tcus.forEach(function (t) { t.limpiaAlarmas(); }); toca(); };
+['desaj', 'offset', 'ruido'].forEach(function (id) {
+  $(id).oninput = function () {
+    var s = tcuSel().sensor;
+    s.desajuste = +$('desaj').value; s.offsetCfg = +$('offset').value;
+    s.ruidoRms = +$('ruido').value / 100;
+    $('desajV').textContent = num(s.desajuste, 1) + '°';
+    $('offsetV').textContent = num(s.offsetCfg, 1) + '°';
+    $('ruidoV').textContent = num(s.ruidoRms, 2) + '° RMS';
+    toca();
+  };
+});
 $('avOff').onchange = function () { tcuSel().online = !this.checked; toca(); };
 $('avSeta').onchange = function () { tcuSel().setaLocal = this.checked; toca(); };
 $('socSet').oninput = function () { tcuSel().soc = +this.value; $('socV').textContent = this.value + ' %'; toca(); };

@@ -85,6 +85,14 @@ var K = {
   /* ---- propio del simulador: no está en el canon porque el estudio de batería no
      lo necesita, pero un gemelo que sirve registros Modbus sí ---- */
   SNOW_ALARM_M: 0.03,           /* 3 cm de nieve → alarma de nieve */
+  /* ---- entradas físicas del TCU (ver el bloque de más abajo) ---- */
+  PULSOS_TOPE: 1910,            /* 41037/41038: ±1910 pulsos = ±55° → 34,7 pulsos/° */
+  DB_PULSOS: 45,                /* 41060/41061: deadband normal, en pulsos */
+  DB_PULSOS_BAJA: 90,           /* 41063: deadband con alarma de baja capacidad */
+  ANTIRREBOTE_S: 0.05,          /* la línea de la seta tiene que estar estable 50 ms */
+  EVAL_MOTOR_S: 5,              /* 41039: ventana para juzgar si el motor se mueve */
+  REINTENTOS_MOTOR: 3,          /* 41065: reintentos antes de enclavar el eje bloqueado */
+  VEL_SIN_CARGA: 0.2,           /* 41067: velocidad del motor en vacío (°/s) */
   V_MIN: 24.0, V_MAX: 27.2,     /* curva de tensión 8S LiFePO4, para el registro 30094 */
   V_ABS: 27.0,                  /* tensión de absorción */
   T_CHG_MIN: 0,                 /* bajo 0 °C no se carga (salvo versión calefactada) */
@@ -273,6 +281,35 @@ HSU.prototype.salud = function () {
   return 'ok';
 };
 
+/* ═══════════════════ ENTRADAS FÍSICAS DEL TCU ═══════════════════
+   Las dos entradas que de verdad mandan sobre el seguidor no se parecen en nada, y
+   modelarlas igual es lo que hacía que este simulador no supiera representar los
+   fallos que más se ven en planta:
+
+   · El INCLINÓMETRO es ANALÓGICO. No devuelve «el ángulo»: devuelve una medida, con
+     su ruido, su deriva con la temperatura, su cuantización y su desajuste de cero.
+     El TCU cierra el lazo y publica los registros con ESA medida, no con la posición
+     real de la mesa. De ahí sale el defecto clásico: un TCU que dice 0° con la mesa
+     a 3°, el SCADA viéndolo todo verde y la producción sin aparecer — justo lo que
+     persigue el ensayo D.1.1 del Anexo 4. El offset con el que se compensa vive en
+     41058 (f32 rad, rango ±π/4) y la cuantización sale de 41037/41038: ±1910 pulsos
+     para ±55°, o sea 34,7 pulsos por grado.
+
+   · La SETA es BINARIA. Es una línea de contacto, no una decisión de software: corta
+     la alimentación del puente en H. Tiene antirrebote, va enclavada (soltarla no
+     basta: hay que limpiar la alarma con 40007 bit 13, que es lo que hace el botón
+     «LIMPIAR ALARMAS» de la toolbox) y se cablea en NORMALMENTE CERRADO, de modo que
+     un cable cortado se lee como pulsada. Un lazo de seguridad que fallara al revés
+     no sería un lazo de seguridad.
+
+   La consecuencia de fondo: mientras la seta está pulsada el algoritmo SIGUE
+   calculando su objetivo, así que 30110 (diferencia objetivo − real) crece y crece.
+   Eso es exactamente lo que ve el operario, y con la seta modelada como una regla de
+   la jerarquía no pasaba.                                                          */
+
+/* Ruido ~gaussiano barato (suma de tres uniformes), en grados RMS. */
+function ruidoGauss(rnd, rms) { return (rnd.next() + rnd.next() + rnd.next() - 1.5) * 1.63 * rms; }
+
 /* ═══════════════════ TCU — unidad de control del seguidor ═══════════════════ */
 function TCU(id, planta, opts) {
   opts = opts || {};
@@ -287,8 +324,37 @@ function TCU(id, planta, opts) {
   this.acOk = true;
 
   /* un repetidor nace plano y ahí se queda: no tiene seguidor ni motor que mover */
-  this.angulo = this.repetidor ? 0 : K.NIGHT_POS;
-  this.objetivo = this.angulo;
+  this.anguloReal = this.repetidor ? 0 : K.NIGHT_POS;   /* la MESA: solo lo sabe el simulador */
+  this.angulo = this.anguloReal;                        /* lo que MIDE el TCU y publica */
+  this.objetivo = this.anguloReal;
+
+  /* --- inclinómetro: entrada analógica --- */
+  this.sensor = {
+    desajuste: 0,                    /* error de montaje REAL del sensor (°) */
+    offsetCfg: 0,                    /* 41058: lo que el instalador cree que hay que compensar */
+    ruidoRms: 0.04,                  /* ruido del MEMS (° RMS) */
+    deriva: 0.004,                   /* deriva térmica del cero (°/°C sobre 25 °C) */
+    pulsosGrado: K.PULSOS_TOPE / K.AXIS_MAX,
+    tau: 3,                          /* constante del filtro de la medida (s) */
+    ok: true,                        /* acelerómetro sano (30004.5) */
+    crudo: this.anguloReal, filtrado: this.anguloReal
+  };
+  /* --- seta: entrada binaria --- */
+  this.setaLocal = false;            /* el pulsador de la propia TCU */
+  this.cableSetaCortado = false;     /* lazo NC abierto: se lee como pulsada */
+  this.setaBruta = false; this.setaDeb = 0; this.seta = false;
+  this.alarmaMotorEnclavada = false; /* solo la limpia 40007 bit 13 */
+  this.motorHabilitado = true;
+  /* --- eje: la avería es FÍSICA; el bit de alarma lo DEDUCE el firmware. Y hay dos
+     averías distintas, que el equipo distingue por caminos distintos:
+       · ATASCADO (rotor calado): no gira nada y el motor pega un pico de corriente,
+         así que salta la sobrecorriente software (30003.5) casi al instante.
+       · DURO (fricción alta, hielo, rodamiento seco): gira, pero más despacio de lo
+         mandado y sin llegar al disparo. Eso es lo que caza la detección lenta:
+         41039 de ventana, 41065 reintentos, y entonces eje bloqueado (30003.8). --- */
+  this.ejeAtascado = false;
+  this.ejeDuro = false;
+  this.tSinMoverse = 0; this.reintentos = 0;
   this.modo = MODO.AUTO; this.manual = 0;
   this.sp = SP.NINGUNA; this.fuenteSp = FUENTE_SP.NINGUNA; this.criterio = CRIT.NOCHE;
   this.bt = false; this.moviendo = 0;      /* −1 este · 0 parado · +1 oeste */
@@ -309,7 +375,8 @@ function TCU(id, planta, opts) {
   /* nace hablando: si el último contacto arrancara en 0, el SCADA vería una planta
      entera con 56 años de antigüedad de comunicaciones */
   this.online = true; this.ultimoContacto = planta.t.epoch;
-  this.ejeBloqueado = false; this.sobrecorriente = false; this.setaLocal = false;
+  this.ejeBloqueado = false;               /* la ALARMA (30003.8), deducida — no la avería */
+  this.sobrecorriente = false;
   this.fueraRango = false; this.limiteOeste = false; this.limiteEste = false;
   this.velocidadBaja = false; this.relajacion = false;
 
@@ -326,7 +393,7 @@ function TCU(id, planta, opts) {
 TCU.prototype.entradas = function () {
   var n = this.p.ncu, g = this.grupo;
   return {
-    seta: n.seta || this.setaLocal,
+    seta: this.seta,                       /* ya filtrada por el antirrebote */
     nivelViento: n.nivelVientoGlobal,
     vientoInvertido: n.vientoInvertido,
     nieve: n.alarmaNieve,
@@ -334,6 +401,51 @@ TCU.prototype.entradas = function () {
     forzado: n.forzadoDe(g),               /* 0 o el número de safe position forzada */
     comNcu: this.online
   };
+};
+
+/* ---- ENTRADA ANALÓGICA: el inclinómetro ----
+   El TCU no sabe dónde está la mesa: sabe lo que le dice el sensor. Y lo que le dice
+   el sensor es la posición real MÁS el desajuste de montaje, MENOS el offset con el
+   que se le ha calibrado (41058), más la deriva térmica del cero y su ruido, todo
+   cuantizado a pulsos y pasado por el filtro. Sobre esa medida se cierra el lazo y
+   se rellenan los registros. */
+TCU.prototype.mide = function (dt) {
+  var s = this.sensor;
+  if (!s.ok) return;                    /* acelerómetro muerto: se queda con lo último */
+  var cero = s.desajuste - s.offsetCfg + s.deriva * (this.tPcb - 25);
+  var crudo = this.anguloReal + cero + ruidoGauss(this.rnd, s.ruidoRms);
+  s.crudo = Math.round(crudo * s.pulsosGrado) / s.pulsosGrado;   /* resolución del sensor */
+  s.filtrado += (s.crudo - s.filtrado) * Math.min(1, dt / s.tau);
+  this.angulo = s.filtrado;
+};
+
+/* ---- ENTRADA BINARIA: la seta ----
+   Línea de contacto en normalmente cerrado: pulsador local, seta del armario de la
+   NCU o cable cortado, las tres la activan. Con antirrebote —una línea que rebota no
+   debe disparar— y ENCLAVADA: al soltarla la alarma sigue puesta hasta que alguien
+   la limpia con 40007 bit 13. */
+TCU.prototype.leeSeta = function (dt) {
+  var bruta = this.setaLocal || this.cableSetaCortado || this.p.ncu.seta;
+  if (bruta !== this.setaBruta) { this.setaBruta = bruta; this.setaDeb = 0; }
+  else if (this.setaDeb < K.ANTIRREBOTE_S) {
+    this.setaDeb += dt;
+    if (this.setaDeb >= K.ANTIRREBOTE_S) this.seta = bruta;
+  }
+  if (this.seta) this.alarmaMotorEnclavada = true;
+  /* el puente en H queda sin alimentación mientras la seta esté pulsada o la alarma
+     de motor siga enclavada. Ojo: esto NO es una decisión del algoritmo. */
+  this.motorHabilitado = !this.seta && !this.alarmaMotorEnclavada;
+};
+
+/* 40007 bit 13 — «clear locked motor alarms». No limpia lo que sigue pasando: si la
+   seta está pulsada de verdad, se vuelve a enclavar en el mismo paso. */
+TCU.prototype.limpiaAlarmas = function () {
+  this.alarmaMotorEnclavada = false;
+  this.ejeBloqueado = false;
+  this.sobrecorriente = false;
+  this.velocidadBaja = false;
+  this.reintentos = 0; this.tSinMoverse = 0;
+  this.iMotorPico = 0;
 };
 
 /* ---- la jerarquía, en un solo sitio y en orden ---- */
@@ -365,12 +477,12 @@ TCU.prototype.decide = function (dt, ang) {
   var sSol = ang.dia ? (ang.sol.az < 0 ? -1 : 1) : 1;
   if (e.vientoInvertido) sSol = -sSol;
 
-  /* 0 — SETA: el motor queda inhibido, el seguidor se queda donde está */
-  if (e.seta) {
-    obj = this.angulo; crit = CRIT.INHIBIDO; inhibido = true;
+  /* La SETA ya no aparece aquí: no decide el objetivo, corta el motor. El algoritmo
+     sigue calculando adónde debería ir el seguidor —y por eso la diferencia de 30110
+     crece mientras está pulsada—, pero el puente en H está sin alimentación. */
 
   /* 1 — SP1 VIENTO */
-  } else if (this.stow > 0 || e.forzado === SP.VIENTO) {
+  if (this.stow > 0 || e.forzado === SP.VIENTO) {
     sp = SP.VIENTO;
     fuente = e.forzado === SP.VIENTO ? FUENTE_SP.NCU : FUENTE_SP.HSU;
     obj = (e.forzado === SP.VIENTO || this.stow === 2)
@@ -434,23 +546,54 @@ TCU.prototype.decide = function (dt, ang) {
    la medición de Factiun (Wh/° = K0 + K1·|θ|, con el ángulo MEDIO del movimiento y
    tope de 50 W) o el consumo SUNNER en mA medios × tiempo de giro. */
 TCU.prototype.mueve = function (dt, inhibido) {
+  /* el error se calcula contra lo que el TCU MIDE, no contra dónde está la mesa: si
+     el inclinómetro miente, el lazo persigue el objetivo equivocado y tan contento */
   var err = this.objetivo - this.angulo, E = this.p.cfg.estrategia;
-  var dead = this.p.cfg.deadband;
+  /* deadband en PULSOS, como el firmware: 45 normal (41060/41061) y 90 con alarma de
+     baja capacidad (41063) — el propio equipo engorda el lazo cuando va justo de
+     batería, que es la versión de fábrica del winter mode */
+  var pulsos = this.bajaCapacidad > 0 ? K.DB_PULSOS_BAJA : K.DB_PULSOS;
+  var dead = this.p.cfg.deadband != null ? this.p.cfg.deadband : pulsos / this.sensor.pulsosGrado;
   /* en seguimiento solo corrige si el error supera el deadband; en posición de
      seguridad va sin histéresis (la orden es de seguridad, no de precisión) */
   var urgente = (this.sp !== SP.NINGUNA) || this.criterio === CRIT.BATERIA;
-  if (inhibido || this.ejeBloqueado || (!urgente && Math.abs(err) < dead && this.moviendo === 0)) {
+  /* sin motor no hay movimiento: seta pulsada, alarma enclavada o modo que no manda */
+  if (!this.motorHabilitado || inhibido ||
+      (!urgente && Math.abs(err) < dead && this.moviendo === 0)) {
     this.moviendo = 0; this.iMotor = 0; this.vMotor = 0;
-    this.velocidadBaja = false;
+    this.tSinMoverse = 0;
     return 0;
   }
-  if (Math.abs(err) <= 0.02) { this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; return 0; }
-  var paso = Math.min(Math.abs(err), K.SLEW_DPS * dt), dir = signo(err);
-  var antes = this.angulo;
-  this.angulo = clamp(this.angulo + dir * paso, -K.AXIS_MAX, K.AXIS_MAX);
-  var mov = Math.abs(this.angulo - antes);
-  this.moviendo = mov > 1e-9 ? dir : 0;
-  var medio = (this.angulo + antes) / 2, dtH = dt / 3600, wh;
+  if (Math.abs(err) <= 0.02) { this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; this.tSinMoverse = 0; return 0; }
+
+  var dir = signo(err), antes = this.anguloReal;
+  var esperado = Math.min(Math.abs(err), K.SLEW_DPS * dt);   /* lo que se le MANDA girar */
+  /* EL EJE ATASCADO ES FÍSICO: el motor tira, consume, y la mesa no se mueve. El bit
+     de alarma no se pone aquí — lo deduce el firmware unas líneas más abajo. */
+  if (!this.ejeAtascado) {
+    var real = this.ejeDuro ? esperado * 0.2 : esperado;   /* el eje duro se arrastra */
+    this.anguloReal = clamp(this.anguloReal + dir * real, -K.AXIS_MAX, K.AXIS_MAX);
+  }
+  var mov = Math.abs(this.anguloReal - antes);
+  this.moviendo = dir;                    /* está MANDADO a moverse, se mueva o no */
+
+  /* --- diagnóstico del firmware: ¿se está moviendo lo que debería? (41039 / 41065) ---
+     La comparación es contra el paso MANDADO, no contra la velocidad máxima: si no,
+     cualquier corrección pequeña —que por definición mueve poco— se diagnosticaría
+     como eje bloqueado. Es justo el fallo que esconde un modelo sin sensor. */
+  if (esperado > 1e-3 && mov < esperado * 0.5) {
+    this.tSinMoverse += dt;
+    if (this.tSinMoverse >= K.EVAL_MOTOR_S) {
+      this.velocidadBaja = true;          /* 30003.14 «motor moves at a lower speed» */
+      this.tSinMoverse = 0;
+      if (++this.reintentos > K.REINTENTOS_MOTOR) {
+        this.ejeBloqueado = true;         /* 30003.8, y queda enclavada */
+        this.alarmaMotorEnclavada = true;
+      }
+    }
+  } else { this.tSinMoverse = 0; this.velocidadBaja = false; }
+
+  var medio = (this.anguloReal + antes) / 2, dtH = dt / 3600, wh;
   /* WINTER MODE (11.5b): el seguidor sigue yendo al mismo sitio, pero con un paso
      tan grueso que consume como si corrigiera 3 °/h en vez de 10 °/h. Se contabiliza
      igual que en el simulador de batería: sobre los grados EFECTIVOS, no sobre el
@@ -464,12 +607,18 @@ TCU.prototype.mueve = function (dt, inhibido) {
     /* consumo SUNNER: mA medios a 25,6 V durante el tiempo que tarda en girar */
     wh = (this.p.cfg.motorModel / 1000) * K.V_NOM * (efec / K.SLEW_DPS) / 3600;
   }
+  /* con el eje en apuros el motor no consume menos: consume MÁS. Calado, corriente de
+     calado y salta 41040; duro, corriente alta pero por debajo del disparo — que es
+     lo que obliga al firmware a darse cuenta por la vía lenta. */
+  if (this.ejeAtascado) wh = (this.p.cfg.iCalado / 1000) * this.vBat * dtH;
+  else if (this.ejeDuro) wh = (this.p.cfg.iDuro / 1000) * this.vBat * dtH;
+
   this.energiaMotorHoy += wh * 3600; this.energiaMotorTotal += wh * 3600;   /* J */
   this.vMotor = this.vBat * 1000;
   var w = dtH > 0 ? wh / dtH : 0;
   this.iMotor = this.vBat > 1 ? (w / this.vBat) * 1000 : 0;                 /* mA */
   if (this.iMotor > this.iMotorPico) this.iMotorPico = this.iMotor;
-  this.velocidadBaja = this.ejeBloqueado;
+  /* los finales de carrera los ve el TCU con SU medida, no con la mesa */
   this.limiteOeste = this.angulo >= K.AXIS_MAX - 0.01;
   this.limiteEste = this.angulo <= -K.AXIS_MAX + 0.01;
   return wh;
@@ -528,7 +677,8 @@ TCU.prototype.energia = function (dt, ang, whMotor) {
        de la fuente. El panel auxiliar escala con la irradiancia que le llega; el
        string es tan grande que el regulador satura en su tope en cuanto amanece
        del todo, y solo se queda corto con muy poca luz. */
-    poaChg = poaAt(this.repetidor ? 0 : this.angulo, ang.sol.el, ang.sol.az, bh, dhi, ghi);
+    /* la irradiancia la recoge la MESA, no lo que el TCU cree que mide */
+    poaChg = poaAt(this.repetidor ? 0 : this.anguloReal, ang.sol.el, ang.sol.az, bh, dhi, ghi);
     if (m.nieve >= 0.02) poaChg *= 0.05;         /* panel o módulos nevados */
     var frac = pf.tipo === 'string' ? Math.min(poaChg / 150, 1) : Math.min(poaChg / 1000, 1);
     pEntrada = pf.chgW * frac * K.ETA_CHG;
@@ -590,11 +740,22 @@ TCU.prototype.paso = function (dt) {
   }
   var ang = angulos(this.p.loc, this.p.t.dia, this.p.t.hora);
   this.solar = { real: ang.real, bt: ang.bt, zen: ang.sol.zen * R2D, az: ang.sol.az * R2D, dia: ang.dia };
+  /* el orden importa: primero se LEEN las entradas (medida analógica y línea binaria),
+     después se decide con lo leído, y solo entonces se actúa */
+  this.mide(dt);
+  this.leeSeta(dt);
   var inhibido = this.decide(dt, ang);
   var whMotor = this.mueve(dt, inhibido);
   this.energia(dt, ang, whMotor);
+  /* 30002.2: «tilt fuera de rango» compara la MEDIDA contra el límite SW más 5° */
   this.fueraRango = Math.abs(this.angulo) > K.AXIS_MAX + 5;
-  this.sobrecorriente = this.iMotor > this.p.cfg.iMotorMax;
+  /* la sobrecorriente ENCLAVA: si solo mirase la corriente instantánea, el bit se
+     borraría en el mismo paso en que el propio disparo corta el motor y la alarma no
+     llegaría ni al siguiente ciclo de lectura del SCADA */
+  if (this.iMotor > this.p.cfg.iMotorMax) {
+    this.sobrecorriente = true;
+    this.alarmaMotorEnclavada = true;
+  }
   if (this.online) this.ultimoContacto = this.p.t.epoch;
 };
 
@@ -605,6 +766,8 @@ TCU.prototype.alarmas = function () {
   var e = this.entradas(), conBat = this.ah > 0;
   return {
     seta: e.seta,
+    motorEnclavado: this.alarmaMotorEnclavada,
+    inclinometro: !this.sensor.ok,           /* 30004.5 «accelerometer is defective» */
     fueraRango: this.fueraRango,
     sinBateria: !conBat,                       /* 30002.10 «battery is not connected» */
     sinAlimentacion: !!this.sinAlimentacion,
@@ -629,7 +792,8 @@ TCU.prototype.systemOk = function () {
 TCU.prototype.salud = function () {
   if (!this.online || this.sinAlimentacion) return 'offline';
   var a = this.alarmas();
-  if (a.ejeBloqueado || a.sobrecorriente || a.socCritica || a.socL3 || a.seta || a.fueraRango) return 'alarma';
+  if (a.ejeBloqueado || a.sobrecorriente || a.socCritica || a.socL3 || a.seta || a.fueraRango ||
+      a.motorEnclavado || a.inclinometro) return 'alarma';
   if (!this.systemOk() || this.desviacion() > 5) return 'aviso';
   return 'ok';
 };
@@ -637,6 +801,8 @@ TCU.prototype.modoTxt = function () { return MODO_TXT[this.modo]; };
 TCU.prototype.estadoTxt = function () {
   if (this.sinAlimentacion) return 'sin alimentación';
   if (!this.online) return 'sin comunicación';
+  if (this.seta) return 'SETA pulsada';
+  if (this.alarmaMotorEnclavada) return 'motor enclavado';
   if (this.sp) return SP_TXT[this.sp];
   if (this.parked) return 'defensa por batería';
   return CRIT_TXT[this.criterio];
@@ -712,7 +878,9 @@ function Planta(cfg) {
     nRep: cfg.nRep || 1,
     grupos: cfg.grupos || 4,
     deadband: cfg.deadband != null ? cfg.deadband : K.HYST_DEG,
-    iMotorMax: cfg.iMotorMax || 4000,        /* mA de disparo de sobrecorriente */
+    iMotorMax: cfg.iMotorMax || 7000,        /* 41040: sobrecorriente por software (mA) */
+    iCalado: cfg.iCalado || 9000,            /* corriente de calado con el eje atascado (mA) */
+    iDuro: cfg.iDuro || 5000,                /* corriente con el eje duro: alta, pero sin disparar */
     perfil: cfg.perfil || F.perfilPorDefecto, /* alimentación y batería (SP · STRING · AC) */
     /* modelo de consumo del motor: 'factiun' (Wh/° medidos) o los mA medios de
        SUNNER a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
@@ -764,7 +932,11 @@ function Planta(cfg) {
      que la simulación tarda diez minutos en recuperarla. */
   var ang0 = angulos(this.loc, this.t.dia, this.t.hora);
   for (i = 0; i < this.tcus.length; i++) {
-    if (!this.tcus[i].repetidor) this.tcus[i].angulo = this.tcus[i].objetivo = ang0.sel;
+    if (!this.tcus[i].repetidor) {
+      var t0 = this.tcus[i];
+      t0.anguloReal = t0.angulo = t0.objetivo = ang0.sel;
+      t0.sensor.crudo = t0.sensor.filtrado = ang0.sel;
+    }
   }
   /* y un paso mínimo para que el estado derivado (sol, objetivo, alarmas) exista */
   this.paso(0.001);
@@ -849,17 +1021,20 @@ Planta.prototype.regsTCU = function (t) {
                     lento: [14, 14], driver: [15, 15] },
                   { sobre: a.sobrecorriente ? 1 : 0, eje: a.ejeBloqueado ? 1 : 0,
                     ncu: a.comNcu ? 1 : 0, lento: a.velocidadBaja ? 1 : 0 }));
-  pon(30004, 0);
+  pon(30004, bits({ flash: [2, 2], esp32: [3, 3], xbee: [4, 4], accel: [5, 5], rtc: [6, 6], mcu2: [7, 7] },
+                  { accel: a.inclinometro ? 1 : 0 }));
+  /* el bit 8 de 30005 es el resumen de 30004: «al menos un IC declarado defectuoso» */
   pon(30005, bits({ vmot_lo: [0, 0], vmot_hi: [1, 1], bus_lo: [2, 2], bus_hi: [3, 3],
                     pcb_lo: [4, 4], pcb_hi: [5, 5], ic: [8, 8] },
                   { vmot_lo: t.vBat < 22 ? 1 : 0, vmot_hi: t.vBat > 33 ? 1 : 0,
                     bus_lo: t.vBat < 22 ? 1 : 0, bus_hi: t.vBat > 33 ? 1 : 0,
-                    pcb_lo: t.tPcb < -30 ? 1 : 0, pcb_hi: t.tPcb > 70 ? 1 : 0 }));
+                    pcb_lo: t.tPcb < -30 ? 1 : 0, pcb_hi: t.tPcb > 70 ? 1 : 0,
+                    ic: R[30004] ? 1 : 0 }));
   pon(30006, bits({ oeste: [0, 0], este: [1, 1], socNo: [6, 6], calef: [9, 9],
                     relax: [10, 10], motor: [11, 11], ok: [15, 15] },
                   { oeste: t.limiteOeste ? 1 : 0, este: t.limiteEste ? 1 : 0,
                     socNo: t.bajaCapacidad >= 2 ? 1 : 0, calef: t.calefactor ? 1 : 0,
-                    relax: t.relajacion ? 1 : 0, motor: (a.seta || t.ejeBloqueado) ? 1 : 0,
+                    relax: t.relajacion ? 1 : 0, motor: t.motorHabilitado ? 0 : 1,
                     ok: t.systemOk() ? 1 : 0 }));
   pon(30010, s16(t.moviendo * K.SLEW_DPS * 1000));            /* °/s ×1000 */
   pon(30011, u16(Math.abs(t.iMotor)));
@@ -923,6 +1098,19 @@ Planta.prototype.regsTCU = function (t) {
     pon32(41042 + k * 2, f32((sp[k] || 0) * D2R, wo));       /* 41044, 41046, … en rad */
   }
   pon(41081, u16((K.SOC_L3 << 8) | K.SOC_L2));
+
+  /* configuración de las ENTRADAS y del motor: ahora estos registros no son adorno,
+     son los que el simulador está usando de verdad para medir y para moverse */
+  pon32(41058, f32(t.sensor.offsetCfg * D2R, wo));        /* offset del inclinómetro */
+  pon(41037, s16(K.PULSOS_TOPE));                         /* límite oeste (pulsos) */
+  pon(41038, s16(-K.PULSOS_TOPE));                        /* límite este (pulsos) */
+  pon(41039, u16(K.EVAL_MOTOR_S * 1000));                 /* ventana de evaluación (ms) */
+  pon(41040, u16(this.cfg.iMotorMax));                    /* sobrecorriente software (mA) */
+  pon32(41042, f32(K.NIGHT_POS * D2R, wo));               /* posición nocturna */
+  pon(41060, u16(K.DB_PULSOS)); pon(41061, u16(K.DB_PULSOS));
+  pon(41062, u16(K.DB_PULSOS_BAJA)); pon(41063, u16(K.DB_PULSOS_BAJA));
+  pon(41065, u16(K.REINTENTOS_MOTOR));
+  pon(41067, u16(K.VEL_SIN_CARGA * 1000));                /* velocidad en vacío (m°/s) */
   return R;
 };
 
@@ -997,7 +1185,7 @@ Planta.prototype.regsNCU = function () {
                       lento: al.velocidadBaja ? 1 : 0 });
     R[b + 4] = bits({ oeste: [0, 0], este: [1, 1], motor: [11, 11], ok: [15, 15] },
                     { oeste: c.limiteOeste ? 1 : 0, este: c.limiteEste ? 1 : 0,
-                      motor: (al.seta || c.ejeBloqueado) ? 1 : 0, ok: c.systemOk() ? 1 : 0 });
+                      motor: c.motorHabilitado ? 0 : 1, ok: c.systemOk() ? 1 : 0 });
     R[b + 5] = u16(c.vPanel);
     par = f32(c.angulo * D2R, wo); R[b + 6] = par[0]; R[b + 7] = par[1];
     R[b + 8] = u16(Math.abs(c.iMotor)); R[b + 9] = u16(c.iMotorPico);

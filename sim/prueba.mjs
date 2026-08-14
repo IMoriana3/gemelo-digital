@@ -82,15 +82,120 @@ for (let i = 0; i < 10 * 60; i += 30) P.paso(30);
 ok(t.sp === SIM.SP.NINGUNA, 'pasado el hold, desabanderado', t.estadoTxt());
 t.modo = SIM.MODO.AUTO;
 
-console.log('\n── seta de emergencia ──');
-P.ncu.seta = true; const antes = t.angulo;
+console.log('\n── seta: entrada BINARIA, no una decisión ──');
+P.ncu.seta = true;
+P.paso(0.02);
+ok(!t.seta, 'antirrebote: un pulso de 20 ms no la dispara');
 for (let i = 0; i < 15 * 60; i += 5) P.paso(5);
-ok(Math.abs(t.angulo - antes) < 0.05, 'con la seta pulsada el seguidor no se mueve');
+const antes = t.anguloReal, objSeta = t.objetivo;
+for (let i = 0; i < 20 * 60; i += 5) P.paso(5);
+ok(Math.abs(t.anguloReal - antes) < 0.01, 'con la seta pulsada la mesa no se mueve');
+ok(!t.motorHabilitado, 'el puente en H queda sin alimentación');
+ok(bitde(P.regsTCU(t)[30006], 11, 11) === 1, 'bit de motor bloqueado en 30006.11');
+/* lo que distingue una entrada de hardware de una regla de la jerarquía: el
+   algoritmo NO se para, sigue calculando objetivo y la desviación crece */
+ok(Math.abs(t.objetivo - objSeta) > 0.5, 'el algoritmo sigue calculando objetivo por debajo',
+   'objetivo ' + t.objetivo.toFixed(1) + '° contra ' + t.anguloReal.toFixed(1) + '° reales');
+ok(Math.abs(s16de(P.regsTCU(t)[30110]) / 10) > 1, 'y 30110 (objetivo − real) se va abriendo',
+   (s16de(P.regsTCU(t)[30110]) / 10).toFixed(1) + '°');
 ok(bitde(P.regsTCU(t)[30002], 4, 4) === 1, 'bit de seta en alarmas 1 (30002.4)');
 ok(bitde(P.regsTCU(t)[30006], 15, 15) === 0, 'system_ok cae a 0');
 ok(bitde(P.regsNCU()[30100], 13, 13) === 1, 'seta también en la entrada digital de la NCU');
 ok(t.salud() === 'alarma', 'salud del TCU = alarma');
+
+console.log('\n── … y va ENCLAVADA ──');
 P.ncu.seta = false;
+for (let i = 0; i < 5 * 60; i += 5) P.paso(5);
+ok(!t.motorHabilitado, 'soltar la seta NO rearma el motor: la alarma sigue enclavada');
+ok(t.alarmaMotorEnclavada, 'y se ve en el estado del equipo', t.estadoTxt());
+t.limpiaAlarmas();                                  /* 40007 bit 13, como la toolbox */
+P.paso(5);
+ok(t.motorHabilitado, 'solo lo rearma limpiar alarmas (40007 bit 13)');
+P.ncu.seta = true; for (let i = 0; i < 60; i += 5) P.paso(5);
+t.limpiaAlarmas(); P.paso(5);
+ok(!t.motorHabilitado, 'y limpiar con la seta AÚN pulsada no sirve de nada');
+P.ncu.seta = false; for (let i = 0; i < 60; i += 5) P.paso(5);
+t.limpiaAlarmas();
+for (let i = 0; i < 30 * 60; i += 5) P.paso(5);
+ok(t.motorHabilitado && Math.abs(t.objetivo - t.anguloReal) < 3, 'rearmado, recupera su posición');
+
+/* la seta del armario enclava la flota ENTERA, no solo el equipo que se mira: por
+   eso la toolbox limpia alarmas por rango y no de una en una */
+ok(P.seguidores().filter(x => x.alarmaMotorEnclavada).length === P.seguidores().length - 1,
+   'la seta del armario dejó enclavada a toda la flota, no solo a la TCU 1');
+P.tcus.forEach(x => x.limpiaAlarmas());
+for (let i = 0; i < 20 * 60; i += 10) P.paso(10);
+
+console.log('\n── inclinómetro: entrada ANALÓGICA ──');
+const ti = P.tcu(3);
+ok(Math.abs(ti.angulo - ti.anguloReal) < 0.3 && ti.angulo !== ti.anguloReal,
+   'lo que mide no es exactamente dónde está la mesa (ruido y cuantización)',
+   'real ' + ti.anguloReal.toFixed(3) + '° · medido ' + ti.angulo.toFixed(3) + '°');
+const paso1 = 1 / ti.sensor.pulsosGrado;
+ok(Math.abs(ti.sensor.crudo / paso1 - Math.round(ti.sensor.crudo / paso1)) < 1e-9,
+   'la medida cruda está cuantizada a pulsos', (1 / paso1).toFixed(1) + ' pulsos/°');
+
+/* el defecto que persigue el ensayo D.1.1: el sensor mal calibrado. La mesa está
+   torcida, el TCU dice que está perfecta, y el SCADA se lo cree. */
+ti.sensor.desajuste = 3.0;                     /* el sensor va montado 3° torcido */
+ti.sensor.offsetCfg = 0;                       /* y nadie lo ha compensado en 41058 */
+for (let i = 0; i < 30 * 60; i += 10) P.paso(10);
+ok(Math.abs(ti.objetivo - ti.angulo) < 1.5, 'el TCU se cree que está donde le mandan',
+   'desviación que publica: ' + (ti.objetivo - ti.angulo).toFixed(2) + '°');
+ok(Math.abs(ti.objetivo - ti.anguloReal) > 2, '…pero la mesa está a 3° de donde debería',
+   'error real: ' + (ti.objetivo - ti.anguloReal).toFixed(2) + '°');
+ok(ti.salud() === 'ok', 'y el SCADA lo ve todo verde — este es el fallo que no se ve en pantalla');
+/* calibrarlo con 41058 lo arregla */
+ti.sensor.offsetCfg = 3.0;
+for (let i = 0; i < 30 * 60; i += 10) P.paso(10);
+ok(Math.abs(ti.objetivo - ti.anguloReal) < 1.5, 'compensado en 41058, la mesa vuelve a su sitio',
+   (ti.objetivo - ti.anguloReal).toFixed(2) + '°');
+casi(f32de(P.regsTCU(ti)[41058], P.regsTCU(ti)[41059]) * 180 / Math.PI, 3.0, 0.01,
+   'el offset se publica en 41058 (f32 rad)');
+ti.sensor.desajuste = 0; ti.sensor.offsetCfg = 0;
+
+/* acelerómetro muerto: la medida se congela y salta el bit de IC defectuoso */
+const tf = P.tcu(6); tf.sensor.ok = false;
+const congelado = tf.angulo;
+for (let i = 0; i < 20 * 60; i += 10) P.paso(10);
+ok(tf.angulo === congelado, 'con el acelerómetro muerto la medida se queda congelada');
+ok(bitde(P.regsTCU(tf)[30004], 5, 5) === 1, 'y levanta 30004.5 «accelerometer is defective»');
+ok(bitde(P.regsTCU(tf)[30005], 8, 8) === 1, 'que arrastra el resumen de IC defectuoso (30005.8)');
+tf.sensor.ok = true;
+
+console.log('\n── eje en apuros: el firmware lo DEDUCE, no se lo dicen ──');
+/* rotor CALADO: no gira y pega el pico de corriente → sobrecorriente inmediata */
+const te = P.tcu(7);
+/* hacia el este: a estas alturas de la prueba el seguidor está en el tope oeste,
+   y una consigna que se recorta contra el límite no manda mover nada */
+te.modo = SIM.MODO.MANUAL; te.manual = te.anguloReal - 25;
+te.ejeAtascado = true;
+const realAntes = te.anguloReal;
+P.paso(5);
+ok(te.iMotor > 7000, 'calado, el motor pega corriente de calado', te.iMotor.toFixed(0) + ' mA');
+ok(te.sobrecorriente, 'y salta la sobrecorriente software de 41040 (7000 mA)');
+P.paso(5);
+ok(!te.motorHabilitado, 'el motor se corta al momento, sin esperar a los reintentos');
+ok(bitde(P.regsTCU(te)[30003], 5, 5) === 1, 'bit de sobrecorriente en 30003.5');
+ok(Math.abs(te.anguloReal - realAntes) < 0.01, 'la mesa no se ha movido nada');
+te.ejeAtascado = false; te.limpiaAlarmas();
+
+/* eje DURO: gira, pero arrastrándose. No dispara la corriente, así que hay que
+   cazarlo por la vía lenta — que es para lo que existen 41039 y 41065. */
+const td = P.tcu(8);
+td.modo = SIM.MODO.MANUAL; td.manual = td.anguloReal - 30;
+td.ejeDuro = true;
+P.paso(5);
+ok(!td.ejeBloqueado && !td.sobrecorriente, 'duro: al primer intento no canta nada');
+ok(td.iMotor > 4000 && td.iMotor < 7000, 'consume de más, pero sin llegar al disparo',
+   td.iMotor.toFixed(0) + ' mA');
+for (let i = 0; i < 8; i++) P.paso(5);
+ok(td.velocidadBaja || td.ejeBloqueado, 'detecta que va más lento de lo mandado (30003.14)');
+ok(td.ejeBloqueado, 'y tras los reintentos de 41065 levanta eje bloqueado', 'reintentos ' + td.reintentos);
+ok(bitde(P.regsTCU(td)[30003], 8, 8) === 1, 'que sale en el registro 30003.8');
+ok(!td.motorHabilitado, 'el motor queda enclavado, no reintentando para siempre');
+td.ejeDuro = false; td.limpiaAlarmas(); td.modo = SIM.MODO.AUTO;
+te.modo = SIM.MODO.AUTO;
 
 console.log('\n── limpieza del grupo 2 ──');
 P.ncu.limpieza[1] = true;
@@ -98,7 +203,7 @@ for (let i = 0; i < 30 * 60; i += 10) P.paso(10);
 const g2 = P.seguidores().filter(x => x.grupo === 2), g1 = P.seguidores().filter(x => x.grupo === 1);
 ok(g2.every(x => x.sp === SIM.SP.LIMPIEZA), 'todo el grupo 2 en SP4 limpieza');
 ok(g1.every(x => x.sp === SIM.SP.NINGUNA), 'el grupo 1 sigue a lo suyo');
-ok(Math.abs(g2[0].angulo) < 0.5, 'limpieza deja el seguidor horizontal', g2[0].angulo.toFixed(2) + '°');
+ok(Math.abs(g2[0].anguloReal) < 0.5, 'limpieza deja el seguidor horizontal', g2[0].anguloReal.toFixed(2) + '°');
 ok(bitde(P.regsNCU()[30100], 4, 4) === 1, 'interruptor de limpieza 2 en la entrada digital');
 P.ncu.limpieza[1] = false;
 
@@ -140,7 +245,7 @@ ok(P.tcu(5).salud() !== 'offline', 'sus vecinas no se contagian');
 
 console.log('\n── repetidor ──');
 const rep = P.tcus.find(x => x.repetidor);
-ok(rep && Math.abs(rep.angulo) < 0.01, 'el repetidor no se mueve');
+ok(rep && Math.abs(rep.anguloReal) < 0.01, 'el repetidor no se mueve');
 ok(P.seguidores().length === 12, 'no cuenta como seguidor en la flota', P.seguidores().length + ' seguidores');
 
 console.log('\n── alimentación: SP contra STRING contra AC ──');
@@ -267,7 +372,7 @@ for (let i = 0; i < 24 * 60; i++) {
   P2.paso(60);
   for (const x of P2.tcus) {
     socMin = Math.min(socMin, x.soc);
-    if (!isFinite(x.angulo) || !isFinite(x.soc) || Math.abs(x.angulo) > 55.001) malos++;
+    if (!isFinite(x.anguloReal) || !isFinite(x.soc) || Math.abs(x.anguloReal) > 55.001) malos++;
   }
 }
 ok(malos === 0, 'ni un NaN ni un ángulo fuera de ±55° en 1.440 pasos');
