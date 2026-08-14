@@ -6,7 +6,9 @@
 <meta name="theme-color" content="#0B0F14">
 <link rel="icon" href="favicon.svg">
 <title>Gestión de Batería TCU — Simulador</title>
-<!-- Autocontenido: sin librerías externas. Gráficas en canvas 2D. -->
+<!-- Gráficas en canvas 2D sin librerías. Leaflet LOCAL (lib/) solo para elegir emplazamiento. -->
+<link rel="stylesheet" href="lib/leaflet.css">
+<script src="lib/leaflet.js"></script>
 <style>
   :root{
     /* Estándar de la casa Factiun (mismos tokens que index.html) */
@@ -32,17 +34,18 @@
   nav .right{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--tx3);display:flex;gap:12px;align-items:center}
   #srcTag{color:var(--ok)}
 
-  .main{flex:1;display:grid;grid-template-columns:300px 1fr;min-height:0}
+  .main{flex:1;display:grid;grid-template-columns:308px 1fr;min-height:0}
   .side{background:var(--panel);border-right:1px solid var(--line);padding:14px;overflow-y:auto}
   .content{overflow-y:auto;padding:14px 16px}
 
-  .grp{margin-bottom:16px}
+  .grp{margin-bottom:15px}
   .grp h3{margin:0 0 8px;font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--tx3)}
   .fld{margin-bottom:9px}
   .fld label{display:block;font-size:12px;color:var(--tx2);margin-bottom:3px}
   .fld select,.fld input[type=number]{width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px}
   .fld input[type=range]{width:100%;accent-color:var(--accent)}
   .fld .rv{font-family:var(--mono);font-size:12px;color:var(--accent)}
+  .fld input[type=file]{width:100%;font-size:12px;color:var(--tx2)}
   .sw{display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none}
   .sw input{accent-color:var(--accent);width:15px;height:15px}
   .sw span{font-size:13px;color:var(--tx)}
@@ -90,51 +93,81 @@
 <div class="side">
   <div class="grp"><h3>Emplazamiento</h3>
     <div class="fld"><select id="loc"></select></div>
+    <div id="customLoc" style="display:none">
+      <div class="fld"><label>Buscar (OpenStreetMap)</label>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="q" placeholder="p. ej. Cáceres, Atacama…" style="flex:1;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px">
+          <button id="qBtn" style="background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 10px;cursor:pointer">🔎</button>
+        </div>
+        <div id="qRes"></div></div>
+      <div id="map" style="height:170px;border-radius:10px;border:1px solid var(--line);margin-bottom:9px"></div>
+      <div class="fld" style="display:flex;gap:6px">
+        <span style="flex:1"><label>Latitud</label><input type="number" id="clat" step="0.001" min="-89" max="89" value="40.0"></span>
+        <span style="flex:1"><label>Longitud</label><input type="number" id="clon" step="0.001" min="-180" max="180" value="-3.7"></span>
+      </div>
+      <div class="fld"><label>Nombre</label><input type="text" id="cname" value="Personalizado" style="width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px"></div>
+      <div class="note">Busca, pulsa en el mapa o teclea lat/lon — cualquier punto del mundo vale (Open-Meteo cubre todo el globo).</div>
+    </div>
   </div>
   <div class="grp"><h3>Perfil TCU (00.2t)</h3>
     <div class="fld"><select id="prof"></select></div>
+    <div class="fld"><label>Modelo de consumo del motor</label>
+      <select id="motor">
+        <option value="factiun">Factiun · Wh/° medido en campaña (canónico)</option>
+        <option value="2500">SUNNER · 2500 mA medio @25,6 V</option>
+        <option value="3250">SUNNER · 3250 mA medio @25,6 V</option>
+        <option value="4000">SUNNER · 4000 mA medio @25,6 V</option>
+      </select></div>
     <div class="note" id="profNote"></div>
   </div>
-  <div class="grp"><h3>Meteorología</h3>
+  <div class="grp"><h3>Meteorología · periodo</h3>
     <div class="fld"><label>Fuente</label>
       <select id="src">
-        <option value="openmeteo">Open-Meteo · forecast real</option>
+        <option value="archive">Open-Meteo · año histórico completo</option>
+        <option value="openmeteo">Open-Meteo · previsión (3–16 días)</option>
+        <option value="pvsyst">CSV horario PVSyst (fichero local)</option>
         <option value="synth">Sintético (cielo claro + nubes)</option>
       </select></div>
-    <div class="fld"><label>Días de simulación <span class="rv" id="daysV">7</span></label>
+    <div class="fld" id="yearFld"><label>Año histórico</label><select id="year"></select></div>
+    <div class="fld" id="daysFld" style="display:none"><label>Días de simulación <span class="rv" id="daysV">7</span></label>
       <input type="range" id="days" min="3" max="16" step="1" value="7"></div>
+    <div class="fld" id="fileFld" style="display:none"><label>Fichero _HourlyRes de PVSyst (.csv)</label>
+      <input type="file" id="file" accept=".csv,.CSV">
+      <div class="note">Usa GlobEff (POA real), T_Amb, GlobHor, DiffHor, WindVel y PhiAng (ángulo real del tracker). El fichero no sale del navegador.</div></div>
     <div class="fld" id="cloudsFld" style="display:none"><label>Nubosidad media <span class="rv" id="cloudsV">30%</span></label>
       <input type="range" id="clouds" min="0" max="100" step="5" value="30"></div>
-    <div class="fld" id="doyFld" style="display:none"><label>Día del año (inicio) <span class="rv" id="doyV">—</span></label>
-      <input type="range" id="doy" min="1" max="365" step="1" value="15"></div>
+    <div class="fld" id="doyFld" style="display:none"><label>Día del año (inicio) <span class="rv" id="doyV">1</span></label>
+      <input type="range" id="doy" min="1" max="365" step="1" value="1"></div>
+    <div class="fld" id="sdaysFld" style="display:none"><label>Días (sintético) <span class="rv" id="sdaysV">365</span></label>
+      <input type="range" id="sdays" min="7" max="365" step="1" value="365"></div>
   </div>
-  <div class="grp"><h3>Batería</h3>
+  <div class="grp"><h3>Estrategia SOC (SUNNER)</h3>
     <div class="fld"><label>SOC inicial <span class="rv" id="soc0V">50%</span></label>
       <input type="range" id="soc0" min="5" max="100" step="5" value="50"></div>
-  </div>
-  <div class="grp"><h3>Gestión de energía</h3>
+    <div class="fld"><label>SOC objetivo de carga <span class="rv" id="socTgtV">80%</span></label>
+      <input type="range" id="socTgt" min="60" max="100" step="1" value="80"></div>
+    <div class="fld"><label>SOC crítico (defensa) <span class="rv" id="socCritV">30%</span></label>
+      <input type="range" id="socCrit" min="5" max="50" step="1" value="30"></div>
+    <div class="fld"><label>Carga completa cada <span class="rv" id="fcV">5</span> días</label>
+      <input type="range" id="fc" min="1" max="15" step="1" value="5"></div>
+    <div class="fld"><label>Tª mínima de carga (°C)</label>
+      <input type="number" id="tmin" value="0" step="1"></div>
     <label class="sw"><input type="checkbox" id="winter">
-      <span>Winter mode<small>Correcciones gruesas: 3°/h en vez de 10°/h solar</small></span></label>
-    <label class="sw"><input type="checkbox" id="surv" checked>
-      <span>Restricción energética (TFM)<small>SOC crítico → aparcar y sobrevivir; rearme con histéresis</small></span></label>
-    <div class="fld"><label>SOC crítico (parada) <span class="rv" id="socCritV">18%</span></label>
-      <input type="range" id="socCrit" min="5" max="40" step="1" value="18"></div>
-    <div class="fld"><label>SOC de rearme <span class="rv" id="socReV">30%</span></label>
-      <input type="range" id="socRe" min="10" max="60" step="1" value="30"></div>
+      <span>Winter mode<small>Correcciones gruesas: 3°/h en vez de 10°/h solar (11.5b)</small></span></label>
   </div>
   <button class="btn" id="run">▶ Simular</button>
   <div class="note">
-    <b>Modelo canónico</b> (SolarGPT · celdas 00.2t + 11.5b): consumo medido campaña IED @24 V
-    — idle/sleep 0,64 W; motor Wh/° = 0,0503 + 0,000845·|θ| (pico 50 W).
-    Carga solar ∝ GHI, limitada por C-rate seguro LiFePO₄ según temperatura.
-    Balance físico hora a hora, sin ML. La curva «sin gestión» es el mismo TCU
-    con seguimiento normal y sin protección: es la referencia de comparación.
+    <b>Metodología</b>: estrategia oficial SUNNER (Battery Availability Study) — CASO 1: crítico&lt;SOC&lt;objetivo,
+    carga + consumo; CASO 2: SOC&gt;objetivo, sin carga; CASO 3: SOC&lt;crítico → <b>defensa 55°</b>,
+    tracker no disponible, solo electrónica. Sin carga bajo la Tª mínima; por encima, C-rate seguro LiFePO₄
+    según Tª (11.5b). Consumo electrónica 0,64 W y motor Wh/° medidos por Factiun (00.2t). Comparativa contra el mismo TCU
+    sin estrategia (siempre seguimiento). Rainflow según el estudio; posición nocturna −5°.
   </div>
 </div>
 
 <!-- ══════════════ RESULTADOS ══════════════ -->
 <div class="content" id="out">
-  <div class="empty">Configura y pulsa <b>▶ Simular</b> — descarga la previsión meteo y simula el balance energético del TCU hora a hora.</div>
+  <div class="empty">Configura y pulsa <b>▶ Simular</b> — simula el año completo (Open-Meteo histórico o CSV de PVSyst) o un periodo corto, con la estrategia oficial de gestión de batería.</div>
 </div>
 
 </div>
@@ -144,40 +177,46 @@
 'use strict';
 var $=function(id){return document.getElementById(id)};
 function fmt(n,d){return n.toFixed(d==null?0:d).replace('.',',')}
+var D2R=Math.PI/180;
 
-/* ═══════════ Emplazamientos (mismos presets que el gemelo) ═══════════ */
+/* ═══════════ Emplazamientos (presets del gemelo + plantas de los estudios SUNNER) ═══════════ */
 var LOCS=[
  {n:"Gorraiz · Navarra (ES)",lat:42.81,lon:-1.58},
  {n:"El Burgo · Zaragoza (ES)",lat:41.576,lon:-0.798},
- {n:"Ayora · Valencia (ES)",lat:39.122,lon:-1.155},
+ {n:"Ayora · Valencia (ES)",lat:39.115,lon:-1.169},
+ {n:"Villamañán · León (ES)",lat:42.317,lon:-5.582},
  {n:"Alconadre · Huesca (ES)",lat:41.85,lon:-0.15},
- {n:"San José · Arequipa (PE)",lat:-16.600,lon:-71.803},
+ {n:"La Joya · Arequipa (PE)",lat:-16.60,lon:-71.803},
  {n:"El Hamma · Gabès (TN)",lat:33.879,lon:9.874},
  {n:"Trani · Apulia (IT)",lat:41.254,lon:16.351},
+ {n:"Latina · Lacio (IT)",lat:41.468,lon:12.904},
  {n:"Benante · Sicilia (IT)",lat:37.373,lon:14.898},
- {n:"Valle de Moinhos (PT)",lat:39.210,lon:-8.774}
+ {n:"Valle de Moinhos (PT)",lat:39.210,lon:-8.774},
+ {n:"Jodhpur · Rajastán (IN)",lat:26.264,lon:73.008}
 ];
 
-/* ═══════════ Perfiles TCU — 00.2t (valores medidos, campaña "Consumos motor_02 @24V") ═══════════ */
-var K0=0.0503, K1=0.000845, MOTOR_PEAK_W=50, IDLE_W=0.64, SLEEP_W=0.64, ETA_CHG=0.90;
+/* ═══════════ Perfiles TCU — 00.2t (medidos por Factiun, campaña "Consumos motor_02 @24V") ═══════════ */
+var K0=0.0503, K1=0.000845, MOTOR_PEAK_W=50, IDLE_W=0.64, SLEEP_W=0.64, ETA_CHG=0.90, V_NOM=25.6;
+var SLEW_DPS=0.17;                      /* velocidad real de giro (°/s) — misma que el gemelo */
 var PROFILES=[
- {id:"SP_45W_3Ah",     n:"SP · panel 45 W · 3 Ah (76,8 Wh)",      wh:76.8,  chgW:45},
+ {id:"SP_45W_3Ah",     n:"SP · panel 45 W · 3 Ah (76,8 Wh)",          wh:76.8,  chgW:45},
  {id:"SP_45W_6Ah",     n:"SP · panel 45 W · 6 Ah (153,6 Wh) — Fayón", wh:153.6, chgW:45},
- {id:"SP_60W_6Ah",     n:"SP · panel 60 W · 6 Ah (153,6 Wh)",     wh:153.6, chgW:60},
- {id:"STRING_60W_3Ah", n:"STRING · regulador 60 W · 3 Ah",        wh:76.8,  chgW:60},
- {id:"STRING_60W_6Ah", n:"STRING · regulador 60 W · 6 Ah",        wh:153.6, chgW:60}
+ {id:"SP_60W_6Ah",     n:"SP · panel 60 W · 6 Ah (153,6 Wh)",         wh:153.6, chgW:60},
+ {id:"STRING_60W_3Ah", n:"STRING · regulador 60 W · 3 Ah",            wh:76.8,  chgW:60},
+ {id:"STRING_60W_6Ah", n:"STRING · regulador 60 W · 6 Ah",            wh:153.6, chgW:60}
 ];
 
-/* ═══════════ Tracker (mismas constantes que el gemelo) ═══════════ */
-var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5;
+/* ═══════════ Tracker (constantes del estudio SUNNER + gemelo) ═══════════ */
+var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
 var DEG_H_NORMAL=10.0, DEG_H_WINTER=3.0;      /* °/h solar por modo (11.5b) */
+var ALBEDO=0.2;
 
 /* ═══════════ Sol y seguimiento — hora en UTC (hora solar = UTC + lon/15 + EoT) ═══════════ */
-function declOf(N){return 23.45*Math.sin(2*Math.PI*(284+N)/365)*Math.PI/180;}
+function declOf(N){return 23.45*Math.sin(2*Math.PI*(284+N)/365)*D2R;}
 function eotMin(N){var B=2*Math.PI/365*(N-81);return 9.87*Math.sin(2*B)-7.53*Math.cos(B)-1.5*Math.sin(B);}
 function solarPos(hUTC,N,latR,lon){
   var hs=hUTC+lon/15+eotMin(N)/60, D=declOf(N);
-  var w=(hs-12)*15*Math.PI/180;
+  var w=(hs-12)*15*D2R;
   var sinEl=Math.sin(latR)*Math.sin(D)+Math.cos(latR)*Math.cos(D)*Math.cos(w);
   var el=Math.asin(Math.max(-1,Math.min(1,sinEl)));
   var caz=(sinEl*Math.sin(latR)-Math.sin(D))/Math.max(1e-6,Math.cos(el)*Math.cos(latR));
@@ -185,14 +224,22 @@ function solarPos(hUTC,N,latR,lon){
   return {el:el,az:az};
 }
 /* Ángulo del tracker 1 eje N-S con backtracking Anderson-Mikofski (igual que index.html) */
-function trackAngle(hUTC,N,latR,lon){
-  var P=solarPos(hUTC,N,latR,lon);
-  if(P.el<=1e-4)return NIGHT_POS;
-  var sx=Math.cos(P.el)*Math.sin(P.az), sz=Math.sin(P.el);
+function trackAngleFrom(el,az){
+  if(el<=1e-4)return NIGHT_POS;
+  var sx=Math.cos(el)*Math.sin(az), sz=Math.sin(el);
   var Rtrue=Math.atan2(sx,sz);
   var t=Math.min(1,(1/GCR)*Math.cos(Rtrue));
   var Rbt=Rtrue-Math.sign(Rtrue)*Math.acos(t);
-  return Math.max(-AXIS_MAX,Math.min(AXIS_MAX,Rbt*180/Math.PI));
+  return Math.max(-AXIS_MAX,Math.min(AXIS_MAX,Rbt/D2R));
+}
+/* Transposición isotrópica: POA en el plano girado R (grados) */
+function poaAt(Rdeg,el,az,bh,dh,gh){
+  if(el<=0)return 0;
+  var R=Rdeg*D2R, sx=Math.cos(el)*Math.sin(az), sz=Math.sin(el);
+  var cosAOI=Math.max(0,sx*Math.sin(R)+sz*Math.cos(R));
+  var rb=cosAOI/Math.max(Math.sin(el),0.087);
+  var cb=Math.cos(Math.abs(R));
+  return Math.max(0,bh)*rb + Math.max(0,dh)*(1+cb)/2 + ALBEDO*Math.max(0,gh)*(1-cb)/2;
 }
 
 /* ═══════════ C-rate seguro LiFePO4 según temperatura (11.5b) ═══════════ */
@@ -204,23 +251,32 @@ function cRateSafeLFP(t){
   return 0.05;
 }
 
-/* ═══════════ Meteo ═══════════ */
+/* ═══════════ Meteo — filas {t, ghi, dhi, temp, wind, poa?, phi?, el?, az?} ═══════════ */
+function parseOM(j){
+  var H=j.hourly, out=[];
+  for(var i=0;i<H.time.length;i++){
+    out.push({t:new Date(H.time[i]+"Z"),
+      ghi:Math.max(0,H.shortwave_radiation[i]||0),
+      dhi:Math.max(0,(H.diffuse_radiation&&H.diffuse_radiation[i])||0),
+      temp:(H.temperature_2m[i]==null?15:H.temperature_2m[i]),
+      wind:(H.windspeed_10m&&H.windspeed_10m[i])||0});
+  }
+  return out;
+}
+var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m";
 function fetchOpenMeteo(loc,days){
   var u="https://api.open-meteo.com/v1/forecast?latitude="+loc.lat+"&longitude="+loc.lon+
-    "&hourly=shortwave_radiation,temperature_2m&forecast_days="+days+"&timezone=UTC";
-  return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
-   .then(function(j){
-     var H=j.hourly, out=[];
-     for(var i=0;i<H.time.length;i++){
-       var d=new Date(H.time[i]+"Z");
-       out.push({t:d,ghi:Math.max(0,H.shortwave_radiation[i]||0),temp:(H.temperature_2m[i]==null?15:H.temperature_2m[i])});
-     }
-     return out;
-   });
+    "&hourly="+OM_VARS+"&forecast_days="+days+"&timezone=UTC";
+  return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM);
 }
-/* Sintético: cielo claro (GHI≈1000·sen(el)^1.15) atenuado por nubes + temperatura estacional/diurna */
+function fetchOpenMeteoYear(loc,year){
+  var u="https://archive-api.open-meteo.com/v1/archive?latitude="+loc.lat+"&longitude="+loc.lon+
+    "&start_date="+year+"-01-01&end_date="+year+"-12-31&hourly="+OM_VARS+"&timezone=UTC";
+  return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM);
+}
+/* Sintético: cielo claro atenuado por nubes + temperatura estacional/diurna */
 function synthMeteo(loc,days,doy0,clouds){
-  var latR=loc.lat*Math.PI/180, out=[];
+  var latR=loc.lat*D2R, out=[];
   var y=new Date().getUTCFullYear();
   var base=new Date(Date.UTC(y,0,1)); base.setUTCDate(doy0);
   var hemi=loc.lat>=0?1:-1;
@@ -229,74 +285,150 @@ function synthMeteo(loc,days,doy0,clouds){
     var N=Math.floor((d-Date.UTC(d.getUTCFullYear(),0,0))/864e5);
     var P=solarPos(d.getUTCHours()+d.getUTCMinutes()/60,N,latR,loc.lon);
     var cs=P.el>0?1000*Math.pow(Math.sin(P.el),1.15):0;
-    /* nubosidad con variación diaria pseudoaleatoria determinista */
     var cf=Math.max(0,Math.min(1,clouds/100+0.25*Math.sin(i*0.71)+0.15*Math.sin(i*0.13)));
     var ghi=cs*(1-0.75*Math.pow(cf,1.5));
-    var tSeason=12-hemi*8*Math.cos(2*Math.PI*(N-15)/365);        /* media anual ~12°C, mín en enero (N) */
+    var tSeason=12-hemi*8*Math.cos(2*Math.PI*(N-15)/365);
     var tDay=5*Math.sin(2*Math.PI*(d.getUTCHours()+loc.lon/15-9)/24);
-    out.push({t:d,ghi:ghi,temp:tSeason+tDay});
+    out.push({t:d,ghi:ghi,dhi:ghi*(0.15+0.75*cf),temp:tSeason+tDay,wind:2});
   }
   return out;
 }
+/* CSV horario de PVSyst (…_HourlyRes_…): date;GlobInc;GlobEff;T_Amb;GlobHor;DiffHor;WindVel;HSol;AzSol;…;PhiAng */
+function parsePVSyst(text){
+  var lines=text.split(/\r?\n/), hi=-1;
+  for(var i=0;i<Math.min(lines.length,40);i++)
+    if(/^date[;,]/i.test(lines[i])){hi=i;break;}
+  if(hi<0)throw new Error("No es un CSV horario de PVSyst (falta cabecera 'date;…')");
+  var sep=lines[hi].indexOf(';')>=0?';':',';
+  var cols=lines[hi].split(sep).map(function(c){return c.trim()});
+  var ix={}; cols.forEach(function(c,k){ix[c]=k});
+  function col(row,name){var k=ix[name];return k==null?null:parseFloat((row[k]||'').replace(',','.'))}
+  var out=[];
+  for(var r=hi+2;r<lines.length;r++){          /* +2: salta la línea de unidades */
+    var row=lines[r].split(sep); if(row.length<3)continue;
+    var m=/^(\d{2})\/(\d{2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/.exec(row[ix['date']]);
+    if(!m)continue;
+    var yy=+m[3]; if(yy<100)yy+=yy<70?2000:1900;
+    var t=new Date(Date.UTC(yy,+m[2]-1,+m[1],+m[4],+m[5]));
+    var e={t:t,
+      ghi:col(row,'GlobHor')||0, dhi:col(row,'DiffHor')||0,
+      temp:(col(row,'T_Amb')==null?15:col(row,'T_Amb')),
+      wind:col(row,'WindVel')||0};
+    var poa=col(row,'GlobEff'); if(poa==null)poa=col(row,'GlobInc');
+    if(poa!=null)e.poa=Math.max(0,poa);
+    var hs=col(row,'HSol'), as=col(row,'AzSol');
+    if(hs!=null){e.el=hs*D2R; e.az=(as||0)*D2R;}
+    var phi=col(row,'PhiAng'); if(phi!=null)e.phi=phi;
+    out.push(e);
+  }
+  if(!out.length)throw new Error("CSV PVSyst sin filas de datos");
+  return out;
+}
 
-/* ═══════════ Simulador SOC hora a hora (11.5b) + gestión ═══════════
-   opts: {winter:bool, surv:bool, socCrit, socRe}  — surv = restricción energética TFM */
+/* ═══════════ SIMULADOR — estrategia oficial SUNNER + winter mode 11.5b ═══════════
+   opts: {motorModel:'factiun'|mA(number), winter, socTgt, socCrit, fcDays, tMin, strategy:bool} */
 function simulate(meteo,prof,loc,soc0,opts){
-  var latR=loc.lat*Math.PI/180, capWh=prof.wh, n=meteo.length;
+  var latR=loc.lat*D2R, capWh=prof.wh, n=meteo.length;
   var soc=soc0, parked=false, prevPos=null;
-  var rows=[];
+  var rows=[], poaPotSum=0, poaLostSum=0;
   for(var h=0;h<n;h++){
     var m=meteo[h];
     var N=Math.floor((m.t-Date.UTC(m.t.getUTCFullYear(),0,0))/864e5);
     var hUTC=m.t.getUTCHours()+m.t.getUTCMinutes()/60;
-    var day=m.ghi>10;
+    var sun = (m.el!=null)?{el:m.el,az:m.az}:solarPos(hUTC,N,latR,loc.lon);
+    var bh=Math.max(0,m.ghi-m.dhi);
+    var day=(m.poa!=null?m.poa:m.ghi)>10;
 
-    /* — Gestión: transición del modo con histéresis — */
-    if(opts.surv){
+    /* — CASO 3 (estrategia): SOC < crítico → defensa, tracker no disponible — */
+    if(opts.strategy){
       if(!parked && soc<opts.socCrit/100) parked=true;
-      else if(parked && soc>=opts.socRe/100) parked=false;
+      else if(parked && soc>=opts.socCrit/100+0.02) parked=false;   /* rearme +2% anti-rebote */
     }
 
-    /* — Posición objetivo del tracker — */
-    var target=parked?0:trackAngle(hUTC,N,latR,loc.lon);   /* aparcado: bandeja plana 0° (supervivencia) */
+    /* — Posición: seguimiento (PhiAng real si hay CSV) o defensa 55° — */
+    var trackPos=(m.phi!=null)?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,m.phi)):trackAngleFrom(sun.el,sun.az);
+    var target=parked?DEFENSE_POS:trackPos;
     if(prevPos==null)prevPos=target;
-    var deltaEff=Math.abs(target-prevPos);                 /* aparcado: un movimiento de aparcada y quieto */
-    if(!parked && opts.winter) deltaEff*=DEG_H_WINTER/DEG_H_NORMAL;   /* winter: correcciones gruesas (11.5b) */
+    var deltaEff=Math.abs(target-prevPos);
+    if(!parked && opts.winter) deltaEff*=DEG_H_WINTER/DEG_H_NORMAL;
     var avgPos=(target+prevPos)/2;
     prevPos=target;
 
-    /* — Consumo motor: Wh/° = K0 + K1·|θ| , pico 50 Wh/h — */
+    /* — Consumo motor: medición Factiun (Wh/°) o SUNNER (mA medio × tiempo de giro) — */
     var motorWh=0;
-    if(deltaEff>0.01){motorWh=Math.min(deltaEff*(K0+K1*Math.abs(avgPos)),MOTOR_PEAK_W);}
-
-    /* — Consumo base (idle día / sleep noche) — */
+    if(deltaEff>0.01){
+      if(opts.motorModel==='factiun')
+        motorWh=Math.min(deltaEff*(K0+K1*Math.abs(avgPos)),MOTOR_PEAK_W);
+      else
+        motorWh=(opts.motorModel/1000)*V_NOM*(deltaEff/SLEW_DPS)/3600;
+    }
     var baseWh=day?IDLE_W:SLEEP_W;
+    var consWh=baseWh+motorWh;
 
-    /* — Carga solar: ∝ GHI, η=0.90, limitada por C-rate seguro según Tª — */
+    /* — Carga: POA real (CSV) o GHI; Tª mín + C-rate seguro; techo objetivo/carga completa — */
+    var poaChg=(m.poa!=null)?m.poa:m.ghi;
     var chgWh=0;
-    if(day){
-      chgWh=prof.chgW*Math.min(m.ghi/1000,1)*ETA_CHG;
+    if(day && m.temp>=opts.tMin){
+      chgWh=prof.chgW*Math.min(poaChg/1000,1)*ETA_CHG;
       chgWh=Math.min(chgWh,cRateSafeLFP(m.temp)*capWh);
     }
+    var fullDay=opts.strategy && (Math.floor(h/24)%opts.fcDays===opts.fcDays-1);
+    var ceil=opts.strategy?(fullDay?1.0:opts.socTgt/100):1.0;
+    /* CASO 2: por encima del techo no entra carga (el consumo sí sigue) */
+    var room=Math.max(0,(ceil-soc))*capWh+consWh;
+    var chgEff=Math.min(chgWh,room);
 
-    /* — Balance SOC — */
-    soc=Math.max(0,Math.min(1,soc+(chgWh-baseWh-motorWh)/capWh));
-    rows.push({t:m.t,ghi:m.ghi,temp:m.temp,soc:soc,chg:chgWh,base:baseWh,motor:motorWh,
-               net:chgWh-baseWh-motorWh,pos:target,parked:parked,
-               cSafe:cRateSafeLFP(m.temp)});
+    soc=Math.max(0,Math.min(1,soc+(chgEff-consWh)/capWh));
+
+    /* — Producción perdida: POA seguimiento vs POA defensa en horas no disponibles — */
+    if(sun.el>0){
+      var poaTrk=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
+      poaPotSum+=poaTrk;
+      if(parked){
+        var poaDef=poaAt(DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi);
+        poaLostSum+=Math.max(0,poaTrk-poaDef);
+      }
+    }
+
+    rows.push({t:m.t,ghi:m.ghi,temp:m.temp,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
+               net:chgEff-consWh,pos:target,parked:parked,mov:deltaEff});
   }
+  rows.poaPotSum=poaPotSum; rows.poaLostSum=poaLostSum;
   return rows;
 }
 
-/* ═══════════ Análisis de ciclos LFP (11.5b · Wang 2014, Barré 2013) ═══════════ */
+/* ═══════════ Rainflow (ASTM simplificado) + modelo de ciclos LFP (11.5b) ═══════════ */
+function rainflow(soc){
+  var tp=[],i;
+  for(i=0;i<soc.length;i++){
+    var v=soc[i];
+    if(tp.length>=2){
+      var a=tp[tp.length-2],b=tp[tp.length-1];
+      if((b-a)*(v-b)>=0){tp[tp.length-1]=v;continue;}
+    }
+    tp.push(v);
+  }
+  var stack=[],cycles=[];
+  for(i=0;i<tp.length;i++){
+    stack.push(tp[i]);
+    while(stack.length>=3){
+      var n=stack.length;
+      var X=Math.abs(stack[n-1]-stack[n-2]), Y=Math.abs(stack[n-2]-stack[n-3]);
+      if(X<Y)break;
+      if(stack.length===3){cycles.push({r:Y,w:0.5});stack.shift();}
+      else{cycles.push({r:Y,w:1});stack.splice(n-3,2);}
+    }
+  }
+  for(i=0;i+1<stack.length;i++)cycles.push({r:Math.abs(stack[i+1]-stack[i]),w:0.5});
+  var tot=0,d30=0,d60=0;
+  cycles.forEach(function(c){tot+=c.w;if(c.r>=0.30)d30+=c.w;if(c.r>=0.60)d60+=c.w;});
+  return {total:tot,dod30:d30,dod60:d60};
+}
 var LFP_A=6000, LFP_B=1.2, LFP_EOL=20;   /* Nf = a/DoD^b · EOL = 80% SOH */
 function cyclesAnalysis(rows){
   var n=rows.length; if(n<2)return null;
-  var thr=0, turns=0, lastSign=0;
-  for(var i=1;i<n;i++){
-    var d=rows[i].soc-rows[i-1].soc; thr+=Math.abs(d);
-    var s=Math.sign(d); if(s!==0){if(lastSign!==0&&s!==lastSign)turns++; lastSign=s;}
-  }
+  var thr=0;
+  for(var i=1;i<n;i++)thr+=Math.abs(rows[i].soc-rows[i-1].soc);
   var efc=thr/2;
   var dods=[], nd=Math.max(1,Math.floor(n/24));
   for(var d2=0;d2<nd;d2++){
@@ -305,7 +437,6 @@ function cyclesAnalysis(rows){
     if(hi>=lo)dods.push(hi-lo);
   }
   var dodMean=dods.reduce(function(a,b){return a+b},0)/dods.length;
-  var dodMax=Math.max.apply(null,dods);
   var dodM=Math.max(dodMean,0.01);
   var toEol=LFP_A/Math.pow(dodM,LFP_B);
   var days=n/24, fade=0, years=30;
@@ -314,26 +445,40 @@ function cyclesAnalysis(rows){
     fade=(cyclesYr/toEol)*LFP_EOL+1.5;                     /* cycle aging + calendar LFP ~1,5%/año */
     years=Math.min(30,LFP_EOL/Math.max(fade,0.001));
   }
-  return {efc:efc,dodMean:dodMean,dodMax:dodMax,turns:turns,toEol:toEol,fadeYr:fade,years:years};
+  return {efc:efc,dodMean:dodMean,toEol:toEol,fadeYr:fade,years:years};
 }
 function summarize(rows){
   var soc=rows.map(function(r){return r.soc});
   var sum=function(k){return rows.reduce(function(a,r){return a+r[k]},0)};
   var minI=0; soc.forEach(function(v,i){if(v<soc[minI])minI=i});
+  var hPark=rows.filter(function(r){return r.parked}).length;
   return {
-    socFinal:soc[soc.length-1], socMin:soc[minI], socMax:Math.max.apply(null,soc),
-    socMinT:rows[minI].t,
+    socFinal:soc[soc.length-1], socMin:soc[minI], socMinT:rows[minI].t,
     hBelow15:soc.filter(function(v){return v<0.15}).length,
-    hBelow10:soc.filter(function(v){return v<0.10}).length,
     hZero:soc.filter(function(v){return v<=0.001}).length,
-    hParked:rows.filter(function(r){return r.parked}).length,
+    hParked:hPark, inactivePct:100*hPark/rows.length,
+    prodLostPct:rows.poaPotSum>0?100*rows.poaLostSum/rows.poaPotSum:0,
     chg:sum('chg'), base:sum('base'), motor:sum('motor'), net:sum('net'),
-    cyc:cyclesAnalysis(rows)
+    cyc:cyclesAnalysis(rows), rf:rainflow(soc)
   };
+}
+function aggDaily(rows){
+  var out=[],cur=null,key=null;
+  rows.forEach(function(r){
+    var k=r.t.getUTCFullYear()*1000+Math.floor((r.t-Date.UTC(r.t.getUTCFullYear(),0,0))/864e5);
+    if(k!==key){key=k;cur={t:new Date(Date.UTC(r.t.getUTCFullYear(),r.t.getUTCMonth(),r.t.getUTCDate())),
+      chg:0,base:0,motor:0,net:0,mov:0,ghiKwh:0,tMin:1e9,tMax:-1e9,socMin:1,socMax:0,parkedH:0};out.push(cur);}
+    cur.chg+=r.chg;cur.base+=r.base;cur.motor+=r.motor;cur.net+=r.net;cur.mov+=r.mov;
+    cur.ghiKwh+=r.ghi/1000;cur.tMin=Math.min(cur.tMin,r.temp);cur.tMax=Math.max(cur.tMax,r.temp);
+    cur.socMin=Math.min(cur.socMin,r.soc);cur.socMax=Math.max(cur.socMax,r.soc);
+    if(r.parked)cur.parkedH++;
+  });
+  return out;
 }
 
 /* ═══════════ Gráficas (canvas 2D, sin librerías) ═══════════ */
 var CH={pad:{l:46,r:12,t:10,b:22}};
+var MES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 function mkCanvas(parent,hCss){
   var c=document.createElement('canvas');c.className='ch';
   parent.appendChild(c);
@@ -344,25 +489,27 @@ function mkCanvas(parent,hCss){
 }
 function frame(g,yMin,yMax,rows,yFmt){
   var p=CH.pad,x=g.x,W=g.w,H=g.h;
-  var X=function(i){return p.l+(W-p.l-p.r)*i/(rows.length-1)};
+  var X=function(i){return p.l+(W-p.l-p.r)*i/Math.max(1,rows.length-1)};
   var Y=function(v){return p.t+(H-p.t-p.b)*(1-(v-yMin)/(yMax-yMin))};
   x.font='10px IBM Plex Mono,monospace';
-  /* rejilla horizontal */
   x.textAlign='right';x.textBaseline='middle';
   for(var k=0;k<=4;k++){
     var v=yMin+(yMax-yMin)*k/4, yy=Y(v);
     x.strokeStyle='rgba(35,48,61,.8)';x.beginPath();x.moveTo(p.l,yy);x.lineTo(W-p.r,yy);x.stroke();
     x.fillStyle='#5e7388';x.fillText(yFmt(v),p.l-6,yy);
   }
-  /* separadores de día + fecha */
+  var daily=rows.length>1&&(rows[1].t-rows[0].t)>=36e5*10;
+  var totalDays=daily?rows.length:rows.length/24;
   x.textAlign='left';x.textBaseline='top';
   for(var i=0;i<rows.length;i++){
     var t=rows[i].t;
-    if(t.getUTCHours()===0){
-      var xx=X(i);
-      x.strokeStyle='rgba(50,72,93,.55)';x.beginPath();x.moveTo(xx,p.t);x.lineTo(xx,H-p.b);x.stroke();
-      x.fillStyle='#5e7388';x.fillText(fmt(t.getUTCDate())+'/'+fmt(t.getUTCMonth()+1),xx+3,H-p.b+4);
-    }
+    if(!daily && t.getUTCHours()!==0)continue;
+    var isMonth=t.getUTCDate()===1;
+    if(totalDays>45 && !isMonth)continue;
+    var xx=X(i);
+    x.strokeStyle='rgba(50,72,93,.55)';x.beginPath();x.moveTo(xx,p.t);x.lineTo(xx,H-p.b);x.stroke();
+    x.fillStyle='#5e7388';
+    x.fillText(totalDays>45?MES[t.getUTCMonth()]:fmt(t.getUTCDate())+'/'+fmt(t.getUTCMonth()+1),xx+3,H-p.b+4);
   }
   return {X:X,Y:Y};
 }
@@ -378,105 +525,191 @@ function hline(g,f,v,color,dash,label){
   if(label){x.fillStyle=color;x.font='9.5px IBM Plex Mono,monospace';x.textAlign='left';x.textBaseline='bottom';
     x.fillText(label,CH.pad.l+4,f.Y(v)-2);}
 }
-function bandParked(g,f,rows,color){
+function bandParked(g,f,rows,color,key){
+  key=key||function(r){return r.parked};
   var x=g.x,H=g.h,p=CH.pad,i=0;
   x.fillStyle=color;
   while(i<rows.length){
-    if(rows[i].parked){var j=i;while(j<rows.length&&rows[j].parked)j++;
-      x.fillRect(f.X(i),p.t,f.X(Math.min(j,rows.length-1))-f.X(i),H-p.t-p.b);i=j;}
+    if(key(rows[i])){var j=i;while(j<rows.length&&key(rows[j]))j++;
+      x.fillRect(f.X(i),p.t,Math.max(1,f.X(Math.min(j,rows.length-1))-f.X(i)),H-p.t-p.b);i=j;}
     else i++;
   }
 }
 
 /* ═══════════ UI ═══════════ */
 LOCS.forEach(function(L,i){$('loc').add(new Option(L.n,i))});
+$('loc').add(new Option('✏️ Personalizado — buscar / mapa / lat-lon…','custom'));
 PROFILES.forEach(function(P,i){$('prof').add(new Option(P.n,i))});
-$('prof').value=1;   /* SP_45W_6Ah — configuración Fayón (perfil activo del notebook) */
+
+/* — Emplazamiento personalizado: Leaflet local + Nominatim (mismo patrón que index.html) — */
+var bmap=null, bmarker=null;
+function setPick(la,lo,name){
+  $('clat').value=(+la).toFixed(3); $('clon').value=(+lo).toFixed(3);
+  if(name)$('cname').value=name;
+  if(bmap){bmarker.setLatLng([la,lo]);}
+  try{localStorage.setItem('bateria_customLoc',JSON.stringify({lat:+la,lon:+lo,n:$('cname').value}))}catch(e){}
+}
+function ensureMap(){
+  if(bmap||typeof L==='undefined')return;
+  bmap=L.map('map',{worldCopyJump:true}).setView([+$('clat').value,+$('clon').value],4);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    {subdomains:'abcd',maxZoom:18,attribution:'© OpenStreetMap · © CARTO'}).addTo(bmap);
+  bmarker=L.marker([+$('clat').value,+$('clon').value]).addTo(bmap);
+  bmap.on('click',function(e){setPick(e.latlng.lat,e.latlng.lng,'('+e.latlng.lat.toFixed(3)+', '+e.latlng.lng.toFixed(3)+')')});
+  setTimeout(function(){bmap.invalidateSize()},90);
+}
+$('loc').onchange=function(){
+  var c=this.value==='custom';
+  $('customLoc').style.display=c?'':'none';
+  if(c)ensureMap();
+};
+try{var sv=JSON.parse(localStorage.getItem('bateria_customLoc'));
+  if(sv){$('clat').value=sv.lat;$('clon').value=sv.lon;$('cname').value=sv.n||'Personalizado';}}catch(e){}
+['clat','clon'].forEach(function(id){$(id).addEventListener('change',function(){
+  if(bmap)bmarker.setLatLng([+$('clat').value,+$('clon').value]);
+  try{localStorage.setItem('bateria_customLoc',JSON.stringify({lat:+$('clat').value,lon:+$('clon').value,n:$('cname').value}))}catch(e){}
+})});
+function doSearch(){
+  var q=($('q').value||'').trim(); if(!q)return;
+  $('qRes').innerHTML='<div class="note">Buscando…</div>';
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=5&q='+encodeURIComponent(q))
+    .then(function(r){return r.json()})
+    .then(function(arr){
+      if(!arr||!arr.length){$('qRes').innerHTML='<div class="note">Sin resultados.</div>';return;}
+      $('qRes').innerHTML='';
+      arr.forEach(function(it){
+        var b=document.createElement('button');
+        b.style.cssText='display:block;width:100%;text-align:left;margin:3px 0;padding:6px 9px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:7px;cursor:pointer;font:inherit;font-size:12px';
+        b.textContent=it.display_name;
+        b.onclick=function(){setPick(+it.lat,+it.lon,(it.display_name||'').split(',')[0]);
+          if(bmap)bmap.setView([+it.lat,+it.lon],9); $('qRes').innerHTML='';};
+        $('qRes').appendChild(b);
+      });
+    })
+    .catch(function(){$('qRes').innerHTML='<div class="note">⛌ Búsqueda no disponible (¿sin red?). Usa el mapa o lat/lon.</div>'});
+}
+$('qBtn').onclick=doSearch;
+$('q').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();doSearch();}});
+function getLoc(){
+  if($('loc').value!=='custom')return LOCS[$('loc').value];
+  var la=Math.max(-89,Math.min(89,+$('clat').value||0)),
+      lo=Math.max(-180,Math.min(180,+$('clon').value||0));
+  return {n:($('cname').value||'Personalizado').trim(),lat:la,lon:lo};
+}
+$('prof').value=1;   /* SP_45W_6Ah — configuración Fayón */
+(function(){var y=new Date().getFullYear();for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
 function profNote(){
   var P=PROFILES[$('prof').value];
-  $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · idle/sleep 0,64 W';
+  $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W';
 }
 profNote();$('prof').onchange=profNote;
-$('days').oninput=function(){$('daysV').textContent=this.value};
-$('clouds').oninput=function(){$('cloudsV').textContent=this.value+'%'};
-$('soc0').oninput=function(){$('soc0V').textContent=this.value+'%'};
-$('socCrit').oninput=function(){$('socCritV').textContent=this.value+'%';
-  if(+$('socRe').value<=+this.value){$('socRe').value=Math.min(60,+this.value+5);$('socRe').oninput.call($('socRe'))}};
-$('socRe').oninput=function(){$('socReV').textContent=this.value+'%'};
-$('doy').oninput=function(){$('doyV').textContent=this.value};
-$('doyV').textContent=$('doy').value;
+[['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
+ ['socCrit','socCritV','%'],['fc','fcV',''],['doy','doyV',''],['sdays','sdaysV','']].forEach(function(a){
+  $(a[0]).oninput=function(){$(a[1]).textContent=this.value+a[2]};
+});
+$('socCrit').addEventListener('input',function(){
+  if(+$('socTgt').value<=+this.value){$('socTgt').value=Math.min(100,+this.value+10);$('socTgtV').textContent=$('socTgt').value+'%'}});
 $('src').onchange=function(){
-  var s=this.value==='synth';
-  $('cloudsFld').style.display=s?'':'none';
-  $('doyFld').style.display=s?'':'none';
+  var v=this.value;
+  $('yearFld').style.display=v==='archive'?'':'none';
+  $('daysFld').style.display=v==='openmeteo'?'':'none';
+  $('fileFld').style.display=v==='pvsyst'?'':'none';
+  $('cloudsFld').style.display=v==='synth'?'':'none';
+  $('doyFld').style.display=v==='synth'?'':'none';
+  $('sdaysFld').style.display=v==='synth'?'':'none';
 };
 setInterval(function(){var d=new Date();$('clock').textContent=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)},1000);
 
 function chip(lab,val,cls,sub){
   return '<div class="chip"><div class="lab">'+lab+'</div><div class="v '+(cls||'')+'">'+val+'</div>'+(sub?'<div class="sub">'+sub+'</div>':'')+'</div>';
 }
-function socCls(v){return v<0.10?'bad':(v<0.18?'warn':'ok')}
+function socCls(v,crit){return v<=0.001?'bad':(v<crit?'warn':'ok')}
+
+function getMeteo(loc){
+  var v=$('src').value;
+  if(v==='openmeteo')
+    return fetchOpenMeteo(loc,+$('days').value).then(function(m){$('srcTag').textContent='Open-Meteo previsión · '+loc.n;return m})
+      .catch(function(){$('srcTag').textContent='⚠ sin red → sintético';
+        return synthMeteo(loc,+$('days').value,180,30)});
+  if(v==='archive')
+    return fetchOpenMeteoYear(loc,+$('year').value).then(function(m){$('srcTag').textContent='Open-Meteo '+$('year').value+' · '+loc.n;return m})
+      .catch(function(){$('srcTag').textContent='⚠ sin red → sintético 365d';
+        return synthMeteo(loc,365,1,+$('clouds').value)});
+  if(v==='pvsyst'){
+    var f=$('file').files[0];
+    if(!f)return Promise.reject(new Error("Selecciona el CSV horario de PVSyst"));
+    return f.text().then(parsePVSyst).then(function(m){$('srcTag').textContent='PVSyst · '+f.name;return m});
+  }
+  return Promise.resolve(synthMeteo(loc,+$('sdays').value,+$('doy').value,+$('clouds').value))
+    .then(function(m){$('srcTag').textContent='Sintético · '+loc.n;return m});
+}
 
 $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
-  var loc=LOCS[$('loc').value], prof=PROFILES[$('prof').value];
-  var days=+$('days').value, soc0=+$('soc0').value/100;
-  var opts={winter:$('winter').checked, surv:$('surv').checked,
-            socCrit:+$('socCrit').value, socRe:+$('socRe').value};
-  var pm = $('src').value==='openmeteo'
-    ? fetchOpenMeteo(loc,days).then(function(m){$('srcTag').textContent='Open-Meteo · '+loc.n;return m})
-       .catch(function(e){$('srcTag').textContent='⚠ sin red → sintético';
-         return synthMeteo(loc,days,+$('doy').value,+$('clouds').value)})
-    : Promise.resolve(synthMeteo(loc,days,+$('doy').value,+$('clouds').value))
-       .then(function(m){$('srcTag').textContent='Sintético · '+loc.n;return m});
-  pm.then(function(meteo){
-    /* gestionado (según checks) vs referencia sin gestión (tracking normal, sin protección) */
+  var loc=getLoc(), prof=PROFILES[$('prof').value];
+  var mm=$('motor').value; mm=(mm==='factiun')?'factiun':+mm;
+  var opts={motorModel:mm, winter:$('winter').checked, strategy:true,
+            socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
+            fcDays:+$('fc').value, tMin:+$('tmin').value};
+  var refOpts={motorModel:mm, winter:false, strategy:false,
+            socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value};
+  getMeteo(loc).then(function(meteo){
+    var soc0=+$('soc0').value/100;
     var mng=simulate(meteo,prof,loc,soc0,opts);
-    var ref=simulate(meteo,prof,loc,soc0,{winter:false,surv:false});
+    var ref=simulate(meteo,prof,loc,soc0,refOpts);
     render(meteo,mng,ref,prof,loc,opts);
   }).catch(function(e){
-    $('out').innerHTML='<div class="empty">❌ Error en la simulación: '+e.message+'</div>';
+    $('out').innerHTML='<div class="empty">❌ '+e.message+'</div>';
   }).then(function(){btn.disabled=false;btn.textContent='▶ Simular'});
 };
 
 function render(meteo,mng,ref,prof,loc,opts){
   var S=summarize(mng), R=summarize(ref);
   var out=$('out');out.innerHTML='';
+  var days=mng.length/24, LONG=mng.length>1200;
+  var dm=LONG?aggDaily(mng):null, dr=LONG?aggDaily(ref):null;
+  var crit=opts.socCrit/100;
 
-  /* — KPIs — */
+  /* — KPIs (métricas de impacto del estudio SUNNER) — */
   var chips=document.createElement('div');chips.className='chips';
   chips.innerHTML=
-    chip('SOC final',fmt(S.socFinal*100)+'%',socCls(S.socFinal))+
-    chip('SOC mínimo',fmt(S.socMin*100)+'%',socCls(S.socMin),
-         S.socMinT.getUTCDate()+'/'+(S.socMinT.getUTCMonth()+1)+' '+('0'+S.socMinT.getUTCHours()).slice(-2)+'h UTC')+
-    chip('Horas SOC &lt; 15%',fmt(S.hBelow15),S.hBelow15>0?'warn':'ok')+
-    chip('Horas SOC = 0 (parada)',fmt(S.hZero),S.hZero>0?'bad':'ok')+
-    chip('Horas aparcado (gestión)',fmt(S.hParked),S.hParked>0?'warn':'')+
-    chip('Balance neto',(S.net>=0?'+':'')+fmt(S.net)+' Wh',S.net>=0?'ok':'warn')+
-    chip('Ciclos equivalentes',fmt(S.cyc.efc,1)+' EFC','', 'DoD medio '+fmt(S.cyc.dodMean*100)+'%')+
-    chip('Vida estimada',fmt(S.cyc.years,1)+' años',S.cyc.years<10?'warn':'ok','fade '+fmt(S.cyc.fadeYr,1)+'%/año');
+    chip('Tiempo no disponible',fmt(S.inactivePct,4)+'%',S.inactivePct>1?'bad':(S.inactivePct>0.1?'warn':'ok'),
+         fmt(S.hParked)+' h en defensa')+
+    chip('Producción perdida',fmt(S.prodLostPct,4)+'%',S.prodLostPct>0.05?'warn':'ok','POA defensa vs seguimiento')+
+    chip('SOC mínimo',fmt(S.socMin*100)+'%',socCls(S.socMin,crit),
+         S.socMinT.getUTCDate()+' '+MES[S.socMinT.getUTCMonth()]+' '+('0'+S.socMinT.getUTCHours()).slice(-2)+'h')+
+    chip('SOC final',fmt(S.socFinal*100)+'%',socCls(S.socFinal,crit))+
+    chip('Horas SOC = 0',fmt(S.hZero),S.hZero>0?'bad':'ok')+
+    chip('Balance neto',(S.net>=0?'+':'')+fmt(S.net)+' Wh',S.net>=0?'ok':'warn',
+         'carga '+fmt(S.chg)+' / consumo '+fmt(S.base+S.motor))+
+    chip('Rainflow',fmt(S.rf.total)+' ciclos','', '≥30% DoD: '+fmt(S.rf.dod30)+' · ≥60%: '+fmt(S.rf.dod60))+
+    chip('Vida estimada',fmt(S.cyc.years,1)+' años',S.cyc.years<10?'warn':'ok',
+         fmt(S.cyc.efc,1)+' EFC · fade '+fmt(S.cyc.fadeYr,1)+'%/año');
   out.appendChild(chips);
 
   /* — Gráfica 1: SOC — */
   var c1=document.createElement('div');c1.className='card';
-  c1.innerHTML='<h2>Estado de carga (SOC)</h2><div class="sub">'+prof.id+' · '+loc.n+' · balance hora a hora'+(opts.winter?' · winter mode':'')+(opts.surv?' · restricción energética ON':'')+'</div>';
+  c1.innerHTML='<h2>Estado de carga (SOC) — '+fmt(days)+' días</h2><div class="sub">'+prof.id+' · '+loc.n+
+    ' · estrategia SUNNER (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días)'+
+    (opts.winter?' · winter mode':'')+'</div>';
   out.appendChild(c1);
-  var g1=mkCanvas(c1,200), f1=frame(g1,0,100,mng,function(v){return fmt(v)+'%'});
-  bandParked(g1,f1,mng,'rgba(226,87,76,.10)');
-  if(opts.surv){hline(g1,f1,opts.socCrit,'#e2574c',true,'crítico '+opts.socCrit+'%');
-                hline(g1,f1,opts.socRe,'#e0a52b',true,'rearme '+opts.socRe+'%');}
-  line(g1,f1,ref,function(r){return r.soc*100},'#5e7388',1.2);
-  line(g1,f1,mng,function(r){return r.soc*100},'#36D399',2);
-  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con gestión</span><span><i style="background:#5e7388"></i>Sin gestión (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>Aparcado (supervivencia)</span></div>');
+  var g1=mkCanvas(c1,210), f1=frame(g1,0,100,mng,function(v){return fmt(v)+'%'});
+  bandParked(g1,f1,mng,'rgba(226,87,76,.12)');
+  hline(g1,f1,opts.socTgt,'#37b87c',true,'objetivo '+opts.socTgt+'%');
+  hline(g1,f1,opts.socCrit,'#e2574c',true,'crítico '+opts.socCrit+'%');
+  line(g1,f1,ref,function(r){return r.soc*100},'#5e7388',1);
+  line(g1,f1,mng,function(r){return r.soc*100},'#36D399',LONG?1.1:2);
+  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con estrategia</span><span><i style="background:#5e7388"></i>Sin estrategia (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>No disponible (defensa 55°)</span></div>');
 
   /* — Gráfica 2: balance energético — */
   var c2=document.createElement('div');c2.className='card';
-  c2.innerHTML='<h2>Balance energético horario</h2><div class="sub">Carga solar vs consumo (base + motor) — Wh por hora</div>';
+  c2.innerHTML='<h2>Balance energético '+(LONG?'diario':'horario')+'</h2><div class="sub">Carga solar vs consumo (electrónica + motor) — Wh por '+(LONG?'día':'hora')+'</div>';
   out.appendChild(c2);
-  var maxE=Math.max(4,Math.max.apply(null,mng.map(function(r){return Math.max(r.chg,r.base+r.motor)})));
-  var g2=mkCanvas(c2,170), f2=frame(g2,-maxE,maxE,mng,function(v){return fmt(v)});
-  var bw=Math.max(1,(g2.w-CH.pad.l-CH.pad.r)/mng.length-0.5);
-  mng.forEach(function(r,i){
+  var bRows=LONG?dm:mng;
+  var maxE=Math.max(4,Math.max.apply(null,bRows.map(function(r){return Math.max(r.chg,r.base+r.motor)})));
+  var g2=mkCanvas(c2,175), f2=frame(g2,-maxE,maxE,bRows,function(v){return fmt(v)});
+  var bw=Math.max(1,(g2.w-CH.pad.l-CH.pad.r)/bRows.length-0.4);
+  bRows.forEach(function(r,i){
     var x0=f2.X(i)-bw/2;
     g2.x.fillStyle='rgba(54,211,153,.75)';
     g2.x.fillRect(x0,f2.Y(r.chg),bw,f2.Y(0)-f2.Y(r.chg));
@@ -485,57 +718,100 @@ function render(meteo,mng,ref,prof,loc,opts){
     g2.x.fillStyle='rgba(226,87,76,.85)';
     g2.x.fillRect(x0,f2.Y(-r.base),bw,f2.Y(-r.base-r.motor)-f2.Y(-r.base));
   });
-  c2.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:rgba(54,211,153,.75)"></i>Carga solar</span><span><i style="background:rgba(224,165,43,.8)"></i>Base (idle/sleep 0,64 W)</span><span><i style="background:rgba(226,87,76,.85)"></i>Motor</span></div>');
+  c2.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:rgba(54,211,153,.75)"></i>Carga solar</span><span><i style="background:rgba(224,165,43,.8)"></i>Electrónica (0,64 W)</span><span><i style="background:rgba(226,87,76,.85)"></i>Motor</span></div>');
 
   /* — Gráfica 3: meteo — */
   var c3=document.createElement('div');c3.className='card';
-  c3.innerHTML='<h2>Meteorología</h2><div class="sub">GHI (W/m²) y temperatura ambiente (°C) — la Tª limita el C-rate de carga LiFePO₄</div>';
+  c3.innerHTML='<h2>Meteorología</h2><div class="sub">'+(LONG?'Irradiación diaria (kWh/m²·día) y Tª mín/máx diaria':'GHI (W/m²) y Tª ambiente')+' — la Tª limita la carga (mín '+opts.tMin+' °C + C-rate LiFePO₄)</div>';
   out.appendChild(c3);
-  var maxG=Math.max(200,Math.max.apply(null,meteo.map(function(m){return m.ghi})));
-  var g3=mkCanvas(c3,160), f3=frame(g3,0,maxG,mng,function(v){return fmt(v)});
-  line(g3,f3,mng,function(r){return r.ghi},'#f0a93b',1.5);
-  var tMin=Math.min.apply(null,meteo.map(function(m){return m.temp})),
-      tMax=Math.max.apply(null,meteo.map(function(m){return m.temp}));
-  var fT={X:f3.X,Y:function(v){return CH.pad.t+(160-CH.pad.t-CH.pad.b)*(1-(v-(tMin-2))/((tMax+2)-(tMin-2)))}};
-  line(g3,fT,mng,function(r){return r.temp},'#3aa0ff',1.5);
-  g3.x.font='10px IBM Plex Mono,monospace';g3.x.textAlign='left';g3.x.textBaseline='top';
-  g3.x.fillStyle='#3aa0ff';g3.x.fillText('T: '+fmt(tMin,1)+'…'+fmt(tMax,1)+' °C',CH.pad.l+6,CH.pad.t+2);
-  c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>GHI</span><span><i style="background:#3aa0ff"></i>Tª ambiente</span></div>');
+  if(LONG){
+    var maxI=Math.max(2,Math.max.apply(null,dm.map(function(r){return r.ghiKwh})));
+    var g3=mkCanvas(c3,165), f3=frame(g3,0,maxI,dm,function(v){return fmt(v,1)});
+    line(g3,f3,dm,'ghiKwh','#f0a93b',1.2);
+    var tLo=Math.min.apply(null,dm.map(function(r){return r.tMin})),
+        tHi=Math.max.apply(null,dm.map(function(r){return r.tMax}));
+    var fT={X:f3.X,Y:function(v){return CH.pad.t+(165-CH.pad.t-CH.pad.b)*(1-(v-(tLo-2))/((tHi+2)-(tLo-2)))}};
+    line(g3,fT,dm,'tMin','#3aa0ff',1);
+    line(g3,fT,dm,'tMax','#e2574c',1);
+    if(opts.tMin>tLo)hline(g3,fT,opts.tMin,'#3aa0ff',true,'Tª mín carga '+opts.tMin+'°C');
+    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>Irradiación</span><span><i style="background:#3aa0ff"></i>Tª mín</span><span><i style="background:#e2574c"></i>Tª máx</span></div>');
+  }else{
+    var maxG=Math.max(200,Math.max.apply(null,mng.map(function(r){return r.ghi})));
+    var g3b=mkCanvas(c3,160), f3b=frame(g3b,0,maxG,mng,function(v){return fmt(v)});
+    line(g3b,f3b,mng,'ghi','#f0a93b',1.5);
+    var tMin2=Math.min.apply(null,mng.map(function(r){return r.temp})),
+        tMax2=Math.max.apply(null,mng.map(function(r){return r.temp}));
+    var fT2={X:f3b.X,Y:function(v){return CH.pad.t+(160-CH.pad.t-CH.pad.b)*(1-(v-(tMin2-2))/((tMax2+2)-(tMin2-2)))}};
+    line(g3b,fT2,mng,'temp','#3aa0ff',1.5);
+    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>GHI</span><span><i style="background:#3aa0ff"></i>Tª ambiente</span></div>');
+  }
 
-  /* — Gráfica 4: posición del tracker — */
+  /* — Gráfica 4: posición / movimiento — */
   var c4=document.createElement('div');c4.className='card';
-  c4.innerHTML='<h2>Posición del seguidor</h2><div class="sub">Backtracking N-S ±55° (GCR 0,397) — aparcado a 0° en modo supervivencia</div>';
   out.appendChild(c4);
-  var g4=mkCanvas(c4,140), f4=frame(g4,-60,60,mng,function(v){return fmt(v)+'°'});
-  bandParked(g4,f4,mng,'rgba(226,87,76,.10)');
-  line(g4,f4,ref,'pos','#5e7388',1);
-  line(g4,f4,mng,'pos','#36D399',1.6);
+  if(LONG){
+    c4.innerHTML='<h2>Movimiento diario del seguidor</h2><div class="sub">Σ|Δθ| por día (°) — la estrategia y el winter mode reducen el recorrido</div>';
+    var maxM=Math.max(10,Math.max.apply(null,dr.map(function(r){return r.mov})));
+    var g4=mkCanvas(c4,145), f4=frame(g4,0,maxM,dm,function(v){return fmt(v)+'°'});
+    bandParked(g4,f4,dm,'rgba(226,87,76,.10)',function(r){return r.parkedH>0});
+    line(g4,f4,dr,'mov','#5e7388',1);
+    line(g4,f4,dm,'mov','#36D399',1.4);
+  }else{
+    c4.innerHTML='<h2>Posición del seguidor</h2><div class="sub">Backtracking N-S ±55° (GCR 0,397) — defensa 55° cuando no está disponible</div>';
+    var g4b=mkCanvas(c4,145), f4b=frame(g4b,-60,60,mng,function(v){return fmt(v)+'°'});
+    bandParked(g4b,f4b,mng,'rgba(226,87,76,.10)');
+    line(g4b,f4b,ref,'pos','#5e7388',1);
+    line(g4b,f4b,mng,'pos','#36D399',1.6);
+  }
 
-  /* — Tabla comparativa (formato 11.5b _print_comparison) — */
+  /* — Tabla mensual (solo periodos largos) — */
+  if(LONG){
+    var months={};
+    mng.forEach(function(r){
+      var k=r.t.getUTCFullYear()+'-'+r.t.getUTCMonth();
+      if(!months[k])months[k]={m:r.t.getUTCMonth(),chg:0,motor:0,base:0,net:0,socMin:1,hPark:0};
+      var M=months[k];M.chg+=r.chg;M.motor+=r.motor;M.base+=r.base;M.net+=r.net;
+      M.socMin=Math.min(M.socMin,r.soc);if(r.parked)M.hPark++;
+    });
+    var cM=document.createElement('div');cM.className='card';
+    cM.innerHTML='<h2>Balance mensual</h2><div class="sub">Con estrategia — el mes crítico es el de menor SOC mínimo</div>';
+    var tb='<table class="cmp"><tr><th>Mes</th><th>Carga (Wh)</th><th>Motor (Wh)</th><th>Electr. (Wh)</th><th>Neto (Wh)</th><th>SOC mín</th><th>h defensa</th></tr>';
+    Object.keys(months).forEach(function(k){
+      var M=months[k];
+      tb+='<tr><td>'+MES[M.m]+'</td><td>'+fmt(M.chg)+'</td><td>'+fmt(M.motor)+'</td><td>'+fmt(M.base)+'</td>'+
+        '<td class="'+(M.net>=0?'ok':'bad')+'">'+(M.net>=0?'+':'')+fmt(M.net)+'</td>'+
+        '<td class="'+(M.socMin<crit?'bad':(M.socMin<crit+0.1?'wn':''))+'">'+fmt(M.socMin*100)+'%</td>'+
+        '<td class="'+(M.hPark>0?'bad':'')+'">'+fmt(M.hPark)+'</td></tr>';
+    });
+    cM.insertAdjacentHTML('beforeend',tb+'</table>');
+    out.appendChild(cM);
+  }
+
+  /* — Comparativa con/sin estrategia — */
   var c5=document.createElement('div');c5.className='card';
-  c5.innerHTML='<h2>Comparativa: sin gestión vs con gestión</h2><div class="sub">Mismo TCU y misma meteo; la gestión cambia sólo la operación</div>';
+  c5.innerHTML='<h2>Comparativa: sin estrategia vs con estrategia</h2><div class="sub">Mismo TCU y misma meteo; cambia solo la operación (estrategia SUNNER'+(opts.winter?' + winter mode':'')+')</div>';
   var rows=[
+    ['Tiempo no disponible',fmt(R.inactivePct,4)+'%',fmt(S.inactivePct,4)+'%',null],
+    ['Producción perdida',fmt(R.prodLostPct,4)+'%',fmt(S.prodLostPct,4)+'%',null],
     ['SOC final',fmt(R.socFinal*100)+'%',fmt(S.socFinal*100)+'%',S.socFinal>=R.socFinal],
     ['SOC mínimo',fmt(R.socMin*100)+'%',fmt(S.socMin*100)+'%',S.socMin>=R.socMin],
-    ['Horas SOC < 15%',fmt(R.hBelow15),fmt(S.hBelow15),S.hBelow15<=R.hBelow15],
-    ['Horas SOC < 10%',fmt(R.hBelow10),fmt(S.hBelow10),S.hBelow10<=R.hBelow10],
-    ['Horas SOC = 0 (PARADA)',fmt(R.hZero),fmt(S.hZero),S.hZero<=R.hZero],
+    ['Horas SOC = 0 (batería muerta)',fmt(R.hZero),fmt(S.hZero),S.hZero<=R.hZero],
     ['Carga total (Wh)',fmt(R.chg),fmt(S.chg),null],
-    ['Consumo base (Wh)',fmt(R.base),fmt(S.base),null],
     ['Consumo motor (Wh)',fmt(R.motor),fmt(S.motor),S.motor<=R.motor],
     ['Balance neto (Wh)',(R.net>=0?'+':'')+fmt(R.net),(S.net>=0?'+':'')+fmt(S.net),S.net>=R.net],
-    ['Ciclos equivalentes (EFC)',fmt(R.cyc.efc,1),fmt(S.cyc.efc,1),S.cyc.efc<=R.cyc.efc],
-    ['DoD diario medio',fmt(R.cyc.dodMean*100)+'%',fmt(S.cyc.dodMean*100)+'%',S.cyc.dodMean<=R.cyc.dodMean],
+    ['Rainflow: ciclos totales',fmt(R.rf.total),fmt(S.rf.total),S.rf.total<=R.rf.total],
+    ['Rainflow: ciclos ≥30% DoD',fmt(R.rf.dod30),fmt(S.rf.dod30),S.rf.dod30<=R.rf.dod30],
+    ['Rainflow: ciclos ≥60% DoD',fmt(R.rf.dod60),fmt(S.rf.dod60),S.rf.dod60<=R.rf.dod60],
+    ['EFC',fmt(R.cyc.efc,1),fmt(S.cyc.efc,1),S.cyc.efc<=R.cyc.efc],
     ['Fade anual estimado',fmt(R.cyc.fadeYr,1)+'%',fmt(S.cyc.fadeYr,1)+'%',S.cyc.fadeYr<=R.cyc.fadeYr],
     ['Vida a 80% SOH (años)',fmt(R.cyc.years,1),fmt(S.cyc.years,1),S.cyc.years>=R.cyc.years]
   ];
-  var tb='<table class="cmp"><tr><th>Métrica</th><th>Sin gestión</th><th>Con gestión</th></tr>';
+  var tb2='<table class="cmp"><tr><th>Métrica</th><th>Sin estrategia</th><th>Con estrategia</th></tr>';
   rows.forEach(function(r){
     var cls=r[3]===null?'':(r[3]?'ok':'bad');
-    tb+='<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td class="'+cls+'">'+r[2]+'</td></tr>';
+    tb2+='<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td class="'+cls+'">'+r[2]+'</td></tr>';
   });
-  tb+='</table>';
-  c5.insertAdjacentHTML('beforeend',tb);
+  c5.insertAdjacentHTML('beforeend',tb2+'</table>');
   out.appendChild(c5);
 }
 </script>
