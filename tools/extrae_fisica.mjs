@@ -133,7 +133,30 @@ function perfiles() {
 }
 
 /* ---------- lectura ---------- */
+/* Regla AUDITADA de tcu.py: según de qué come el TCU, tiene sentido enseñar unas
+   cosas u otras. Un equipo de alterna no tiene SoC que enseñar porque no tiene
+   batería que gestionar, y uno de string no tiene panel propio que mirar. */
+function visibilidad() {
+  const i = tcuPy.indexOf('def ui_visibility_for_source');
+  if (i < 0) throw new Error('no encuentro ui_visibility_for_source en tcu.py');
+  const cuerpo = tcuPy.slice(i, tcuPy.indexOf('\ndef ', i + 10));
+  const out = {};
+  const re = /if src (?:in \{[^}]*"(SP|STRING|AC)"[^}]*\}|== "(SP|STRING|AC)"):\s*\n\s*return \{([^}]*)\}/g;
+  let m;
+  while ((m = re.exec(cuerpo))) {
+    const clave = (m[1] || m[2]).toLowerCase(), campos = {};
+    for (const par of m[3].split(',')) {
+      const kv = par.match(/"(\w+)"\s*:\s*(True|False)/);
+      if (kv) campos[kv[1]] = kv[2] === 'True';
+    }
+    out[clave] = campos;
+  }
+  if (!out.sp || !out.string || !out.ac) throw new Error('la regla de visibilidad no salió entera');
+  return out;
+}
+
 const canon = {
+  visibilidad: visibilidad(),
   motorK0: pyNum(tcuPy, 'TCU_MOTOR_K0_WH_DEG', 'tcu.py'),
   motorK1: pyNum(tcuPy, 'TCU_MOTOR_K1_WH_DEG2', 'tcu.py'),
   motorPeakW: pyNum(tcuPy, 'TCU_MOTOR_PEAK_W', 'tcu.py'),
@@ -224,6 +247,9 @@ var FISICA = {
 
  /* ── perfiles de hardware (PROFILES de tcu.py, en su orden) ── */
  perfilPorDefecto: ${JSON.stringify(canon.perfilPorDefecto)},
+
+ /* qué tiene sentido enseñar de cada variante (regla auditada de tcu.py) */
+ visibilidad: ${JSON.stringify(canon.visibilidad)},
  perfiles: [
 ${perfilesJs}
  ],
@@ -257,4 +283,8 @@ console.log('sim/fisica.js  ·  ' + canon.perfiles.length + ' perfiles  ·  ' + 
 console.log('  motor  Wh/° = ' + canon.motorK0 + ' + ' + canon.motorK1 + '·|θ|   pico ' + canon.motorPeakW + ' W');
 console.log('  techo  verano ' + canon.verano.socMax + ' % / ' + canon.verano.calibDias + ' d   ·   invierno ' +
   canon.invierno.socMax + ' % / ' + canon.invierno.calibDias + ' d');
+console.log('  visib ' + Object.keys(canon.visibilidad).map(function (k) {
+  var v = canon.visibilidad[k];
+  return k + ': ' + Object.keys(v).filter(function (x) { return v[x]; }).map(function (x) { return x.replace('show_', ''); }).join('+');
+}).join('   ·   '));
 console.log('  ✓ tcu.py, tfm_constants.py y bateria.html dicen lo mismo en todo lo que comparten');

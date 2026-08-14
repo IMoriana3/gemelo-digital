@@ -499,6 +499,13 @@ function aplicaMeteo() {
   P.meteo.tMedia = +$('temp').value;
 }
 function tcuSel() { return P.tcu(sel) || P.tcus[0]; }
+/* Regla auditada del canon (ui_visibility_for_source de tcu.py), leída de fisica.js:
+   SELF/SP enseña panel + batería + SoC + calibración; STRING esconde el panel porque
+   no lo tiene; AC no enseña nada de energía porque no lleva batería que gestionar. */
+function ve(que) {
+  var v = SIM.FISICA.visibilidad[tcuSel().perfil.tipo] || {};
+  return !!v['show_' + que];
+}
 /* Tocar un mando con la simulación en pausa tiene que verse igualmente: se da un
    paso mínimo para que el estado derivado (posición segura, alarmas, alimentación)
    se recalcule antes de repintar. Sin esto, pulsar la seta en pausa no hace nada
@@ -565,10 +572,12 @@ function pintaChips() {
     chip('Equipos', r.total, '', P.seguidores().length + ' seguidores + ' + (r.total - P.seguidores().length) + ' repetidores') +
     chip('Salud', r.ok + '/' + r.total, r.alarma ? 'bad' : (r.aviso ? 'warn' : 'ok'), r.alarma + ' alarma · ' + r.offline + ' offline') +
     chip('Moviendo', r.moviendo, r.moviendo ? 'blue' : '', 'motores en marcha') +
-    chip('SoC medio', num(r.socMedio, 0) + ' %', r.socMin < P.cfg.estrategia.socCrit ? 'bad' : (r.socMin < 50 ? 'warn' : 'ok'),
-      'mínimo ' + num(r.socMin, 0) + ' % · techo ' + num(P.tcus[0].techoSoc, 0) + ' %') +
-    chip('No disponibles', r.noDisponibles, r.noDisponibles ? 'bad' : 'ok',
-      r.noDisponibles ? 'en defensa por batería' : 'todos siguiendo') +
+    (ve('soc')
+      ? chip('SoC medio', num(r.socMedio, 0) + ' %', r.socMin < P.cfg.estrategia.socCrit ? 'bad' : (r.socMin < 50 ? 'warn' : 'ok'),
+          'mínimo ' + num(r.socMin, 0) + ' % · techo ' + num(P.tcus[0].techoSoc, 0) + ' %') +
+        chip('No disponibles', r.noDisponibles, r.noDisponibles ? 'bad' : 'ok',
+          r.noDisponibles ? 'en defensa por batería' : 'todos siguiendo')
+      : chip('Batería', 'no aplica', '', 'alimentación de red')) +
     chip('Viento', num(h0.viento * 3.6, 0) + ' km/h', n.nivelVientoGlobal >= 2 ? 'bad' : (n.nivelVientoGlobal ? 'warn' : 'ok'), nivelTxt) +
     chip('Nieve', num(P.meteo.nieve * 100, 1) + ' cm', n.alarmaNieve ? 'bad' : '', n.alarmaNieve ? 'alarma de nieve' : 'sin alarma') +
     chip('Alimentación', TIPO_TXT[P.tcus[0].perfil.tipo], n.acFallo && P.tcus[0].perfil.tipo === 'ac' ? 'bad' : '',
@@ -830,10 +839,15 @@ function pintaDetalle() {
         ? 'MIENTE ' + num(t.angulo - t.anguloReal, 2) + '°'
         : 'medida fiel') +
     chip('Desviación', num(t.desviacion(), 2) + '°', t.desviacion() > 5 ? 'warn' : 'ok', t.moviendo ? 'moviendo' : 'parado') +
-    chip('SoC', num(t.soc, 1) + ' %', t.soc < 25 ? 'bad' : (t.soc < 50 ? 'warn' : 'ok'), 'SoH ' + num(t.soh, 0) + ' %') +
-    chip('Batería', num(t.vBat, 2) + ' V', '', num(t.iBat, 0) + ' mA · ' + num(t.tBat, 1) + ' °C') +
-    chip(t.perfil.tipo === 'ac' ? 'Alterna' : (t.perfil.tipo === 'string' ? 'Regulador' : 'Panel'),
-      num(t.vPanel / 1000, 1) + ' V', t.sinAlimentacion ? 'bad' : '', num(t.iPanel, 0) + ' mA') +
+    (ve('soc') ? chip('SoC', num(t.soc, 1) + ' %', t.soc < 25 ? 'bad' : (t.soc < 50 ? 'warn' : 'ok'), 'SoH ' + num(t.soh, 0) + ' %') : '') +
+    (ve('battery') ? chip('Batería', num(t.vBat, 2) + ' V', '', num(t.iBat, 0) + ' mA · ' + num(t.tBat, 1) + ' °C') : '') +
+    /* el canon esconde el panel en STRING (no hay panel propio que mirar) y esconde
+       todo el bloque de energía en AC (no hay batería que gestionar) */
+    (ve('panel')
+      ? chip('Panel', num(t.vPanel / 1000, 1) + ' V', t.sinAlimentacion ? 'bad' : '', num(t.iPanel, 0) + ' mA')
+      : chip(t.perfil.tipo === 'ac' ? 'Alterna' : 'Entrada de string',
+          t.sinAlimentacion ? 'CAÍDA' : 'presente', t.sinAlimentacion ? 'bad' : 'ok',
+          t.perfil.tipo === 'ac' ? 'red de planta' : '1500 V → convertidor')) +
     chip('Motor', num(t.iMotor, 0) + ' mA', t.moviendo ? 'blue' : '', 'pico ' + num(t.iMotorPico, 0) + ' mA');
 
   var err = t.angulo - t.anguloReal;

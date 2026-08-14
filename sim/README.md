@@ -89,9 +89,19 @@ El mismo seguidor se comporta de forma muy distinta según su alimentación, y e
 
 | Tipo | Qué es | Lo que cambia |
 |---|---|---|
-| **SP** (*self-powered*) | panel auxiliar propio de 45 o 60 W sobre el seguidor | lo que entra depende del **ángulo real**: abanderar o quedarse parado también cuesta carga. Es el caso duro |
-| **STRING** | del propio string FV por regulador de 60 W | con sol satura en su tope; la carga la limitan la temperatura y el C-rate, no el panel |
+| **SELF / SP** | panel auxiliar propio de 45 o 60 W, montado en el seguidor | lo que entra depende del **ángulo real**: abanderar o quedarse parado también cuesta carga. Es el caso duro |
+| **STRING** | del propio string de la planta, a **1500 V** de continua, por un convertidor de 60 W | con sol hay potencia de sobra: el convertidor satura en su tope y quien limita la carga pasa a ser la temperatura y el C-rate, no la fuente |
 | **AC** | de alterna (`AC_grid`) | en el canon va **sin batería**: mientras haya red va servido, y un corte tumba el TCU entero |
+
+Y no cambia solo de dónde viene la corriente: cambia **qué tiene sentido mirar**. `tcu.py` trae una regla marcada como *auditada* que el simulador lee y respeta (`ui_visibility_for_source`):
+
+| Alimentación | Panel | Batería | SoC | Calibración |
+|---|---|---|---|---|
+| SELF / SP | sí | sí | sí | sí |
+| STRING | **no** | sí | sí | sí |
+| AC | **no** | **no** | **no** | **no** |
+
+Por eso, con un perfil de alterna, la interfaz deja de enseñar SoC y batería: no es que valgan cero, es que no hay batería que gestionar.
 
 ### Estrategia oficial SUNNER
 
@@ -123,7 +133,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `planta.js` | el motor: física, jerarquía y generación de la imagen de registros. Sin DOM — se ejecuta igual en Node |
 | `modbus-map.js` | **generado**, no se toca a mano: 515 direcciones del mapa canónico |
 | `fisica.js` | **generado**, no se toca a mano: perfiles, constantes medidas, políticas y curvas de carga |
-| `prueba.mjs` | prueba de humo: 108 comprobaciones sobre un día de planta |
+| `prueba.mjs` | prueba de humo: 111 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
 | `../tools/extrae_fisica.mjs` | regenera `fisica.js` desde SolarGPT y `bateria.html`, contrastando las fuentes |

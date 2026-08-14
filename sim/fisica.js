@@ -25,6 +25,9 @@ var FISICA = {
 
  /* ── perfiles de hardware (PROFILES de tcu.py, en su orden) ── */
  perfilPorDefecto: "SP_45W_6Ah",
+
+ /* qué tiene sentido enseñar de cada variante (regla auditada de tcu.py) */
+ visibilidad: {"sp":{"show_panel":true,"show_battery":true,"show_soc":true,"show_calibration":true},"string":{"show_panel":false,"show_battery":true,"show_soc":true,"show_calibration":true},"ac":{"show_panel":false,"show_battery":false,"show_soc":false,"show_calibration":false}},
  perfiles: [
   { id: "SP_45W_3Ah", n: "SP · 45W dedicated panel · 3 Ah (76.8 Wh)", tipo: "sp", ah: 3, wh: 76.8, chgW: 45, dependePoa: true, winterMode: true, heated: false },
   { id: "SP_45W_6Ah", n: "SP · 45W dedicated panel · 6 Ah (153.6 Wh)", tipo: "sp", ah: 6, wh: 153.6, chgW: 45, dependePoa: true, winterMode: true, heated: false },

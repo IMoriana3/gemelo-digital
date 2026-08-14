@@ -274,6 +274,14 @@ console.log('   tres días al 92 % de nubes — SP:', spA.toFixed(1) + '% · STR
 ok(stA > spA + 5, 'con poca luz, el STRING aguanta bastante mejor que el panel propio');
 ok(ac.soc === 100 && ac.ah === 0, 'el perfil de alterna del canon va sin batería y no tiene SoC que gestionar');
 
+/* la regla auditada de tcu.py sobre qué tiene sentido enseñar de cada variante */
+const vis = SIM.FISICA.visibilidad;
+ok(vis.sp.show_panel && vis.sp.show_battery && vis.sp.show_soc, 'SELF enseña panel, batería y SoC');
+ok(!vis.string.show_panel && vis.string.show_battery && vis.string.show_soc,
+   'STRING esconde el panel pero mantiene batería y SoC');
+ok(!vis.ac.show_panel && !vis.ac.show_battery && !vis.ac.show_soc && !vis.ac.show_calibration,
+   'AC no enseña nada de energía: ni panel, ni batería, ni SoC, ni calibración');
+
 console.log('\n── estrategia oficial SUNNER (la de bateria.html) ──');
 function conEstrategia(e, dias = 2, perfil = 'SP_60W_6Ah') {
   const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 6, perfil, estrategia: e });
