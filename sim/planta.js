@@ -198,6 +198,8 @@ function tocados() {
 
 /* las cuatro curvas, tal cual salen de bateria.html */
 var cRateSafeLFP = F.cRateSafeLFP, hotDerate = F.hotDerate, heaterW = F.heaterW, poaAt = F.poaAt;
+/* y el consumo de un TCU en un paso, que es del módulo de gestión de batería */
+var consumoTCU = F.consumoTCU;
 
 /* El abanderamiento vive en su propio módulo compartido (sim/viento.js), que es el
    mismo fichero que usan el gemelo 3D y el visor de terreno. Una sola implementación
@@ -736,12 +738,13 @@ TCU.prototype.mueve = function (dt, inhibido) {
      o una defensa por batería se ejecutan enteras, con winter mode o sin él). */
   var efec = mov;
   if (E.winter && this.sp === SP.NINGUNA && !this.parked) efec *= K.DEG_H_WINTER / K.DEG_H_NORMAL;
-  if (this.p.cfg.motorModel === 'factiun') {
-    wh = Math.min(efec * (K.MOT_K0 + K.MOT_K1 * Math.abs(medio)), K.MOTOR_PEAK_W * dtH);
-  } else {
-    /* consumo SUNNER: mA medios a 25,6 V durante el tiempo que tarda en girar */
-    wh = (this.p.cfg.motorModel / 1000) * K.V_NOM * (efec / K.SLEW_DPS) / 3600;
-  }
+  /* el consumo NO se calcula aquí: lo da el módulo de gestión de batería (consumoTCU,
+     copiado íntegro de bateria.html por el generador). Este simulador decide cuánto se
+     mueve y en qué ángulo; cuántos Wh cuesta eso lo dice el canon. */
+  wh = consumoTCU({ dtH: dtH, dia: true, mov: efec, pos: medio,
+                    motorModel: this.p.cfg.motorModel, calefactada: false, tAmb: 20,
+                    k0: K.MOT_K0, k1: K.MOT_K1, picoW: K.MOTOR_PEAK_W,
+                    vNom: K.V_NOM, slew: K.SLEW_DPS }).motor;
   /* con el eje en apuros el motor no consume menos: consume MÁS. Calado, corriente de
      calado y salta 41040; duro, corriente alta pero por debajo del disparo — que es
      lo que obliga al firmware a darse cuenta por la vía lenta. */
@@ -789,12 +792,20 @@ TCU.prototype.energia = function (dt, ang, whMotor) {
   var bh = Math.max(0, ghi - dhi);
   var dia = ghi > 10;
 
-  /* ── CONSUMO ── */
-  this.calefactor = !!pf.heated && dia && this.tBat < 0;
-  var whCal = this.calefactor ? heaterW(this.tBat) * dtH : 0;
-  var tEf = this.calefactor ? Math.max(this.tBat, 1) : this.tBat;
-  var whBase = (dia ? K.IDLE_W : K.SLEEP_W) * dtH;
-  var whCons = whBase + whMotor + whCal;
+  /* ── CONSUMO ──
+     Tampoco se calcula aquí. La electrónica y el calefactor los da el mismo consumoTCU
+     del módulo de batería; el motor entra ya hecho porque el movimiento lo decide este
+     simulador (y porque un eje calado o duro consume lo que consume la avería, que es
+     cosa del gemelo y no de la gestión de batería).
+     La temperatura que decide el calefactor es la de la BATERÍA, no la ambiente: es la
+     que el equipo mide y la que limita la carga. */
+  var cons = consumoTCU({ dtH: dtH, dia: dia, mov: 0, pos: 0,
+                          motorModel: this.p.cfg.motorModel,
+                          calefactada: !!pf.heated, tAmb: this.tBat,
+                          idleW: K.IDLE_W, sleepW: K.SLEEP_W });
+  this.calefactor = cons.heat > 0;
+  var whCal = cons.heat, tEf = cons.tEff, whBase = cons.base;
+  var whCons = cons.total + whMotor;
 
   /* ── ENTRADA, según de qué come este TCU ── */
   var poaChg, pEntrada;

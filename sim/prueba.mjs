@@ -6,6 +6,7 @@
 
        node sim/prueba.mjs
 */
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const SIM = require('./planta.js');
@@ -506,6 +507,53 @@ const Pd = new SIM.Planta({ nTCU: 2, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 11, di
                             lat: 42.82, lon: -1.60, tz: 1 });
 Pd.meteo.viento = 9; Pd.meteo.rachas = 0; Pd.paso(1); Pd.paso(1);
 ok(Pd.tcu(1).stow === 0, 'y con el canon puesto, 9 m/s ya no abandera');
+
+/* ───────── el consumo lo pone el módulo de gestión de batería ─────────
+   Ni el gemelo ni el informe de impacto lo calculan: los tres llaman a la misma
+   función, copiada íntegra de bateria.html por el generador. Dos versiones de esto
+   es exactamente lo que hubo que medir cuando los Wh de motor no cuadraban. */
+ok(typeof SIM.FISICA.consumoTCU === 'function',
+   'el módulo de batería expone el consumo del TCU');
+const fuentePlanta = fs.readFileSync(new URL('./planta.js', import.meta.url), 'utf8');
+ok(!/MOT_K0\s*\+\s*K\.MOT_K1/.test(fuentePlanta) && !/K\.IDLE_W\s*:\s*K\.SLEEP_W/.test(fuentePlanta),
+   'y el gemelo ya no lleva su propia copia de la fórmula');
+
+/* lo que el gemelo gasta moviendo tiene que ser LO QUE DICE el módulo.
+   Se le manda a mano lejos para que el paso mueva de verdad: en seguimiento normal
+   el lazo pasa la mayor parte del tiempo dentro de la banda muerta y no movería. */
+function unPasoMoviendo() {
+  const P = new SIM.Planta({ nTCU: 1, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 10, dia: 172,
+                             lat: 42.82, lon: -1.60, tz: 1 });
+  const t = P.tcu(1);
+  t.modo = SIM.MODO.MANUAL; t.manual = 40;
+  const a0 = t.anguloReal;
+  P.paso(60);
+  return { t: t, mov: Math.abs(t.anguloReal - a0), medio: (t.anguloReal + a0) / 2,
+           wh: t.energiaMotorHoy / 3600 };
+}
+const p1 = unPasoMoviendo();
+ok(p1.mov > 0.5, 'el TCU se mueve en el paso de prueba', p1.mov.toFixed(2) + '°');
+const esperado = SIM.FISICA.consumoTCU({
+  dtH: 60 / 3600, dia: true, mov: p1.mov, pos: p1.medio,
+  motorModel: 'factiun', calefactada: false, tAmb: 20 }).motor;
+ok(Math.abs(p1.wh - esperado) < 1e-12,
+   'los Wh de motor del gemelo son los del módulo, al bit', p1.wh.toFixed(6) + ' Wh');
+
+/* el paso de arriba va a tope de velocidad, y ahí el motor topa en su pico: a 0,17 °/s
+   la curva medida pide ~49 W, o sea que el tope de 50 W está a un pelo. Que el consumo
+   salga exactamente MOTOR_PEAK_W·dtH no es casualidad, es el limitador haciendo su
+   trabajo — y por eso SUBIR K0 no cambiaría nada aquí. */
+ok(Math.abs(p1.wh - SIM.K.MOTOR_PEAK_W * (60 / 3600)) < 1e-12,
+   'a plena velocidad el motor topa en su pico, como debe', SIM.K.MOTOR_PEAK_W + ' W');
+
+/* y los parámetros del motor tienen que seguir teniendo efecto a través del módulo:
+   moverlos sin que el consumo cambie sería peor que no poder moverlos */
+SIM.ajusta({ MOT_K0: SIM.K_CANON.MOT_K0 / 2 });
+const p2 = unPasoMoviendo();
+ok(p2.wh < p1.wh * 0.9, 'bajar K0 baja lo que gasta el motor, pasando por el módulo',
+   p1.wh.toFixed(4) + ' → ' + p2.wh.toFixed(4) + ' Wh');
+SIM.restauraCanon();
+ok(Math.abs(unPasoMoviendo().wh - p1.wh) < 1e-12, 'y volver al canon lo devuelve exacto');
 
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);

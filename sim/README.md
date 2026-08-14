@@ -124,6 +124,23 @@ Y el generador ya no se conforma con que los números coincidan: exige que `tcu_
   importar el canónico. Hoy coincide; mañana es el que se queda atrás.
 ```
 
+## El consumo no lo calcula el gemelo
+
+Lo que gasta un TCU en un paso —electrónica, motor y calefactor— vive en **`consumoTCU`**, dentro del módulo de gestión de batería (`bateria.html`), y el generador lo copia **entero** a `fisica.js` igual que las cuatro curvas. El gemelo y el informe de impacto **no lo recalculan: lo llaman**.
+
+```js
+consumoTCU({ dtH, dia, mov, pos, motorModel, calefactada, tAmb })
+// → { base, motor, heat, total, tEff }
+```
+
+El reparto de responsabilidades queda así: el gemelo decide **cuánto se mueve** el seguidor y **en qué ángulo** —eso es suyo, con su lazo, su banda muerta en pulsos y su sensor— y el módulo dice **cuántos Wh cuesta eso**. Lo único que el gemelo sigue calculando aparte es el consumo de una **avería**: un eje calado o duro consume la corriente de la avería, que es cosa del equipo y no de la gestión de batería.
+
+Las constantes se pueden pasar (`k0`, `k1`, `picoW`, `vNom`, `slew`, `idleW`, `sleepW`) y si no se pasan manda el canon. Sin eso, los parámetros ajustables del gemelo habrían quedado sin efecto sobre el consumo, que es peor que no tenerlos: parecen hacer algo.
+
+Guards en `prueba.mjs`: que los Wh de motor del gemelo sean **los del módulo al bit**, que en `planta.js` ya no quede la fórmula, y que mover `MOT_K0` siga cambiando el consumo pasando por ahí. El refactor no movió ni un número — misma tabla de impacto antes y después, que es lo que se le pide a un cambio así.
+
+Un detalle que sale al probarlo: a plena velocidad el motor **topa en su pico**. La curva medida pide ~49 W a 0,17 °/s y el tope son 50 W, así que un movimiento a tope de slew sale exactamente `MOTOR_PEAK_W · dtH`. No es un error de redondeo, es el limitador — y explica por qué *subir* K0 no cambia nada en ese régimen.
+
 ## El canon es el defecto, no el dogma
 
 Ninguna constante está clavada. `K` nace del canon, pero **todo** se puede apartar en caliente:

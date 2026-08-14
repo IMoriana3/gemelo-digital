@@ -72,6 +72,9 @@ var FISICA = {
    se puedan traer tal cual sin tocarles ni una línea. */
 var D2R = Math.PI / 180;
 var JEITA_T3 = FISICA.e.JEITA_T3, JEITA_T4 = FISICA.e.JEITA_T4, ALBEDO = FISICA.e.ALBEDO;
+var K0 = FISICA.motor.K0, K1 = FISICA.motor.K1, MOTOR_PEAK_W = FISICA.motor.picoW;
+var V_NOM = FISICA.vNom, SLEW_DPS = FISICA.e.SLEW_DPS;
+var IDLE_W = FISICA.idleW, SLEEP_W = FISICA.sleepW;
 
 /* Curvas canónicas, copiadas ÍNTEGRAS de bateria.html por el generador. */
 function cRateSafeLFP(t){
@@ -91,11 +94,35 @@ function poaAt(Rdeg,el,az,bh,dh,gh){
   var cb=Math.cos(Math.abs(R));
   return Math.max(0,bh)*rb + Math.max(0,dh)*(1+cb)/2 + ALBEDO*Math.max(0,gh)*(1-cb)/2;
 }
+function consumoTCU(o){
+  /* Las constantes son las canónicas salvo que se pasen: el canon manda cuando no lo
+     configuras, no siempre. Sin esto, quien llame desde fuera (el gemelo) tendría sus
+     parámetros ajustables sin efecto ninguno sobre el consumo, que es peor que no
+     tenerlos: parece que hacen algo. */
+  var d=function(v,c){return v!=null?v:c;};
+  var k0=d(o.k0,K0), k1=d(o.k1,K1), pico=d(o.picoW,MOTOR_PEAK_W);
+  var vNom=d(o.vNom,V_NOM), slew=d(o.slew,SLEW_DPS);
+  var idle=d(o.idleW,IDLE_W), sleep=d(o.sleepW,SLEEP_W);
+  var motorWh=0;
+  if(o.mov>0.01){
+    /* medición Factiun (Wh/° = K0 + K1·|θ|, con tope de pico) o SUNNER (mA medios
+       durante el tiempo que tarda en girar: por eso depende de la velocidad) */
+    if(o.motorModel==='factiun')
+      motorWh=Math.min(o.mov*(k0+k1*Math.abs(o.pos)),pico*o.dtH);
+    else
+      motorWh=(o.motorModel/1000)*vNom*(o.mov/slew)/3600;
+  }
+  var baseWh=(o.dia?idle:sleep)*o.dtH;
+  var heatWh=0, tEff=o.tAmb;
+  if(o.calefactada && o.dia && o.tAmb<0){heatWh=heaterW(o.tAmb)*o.dtH; tEff=Math.max(o.tAmb,1);}
+  return {base:baseWh, motor:motorWh, heat:heatWh, total:baseWh+motorWh+heatWh, tEff:tEff};
+}
 
 FISICA.cRateSafeLFP = cRateSafeLFP;
 FISICA.hotDerate = hotDerate;
 FISICA.heaterW = heaterW;
 FISICA.poaAt = poaAt;
+FISICA.consumoTCU = consumoTCU;
 
 if (typeof window !== "undefined") window.FISICA = FISICA;
 if (typeof module !== "undefined") module.exports = FISICA;

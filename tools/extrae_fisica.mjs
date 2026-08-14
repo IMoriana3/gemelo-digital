@@ -206,7 +206,9 @@ const estrategia = {
   JEITA_T3: jsNum('JEITA_T3'), JEITA_T4: jsNum('JEITA_T4'),
   DEG_H_NORMAL: jsNum('DEG_H_NORMAL'), DEG_H_WINTER: jsNum('DEG_H_WINTER')
 };
-const funciones = ['cRateSafeLFP', 'hotDerate', 'heaterW', 'poaAt'].map(jsFuncion);
+/* consumoTCU va la ÚLTIMA porque llama a heaterW: que el fichero generado se lea en
+   el mismo orden en que se depende, aunque las declaraciones de función se icen. */
+const funciones = ['cRateSafeLFP', 'hotDerate', 'heaterW', 'poaAt', 'consumoTCU'].map(jsFuncion);
 
 /* ---------- contraste entre fuentes ---------- */
 const choques = [];   /* divergencias que impiden generar */
@@ -353,6 +355,9 @@ ${perfilesJs}
    se puedan traer tal cual sin tocarles ni una línea. */
 var D2R = Math.PI / 180;
 var JEITA_T3 = FISICA.e.JEITA_T3, JEITA_T4 = FISICA.e.JEITA_T4, ALBEDO = FISICA.e.ALBEDO;
+var K0 = FISICA.motor.K0, K1 = FISICA.motor.K1, MOTOR_PEAK_W = FISICA.motor.picoW;
+var V_NOM = FISICA.vNom, SLEW_DPS = FISICA.e.SLEW_DPS;
+var IDLE_W = FISICA.idleW, SLEEP_W = FISICA.sleepW;
 
 /* Curvas canónicas, copiadas ÍNTEGRAS de bateria.html por el generador. */
 ${funciones.join('\n')}
@@ -361,6 +366,7 @@ FISICA.cRateSafeLFP = cRateSafeLFP;
 FISICA.hotDerate = hotDerate;
 FISICA.heaterW = heaterW;
 FISICA.poaAt = poaAt;
+FISICA.consumoTCU = consumoTCU;
 
 if (typeof window !== "undefined") window.FISICA = FISICA;
 if (typeof module !== "undefined") module.exports = FISICA;

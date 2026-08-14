@@ -240,6 +240,47 @@ var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
    coteja el generador de física. Con paso horario los 0,5 h de histéresis se redondean a
    uno: un paso más de bandera, que es lo que hacía la versión anterior. */
 var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=0.5;
+/* ═══════════ CONSUMO DEL TCU — canónico, un solo sitio ═══════════
+   Lo que gasta un TCU en un paso: electrónica, motor y calefactor. Vive AQUÍ y lo
+   copia entero tools/extrae_fisica.mjs a sim/fisica.js, así que ni el simulador de
+   planta ni el informe de impacto lo recalculan: llaman a esta misma función. Tener
+   dos versiones de esto es justo lo que hizo falta medir cuando el consumo de motor
+   del gemelo y el de SolarGPT no daban lo mismo.
+
+     o.dtH        paso en horas
+     o.dia        ¿hay luz? (electrónica en idle o en reposo)
+     o.mov        grados EFECTIVOS movidos en el paso (ya con winter mode aplicado)
+     o.pos        ángulo MEDIO del movimiento — el par depende de dónde está la mesa
+     o.motorModel 'factiun' (Wh/° medidos) o mA medios del estudio SUNNER
+     o.calefactada  perfil -LT
+     o.tAmb       temperatura que decide el calefactor
+
+   Devuelve los tres sumandos, el total y la temperatura EFECTIVA (el calefactor
+   desbloquea la carga: por debajo de 0 °C no se carga, pero calentando sí). */
+function consumoTCU(o){
+  /* Las constantes son las canónicas salvo que se pasen: el canon manda cuando no lo
+     configuras, no siempre. Sin esto, quien llame desde fuera (el gemelo) tendría sus
+     parámetros ajustables sin efecto ninguno sobre el consumo, que es peor que no
+     tenerlos: parece que hacen algo. */
+  var d=function(v,c){return v!=null?v:c;};
+  var k0=d(o.k0,K0), k1=d(o.k1,K1), pico=d(o.picoW,MOTOR_PEAK_W);
+  var vNom=d(o.vNom,V_NOM), slew=d(o.slew,SLEW_DPS);
+  var idle=d(o.idleW,IDLE_W), sleep=d(o.sleepW,SLEEP_W);
+  var motorWh=0;
+  if(o.mov>0.01){
+    /* medición Factiun (Wh/° = K0 + K1·|θ|, con tope de pico) o SUNNER (mA medios
+       durante el tiempo que tarda en girar: por eso depende de la velocidad) */
+    if(o.motorModel==='factiun')
+      motorWh=Math.min(o.mov*(k0+k1*Math.abs(o.pos)),pico*o.dtH);
+    else
+      motorWh=(o.motorModel/1000)*vNom*(o.mov/slew)/3600;
+  }
+  var baseWh=(o.dia?idle:sleep)*o.dtH;
+  var heatWh=0, tEff=o.tAmb;
+  if(o.calefactada && o.dia && o.tAmb<0){heatWh=heaterW(o.tAmb)*o.dtH; tEff=Math.max(o.tAmb,1);}
+  return {base:baseWh, motor:motorWh, heat:heatWh, total:baseWh+motorWh+heatWh, tEff:tEff};
+}
+
 /* Calefactor -LT (PS26002_RevA): P = 1,0 + 0,15·|T| W si T<0°C, solo de día; desbloquea carga (T efectiva ≥1°C) */
 function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
 /* JEITA lado caliente (§04.1a): T3=35°C reduce, T4=45°C bloquea carga */
@@ -440,19 +481,10 @@ function simulate(meteo,prof,loc,soc0,opts){
     var avgPos=(target+prevPos)/2;
     if(moveNow)prevPos=target;
 
-    /* — Consumo motor: medición Factiun (Wh/°) o SUNNER (mA medio × tiempo de giro) — */
-    var motorWh=0;
-    if(deltaEff>0.01){
-      if(opts.motorModel==='factiun')
-        motorWh=Math.min(deltaEff*(K0+K1*Math.abs(avgPos)),MOTOR_PEAK_W*dtH);
-      else
-        motorWh=(opts.motorModel/1000)*V_NOM*(deltaEff/SLEW_DPS)/3600;
-    }
-    var baseWh=(day?IDLE_W:SLEEP_W)*dtH;
-    /* — Calefactor -LT (solo de día, con fuente de carga): P=1+0,15·|T| y desbloquea la carga — */
-    var heatWh=0, tEff=m.temp;
-    if(prof.heated && day && m.temp<0){heatWh=heaterW(m.temp)*dtH; tEff=Math.max(m.temp,1);}
-    var consWh=baseWh+motorWh+heatWh;
+    /* — Consumo del paso: electrónica + motor + calefactor — */
+    var cons=consumoTCU({dtH:dtH,dia:day,mov:deltaEff,pos:avgPos,
+                         motorModel:opts.motorModel,calefactada:prof.heated,tAmb:m.temp});
+    var motorWh=cons.motor, baseWh=cons.base, heatWh=cons.heat, tEff=cons.tEff, consWh=cons.total;
 
     /* — Carga: POA de la posición REAL (abanderado/defensa reduce), JEITA frío+calor, techo — */
     var poaChg;

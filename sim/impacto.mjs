@@ -112,17 +112,23 @@ function balance(nombre, opts) {
     } else {
       pEnt = pf.chgW * Math.min(s.poa / 1000, 1) * F.e.ETA_CHG;
     }
-    /* --- consumo --- */
-    const pBase = s.dia ? C.pIdle : (opts.sleep45 ? C.pSleepViejo : F.e.SLEEP_W);
-    let whMot;
-    if (opts.motorCurva) whMot = motorW(s.ang) * (s.mov / (opts.slew16 ? C.vMaxViejo : C.vMax)) / 3600;
-    else whMot = s.mov * (F.motor.K0 + F.motor.K1 * s.ang);
-    if (E.winter) whMot *= F.e.DEG_H_WINTER / F.e.DEG_H_NORMAL;
-    const whCal = s.calef ? F.heaterW(s.tAmb) * dtH : 0;
-    const whCons = pBase * dtH + whMot + whCal;
+    /* --- consumo ---
+       La REFERENCIA no se calcula aquí: sale de consumoTCU, el módulo de gestión de
+       batería. Lo que se calcula a mano es solo la VARIANTE que se está contrastando
+       (la curva medida I(θ)), que es de lo que va el informe. */
+    let mov = s.mov;
+    if (E.winter) mov *= F.e.DEG_H_WINTER / F.e.DEG_H_NORMAL;
+    const canon = F.consumoTCU({ dtH: dtH, dia: s.dia, mov: mov, pos: s.ang,
+                                 motorModel: 'factiun', calefactada: s.calef, tAmb: s.tAmb });
+    let whMot = canon.motor;
+    if (opts.motorCurva) whMot = motorW(s.ang) * (mov / (opts.slew16 ? C.vMaxViejo : C.vMax)) / 3600;
+    /* el sleep viejo es lo único que puede apartarse de lo que dice el módulo */
+    const whBase = opts.sleep45 && !s.dia ? C.pSleepViejo * dtH : canon.base;
+    const whCal = canon.heat;
+    const whCons = whBase + whMot + whCal;
     whMotorTotal += whMot;
     /* --- admisión --- */
-    const tEf = s.calef ? Math.max(s.tAmb, 1) : s.tAmb;
+    const tEf = canon.tEff;
     let whChg = 0;
     if (s.dia && tEf >= E.tMin && s.poa >= (opts.etaCurva ? 0.5 : E.poaMin)) {
       let pAdm = Math.min(pEnt, F.cRateSafeLFP(tEf) * F.hotDerate(tEf) * capWh);
