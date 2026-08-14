@@ -65,11 +65,15 @@ var K = {
   SNOW_ALARM_M: 0.03,           /* 3 cm de nieve → alarma de nieve */
   BAT_AH: 6, BAT_MAH: 6000,     /* batería 6 Ah */
   PV_PEAK: 60,                  /* panel auxiliar 60 Wp */
-  P_CHG_MAX: 54,                /* tope del regulador (W) */
   V_MIN: 24.0, V_MAX: 27.2,     /* 8S LiFePO4 (V) */
   V_ABS: 27.0,                  /* tensión de absorción */
-  P_ELEC: 0.64,                 /* consumo de electrónica medido (W) */
-  MOT_A: 0.0503, MOT_B: 0.000845, /* motor: Wh/° = a + b·|θ| */
+  /* ---- física medida, idéntica a bateria.html (00.2t: campaña «Consumos motor_02 @24V») ---- */
+  IDLE_W: 0.64, SLEEP_W: 0.64,  /* electrónica, de día y de noche (W) */
+  MOT_K0: 0.0503, MOT_K1: 0.000845, /* motor: Wh/° = K0 + K1·|θ| */
+  MOTOR_PEAK_W: 50,             /* tope instantáneo del motor (W) */
+  ETA_CHG: 0.90,                /* rendimiento de la carga */
+  DEG_H_NORMAL: 10.0, DEG_H_WINTER: 3.0,  /* °/h solar por modo (11.5b) */
+  ALBEDO: 0.2,
   JEITA_T3: 35, JEITA_T4: 45,   /* lado caliente: reduce a 35 °C, bloquea a 45 */
   T_CHG_MIN: 0,                 /* bajo 0 °C no se carga (salvo versión calefactada) */
   SOC_L1: 50, SOC_L2: 35, SOC_L3: 25,  /* umbrales de batería (configurables, 41081) */
@@ -191,6 +195,40 @@ function cosAOI(P, tiltDeg) {
   return Math.max(0, sx * Math.sin(r) + sz * Math.cos(r));
 }
 
+/* ═══════════════════ carga de la batería ═══════════════════
+   Las tres funciones de bateria.html, sin cambiar una coma: son las que fijan
+   cuánta carga admite la batería y son la diferencia entre un modelo que dice
+   «hay sol, luego carga» y uno que sabe que a −5 °C no carga casi nada.        */
+
+/* C-rate seguro de una LiFePO4 según temperatura (física canónica 11.5b). */
+function cRateSafeLFP(t) {
+  if (t > 25) return 1.0;
+  if (t > 10) return 0.5 + (t - 10) * (0.5 / 15);
+  if (t > 0)  return 0.2 + (t / 10) * 0.3;
+  if (t > -10) return 0.05 + (t + 10) * (0.15 / 10);
+  return 0.05;
+}
+/* JEITA por el lado caliente (§04.1a): T3 = 35 °C reduce, T4 = 45 °C bloquea. */
+function hotDerate(t) {
+  if (t >= K.JEITA_T4) return 0;
+  if (t > K.JEITA_T3) return 1 - 0.7 * (t - K.JEITA_T3) / (K.JEITA_T4 - K.JEITA_T3);
+  return 1;
+}
+/* Calefactor de las versiones -LT (PS26002_RevA): P = 1 + 0,15·|T| W bajo 0 °C. */
+function heaterW(t) { return t < 0 ? 1.0 + 0.15 * Math.abs(t) : 0; }
+
+/* Transposición isotrópica: irradiancia en el plano girado R grados. Es la que
+   convierte «hay 700 W/m² de global» en «a este panel, girado así, le llegan
+   tantos» — y por eso abanderar o quedarse en defensa se paga en carga. */
+function poaAt(Rdeg, el, az, bh, dh, gh) {
+  if (el <= 0) return 0;
+  var R = Rdeg * D2R, sx = Math.cos(el) * Math.sin(az), sz = Math.sin(el);
+  var cAOI = Math.max(0, sx * Math.sin(R) + sz * Math.cos(R));
+  var rb = cAOI / Math.max(Math.sin(el), 0.087);
+  var cb = Math.cos(Math.abs(R));
+  return Math.max(0, bh) * rb + Math.max(0, dh) * (1 + cb) / 2 + K.ALBEDO * Math.max(0, gh) * (1 - cb) / 2;
+}
+
 /* ═══════════════════ codificación Modbus ═══════════════════ */
 function u16(v) { return Math.round(v) & 0xFFFF; }
 function s16(v) { v = Math.round(v); return (v < 0 ? v + 65536 : v) & 0xFFFF; }
@@ -284,6 +322,9 @@ function TCU(id, planta, opts) {
   this.ciclos = Math.floor(this.rnd.entre(40, 200));
   this.diasPreservacion = 0; this.cargador = 3; this.calefactor = false;
   this.bajaCapacidad = 0;                  /* 0 normal · 1 baja · 2 muy baja · 3 crítica */
+  this.parked = false;                     /* defensa por SOC crítico (estrategia) */
+  this.techoSoc = 100; this.cargaCompletaHoy = false;
+  this.whCarga = 0; this.whConsumo = 0;
 
   /* nace hablando: si el último contacto arrancara en 0, el SCADA vería una planta
      entera con 56 años de antigüedad de comunicaciones */
@@ -374,8 +415,12 @@ TCU.prototype.decide = function (dt, ang) {
     sp = e.forzado; fuente = FUENTE_SP.NCU;
     obj = cfg.spTilt[e.forzado]; crit = CRIT.SEGURIDAD;
 
-  /* 5 — BATERÍA: crítico manda a defensa; muy baja congela el seguimiento */
-  } else if (this.bajaCapacidad === 3) {
+  /* 5 — BATERÍA. Dos cosas distintas que caen en el mismo escalón:
+     · la ESTRATEGIA (SOC < crítico) manda el seguidor a defensa y lo cuenta como
+       no disponible — es el CASO 3 del estudio de disponibilidad;
+     · los modos de baja capacidad del FIRMWARE (L1/L2/L3, umbrales configurables
+       del propio TCU) que, por debajo de L2, congelan el seguimiento donde esté. */
+  } else if (this.parked || this.bajaCapacidad === 3) {
     obj = signo(this.angulo || 1) * Math.abs(cfg.defensaTilt); crit = CRIT.BATERIA;
     fuente = FUENTE_SP.LOCAL;
   } else if (this.bajaCapacidad === 2) {
@@ -404,12 +449,13 @@ TCU.prototype.decide = function (dt, ang) {
   return inhibido;
 };
 
-/* ---- motor: velocidad real, deadband y consumo ---- */
+/* ---- motor: velocidad real, deadband y consumo ----
+   Devuelve los Wh gastados en este paso, con el modelo elegido en la estrategia:
+   la medición de Factiun (Wh/° = K0 + K1·|θ|, con el ángulo MEDIO del movimiento y
+   tope de 50 W) o el consumo SUNNER en mA medios × tiempo de giro. */
 TCU.prototype.mueve = function (dt, inhibido) {
-  var err = this.objetivo - this.angulo, dead = this.p.cfg.deadband;
-  /* con batería baja (L1) el lazo se hace grueso: es el winter mode del estudio
-     SUNNER — 3 °/h en vez de 10 °/h, o sea ~3× menos correcciones */
-  if (this.bajaCapacidad === 1) dead *= 3.3;
+  var err = this.objetivo - this.angulo, E = this.p.cfg.estrategia;
+  var dead = this.p.cfg.deadband;
   /* en seguimiento solo corrige si el error supera el deadband; en posición de
      seguridad va sin histéresis (la orden es de seguridad, no de precisión) */
   var urgente = (this.sp !== SP.NINGUNA) || this.criterio === CRIT.BATERIA;
@@ -424,23 +470,48 @@ TCU.prototype.mueve = function (dt, inhibido) {
   this.angulo = clamp(this.angulo + dir * paso, -K.AXIS_MAX, K.AXIS_MAX);
   var mov = Math.abs(this.angulo - antes);
   this.moviendo = mov > 1e-9 ? dir : 0;
-  /* energía: Wh/° = a + b·|θ| (medida en banco, física canónica de SolarGPT) */
-  var wh = (K.MOT_A + K.MOT_B * Math.abs(this.angulo)) * mov;
-  var w = dt > 0 ? wh * 3600 / dt : 0;
+  var medio = (this.angulo + antes) / 2, dtH = dt / 3600, wh;
+  /* WINTER MODE (11.5b): el seguidor sigue yendo al mismo sitio, pero con un paso
+     tan grueso que consume como si corrigiera 3 °/h en vez de 10 °/h. Se contabiliza
+     igual que en el simulador de batería: sobre los grados EFECTIVOS, no sobre el
+     recorrido real, y solo mientras se está siguiendo al sol (una orden de seguridad
+     o una defensa por batería se ejecutan enteras, con winter mode o sin él). */
+  var efec = mov;
+  if (E.winter && this.sp === SP.NINGUNA && !this.parked) efec *= K.DEG_H_WINTER / K.DEG_H_NORMAL;
+  if (this.p.cfg.motorModel === 'factiun') {
+    wh = Math.min(efec * (K.MOT_K0 + K.MOT_K1 * Math.abs(medio)), K.MOTOR_PEAK_W * dtH);
+  } else {
+    /* consumo SUNNER: mA medios a 25,6 V durante el tiempo que tarda en girar */
+    wh = (this.p.cfg.motorModel / 1000) * K.V_NOM * (efec / K.SLEW_DPS) / 3600;
+  }
   this.energiaMotorHoy += wh * 3600; this.energiaMotorTotal += wh * 3600;   /* J */
   this.vMotor = this.vBat * 1000;
+  var w = dtH > 0 ? wh / dtH : 0;
   this.iMotor = this.vBat > 1 ? (w / this.vBat) * 1000 : 0;                 /* mA */
   if (this.iMotor > this.iMotorPico) this.iMotorPico = this.iMotor;
   this.velocidadBaja = this.ejeBloqueado;
   this.limiteOeste = this.angulo >= K.AXIS_MAX - 0.01;
   this.limiteEste = this.angulo <= -K.AXIS_MAX + 0.01;
-  return w;
+  return wh;
 };
 
-/* ---- batería LiFePO4: entrada según el tipo de alimentación (SP · STRING · AC),
-       cargas, límites JEITA y conteo de culombios ---- */
-TCU.prototype.energia = function (dt, ang, wMotor) {
-  var m = this.p.meteo, pf = this.perfil;
+/* ═══ GESTIÓN DE BATERÍA — la misma que bateria.html ═══════════════════════════
+   Balance en Wh sobre la capacidad del perfil, no en amperios-hora sueltos, con
+   los cuatro elementos que hacen que el resultado se parezca al de planta:
+
+     1. La carga entra por el POA de la posición REAL (transposición isotrópica),
+        no por «hay sol». Abanderado o en defensa se carga menos, y ese es el
+        coste oculto de cada abanderamiento.
+     2. Techo de carga: con la estrategia activa la batería NO sube del SOC
+        objetivo (80 %) salvo el día de carga completa (uno de cada cinco), que es
+        lo que evita tenerla siempre al 100 % envejeciendo.
+     3. Límite real de admisión: rendimiento de carga, C-rate seguro LiFePO4 según
+        temperatura, JEITA por el lado caliente y cut-in del regulador.
+     4. Consumo: electrónica + motor (medición Factiun o mA SUNNER) + calefactor
+        de las versiones LT, que gasta pero desbloquea la carga en frío.       */
+TCU.prototype.energia = function (dt, ang, whMotor) {
+  var m = this.p.meteo, pf = this.perfil, E = this.p.cfg.estrategia;
+  var dtH = dt / 3600, capWh = pf.wh;
   this.vBat = K.V_MIN + (this.soc / 100) * (K.V_MAX - K.V_MIN);
 
   /* temperaturas: siguen a la ambiente con inercia; la PCB, un poco por encima */
@@ -448,62 +519,83 @@ TCU.prototype.energia = function (dt, ang, wMotor) {
   this.tBat += (tAmb - this.tBat) * Math.min(1, dt / 1800);
   this.tPcb += (tAmb + (this.moviendo ? 6 : 2) - this.tPcb) * Math.min(1, dt / 600);
 
+  /* ── irradiancia del sitio: global, difusa y directa horizontal ── */
+  var ghi = 1000 * Math.max(0, Math.sin(Math.max(0, ang.sol.el))) * m.transmitancia();
+  var dhi = ghi * (0.12 + 0.6 * (m.nubes / 100));
+  var bh = Math.max(0, ghi - dhi);
+  var dia = ghi > 10;
+
+  /* ── CONSUMO ── */
+  this.calefactor = !!pf.heated && dia && this.tBat < 0;
+  var whCal = this.calefactor ? heaterW(this.tBat) * dtH : 0;
+  var tEf = this.calefactor ? Math.max(this.tBat, 1) : this.tBat;
+  var whBase = (dia ? K.IDLE_W : K.SLEEP_W) * dtH;
+  var whCons = whBase + whMotor + whCal;
+
   /* ── ENTRADA, según de qué come este TCU ── */
-  var directa = Math.max(0, Math.sin(Math.max(0, ang.sol.el))) * m.transmitancia();
-  var aoi = this.repetidor ? directa : cosAOI(ang.sol, this.angulo);
-  var pDisp;
+  var poaChg, pEntrada;
   if (pf.tipo === 'ac') {
-    /* alterna: potencia de sobra mientras haya red. Si se corta, el TCU pasa a
-       vivir de la batería de respaldo — y el que no la lleva, se apaga. */
+    /* alterna: la fuente da su potencia nominal haya sol o no. Si se corta la red,
+       el TCU pasa a vivir de la batería de respaldo — y el que no la lleva, se apaga. */
     this.acOk = !this.p.ncu.acFallo;
-    pDisp = this.acOk ? pf.chgW : 0;
+    poaChg = this.acOk ? 1000 : 0;
+    pEntrada = this.acOk ? pf.chgW * K.ETA_CHG : 0;
     this.vPanel = this.acOk ? 30000 : 0;
-  } else if (pf.tipo === 'string') {
-    /* del propio string por regulador: con sol satura en su tope; lo único que le
-       afecta del seguidor es que abanderado el string produce menos, pero aun así
-       sobra para 60 W hasta irradiancias bajas */
-    var pStr = K.PV_PEAK * 30 * directa * Math.max(aoi, 0.25);
-    if (m.nieve >= 0.02) pStr *= 0.05;
-    pDisp = Math.min(pf.chgW, pStr);
-    this.vPanel = (pDisp > 1 ? 30 + this.rnd.entre(-1, 1) : 0) * 1000;
   } else {
-    /* panel auxiliar propio: ve el ÁNGULO REAL — abanderar o quedarse parado
-       también cuesta carga, que es el meollo del estudio de disponibilidad */
-    var poa = pf.chgW * directa * aoi;
-    if (m.nieve >= 0.02) poa *= 0.05;            /* panel nevado: casi nada entra */
-    pDisp = Math.min(poa, pf.chgW);
-    this.vPanel = (poa > 1 ? 30 + this.rnd.entre(-1, 1) : 0) * 1000;
+    /* SP y STRING ven el mismo sol y el mismo ángulo; lo que cambia es el tamaño
+       de la fuente. El panel auxiliar escala con la irradiancia que le llega; el
+       string es tan grande que el regulador satura en su tope en cuanto amanece
+       del todo, y solo se queda corto con muy poca luz. */
+    poaChg = poaAt(this.repetidor ? 0 : this.angulo, ang.sol.el, ang.sol.az, bh, dhi, ghi);
+    if (m.nieve >= 0.02) poaChg *= 0.05;         /* panel o módulos nevados */
+    var frac = pf.tipo === 'string' ? Math.min(poaChg / 150, 1) : Math.min(poaChg / 1000, 1);
+    pEntrada = pf.chgW * frac * K.ETA_CHG;
+    this.vPanel = (poaChg > 5 ? 30 + this.rnd.entre(-1, 1) : 0) * 1000;
   }
 
-  /* cargas: electrónica siempre; motor cuando se mueve; calefactor de la versión
-     LT bajo 0 °C (P = 1 + 0,15·|T| W), que además desbloquea la carga */
-  this.calefactor = !!pf.heated && this.tBat < 0;
-  var pCal = this.calefactor ? 1.0 + 0.15 * Math.abs(this.tBat) : 0;
-  var pCarga = K.P_ELEC + wMotor + pCal;
-
-  /* límites de temperatura de carga (JEITA): bloquea en frío y en caliente */
-  var tEf = this.calefactor ? Math.max(this.tBat, 1) : this.tBat;
-  var derate = 1;
-  if (tEf < K.T_CHG_MIN) derate = 0;
-  else if (tEf >= K.JEITA_T4) derate = 0;
-  else if (tEf > K.JEITA_T3) derate = 1 - 0.7 * (tEf - K.JEITA_T3) / (K.JEITA_T4 - K.JEITA_T3);
-  if (this.soc >= 99.5) derate *= 0.05;          /* flotación */
-  else if (this.vBat >= K.V_ABS || this.soc > 92) derate *= Math.max(0.05, 1 - (this.soc - 92) / 8 * 0.9);
-
-  var pCargaBat = pDisp * derate - pCarga;
-  this.iPanel = this.vBat > 1 ? (pDisp / this.vBat) * 1000 : 0;
-  this.iBat = this.vBat > 1 ? (pCargaBat / this.vBat) * 1000 : 0;            /* + carga, − descarga */
+  /* ── ADMISIÓN de la batería: C-rate seguro y JEITA, y el cut-in del regulador ── */
+  var whChg = 0, bloqueoT = false;
   if (this.ah > 0) {
-    this.soc = clamp(this.soc + (this.iBat / 1000) * (dt / 3600) / this.ah * 100, 0, 100);
+    if ((dia || pf.tipo === 'ac') && tEf >= E.tMin && poaChg >= E.poaMin) {
+      var pAdm = Math.min(pEntrada, cRateSafeLFP(tEf) * hotDerate(tEf) * capWh);
+      whChg = Math.max(0, pAdm) * dtH;
+    } else if (poaChg >= E.poaMin && tEf < E.tMin) bloqueoT = true;
+  }
+
+  /* ── TECHO: SOC objetivo, salvo el día de carga completa (uno de cada fcDays) ── */
+  var diaIdx = Math.floor(this.p.t.epoch / 86400) - this.p.diaBase;
+  this.cargaCompletaHoy = E.activa ? (((diaIdx % E.fcDays) + E.fcDays) % E.fcDays === E.fcDays - 1) : true;
+  var techo = E.activa ? (this.cargaCompletaHoy ? 1.0 : E.socTgt / 100) : 1.0;
+  this.techoSoc = techo * 100;
+
+  if (this.ah > 0) {
+    var socF = this.soc / 100;
+    /* hueco disponible hasta el techo, contando que el consumo también hace sitio */
+    var hueco = Math.max(0, techo - socF) * capWh + whCons;
+    var whEf = Math.min(whChg, hueco);
+    this.soc = clamp((socF + (whEf - whCons) / capWh) * 100, 0, 100);
+    this.whCarga = whEf; this.whConsumo = whCons;
+    this.iBat = (this.vBat > 1 && dtH > 0) ? ((whEf - whCons) / dtH / this.vBat) * 1000 : 0;
+    this.iPanel = (this.vBat > 1 && dtH > 0) ? ((whEf / dtH) / this.vBat) * 1000 : 0;
   } else {
-    /* sin batería (AC puro): no hay SoC que contar. Con red, el equipo va servido;
-       sin red se queda sin alimentación y deja de comunicar. */
+    /* sin batería (AC puro): no hay SoC que contar ni culombios que sumar */
     this.soc = this.acOk ? 100 : 0;
     this.iBat = 0;
+    this.iPanel = this.acOk ? (pEntrada / Math.max(this.vBat, 1)) * 1000 : 0;
+    this.whCarga = 0; this.whConsumo = whCons;
   }
-  this.cargador = (derate === 0 && pDisp > 1) ? 2 : (pDisp > 1 ? 3 : 1);
+
+  /* ── ESTRATEGIA: por debajo del SOC crítico el seguidor va a defensa y cuenta
+     como NO DISPONIBLE. Rearme con +2 %, que es lo que evita el baile de entrar y
+     salir cada paso al rozar el umbral. ── */
+  if (E.activa && this.ah > 0) {
+    if (!this.parked && this.soc < E.socCrit) this.parked = true;
+    else if (this.parked && this.soc >= E.socCrit + 2) this.parked = false;
+  } else this.parked = false;
+
+  this.cargador = bloqueoT ? 2 : (whChg > 0 ? 3 : 1);
   this.relajacion = !this.moviendo && Math.abs(this.iBat) < 30;
-  if (!ang.dia && this.p.t.hora < 0.02) this.energiaMotorHoy = 0;            /* corte diario */
+  if (!dia && this.p.t.hora < 0.02) this.energiaMotorHoy = 0;                /* corte diario */
 };
 
 TCU.prototype.paso = function (dt) {
@@ -517,8 +609,8 @@ TCU.prototype.paso = function (dt) {
   var ang = angulos(this.p.loc, this.p.t.dia, this.p.t.hora);
   this.solar = { real: ang.real, bt: ang.bt, zen: ang.sol.zen * R2D, az: ang.sol.az * R2D, dia: ang.dia };
   var inhibido = this.decide(dt, ang);
-  var w = this.mueve(dt, inhibido);
-  this.energia(dt, ang, w);
+  var whMotor = this.mueve(dt, inhibido);
+  this.energia(dt, ang, whMotor);
   this.fueraRango = Math.abs(this.angulo) > K.AXIS_MAX + 5;
   this.sobrecorriente = this.iMotor > this.p.cfg.iMotorMax;
   if (this.online) this.ultimoContacto = this.p.t.epoch;
@@ -564,6 +656,7 @@ TCU.prototype.estadoTxt = function () {
   if (this.sinAlimentacion) return 'sin alimentación';
   if (!this.online) return 'sin comunicación';
   if (this.sp) return SP_TXT[this.sp];
+  if (this.parked) return 'defensa por batería';
   return CRIT_TXT[this.criterio];
 };
 
@@ -639,6 +732,20 @@ function Planta(cfg) {
     deadband: cfg.deadband != null ? cfg.deadband : K.HYST_DEG,
     iMotorMax: cfg.iMotorMax || 4000,        /* mA de disparo de sobrecorriente */
     perfil: cfg.perfil || 'SP_60W_6Ah',      /* alimentación y batería (SP · STRING · AC) */
+    /* modelo de consumo del motor: 'factiun' (Wh/° medidos) o los mA medios de
+       SUNNER a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
+    motorModel: cfg.motorModel || 'factiun',
+    /* ESTRATEGIA de gestión de batería — los mismos parámetros y los mismos valores
+       por defecto que el simulador de batería (estrategia oficial SUNNER) */
+    estrategia: {
+      activa:  cfg.estrategia && cfg.estrategia.activa  != null ? cfg.estrategia.activa  : true,
+      socTgt:  cfg.estrategia && cfg.estrategia.socTgt  != null ? cfg.estrategia.socTgt  : 80,  /* techo normal (%) */
+      socCrit: cfg.estrategia && cfg.estrategia.socCrit != null ? cfg.estrategia.socCrit : 30,  /* defensa (%) */
+      fcDays:  cfg.estrategia && cfg.estrategia.fcDays  != null ? cfg.estrategia.fcDays  : 5,   /* carga completa cada N días */
+      winter:  cfg.estrategia && cfg.estrategia.winter  != null ? cfg.estrategia.winter  : false,
+      tMin:    cfg.estrategia && cfg.estrategia.tMin    != null ? cfg.estrategia.tMin    : 0,   /* T mínima de carga (°C) */
+      poaMin:  cfg.estrategia && cfg.estrategia.poaMin  != null ? cfg.estrategia.poaMin  : 50   /* cut-in del regulador (W/m²) */
+    },
     defensaTilt: cfg.defensaTilt != null ? cfg.defensaTilt : 55,
     /* tilt de cada posición de seguridad (registros 41044…41056 de la TCU) */
     spTilt: cfg.spTilt || [0, 55, 0, 55, 0, 0, 0, 0],
@@ -647,6 +754,9 @@ function Planta(cfg) {
   this.loc = cfg.loc || { n: 'Gorraiz', lat: 42.81, lon: -1.58, tz: 1, dst: true };
   this.t = { dia: cfg.dia || 172, hora: cfg.hora != null ? cfg.hora : 9, epoch: Math.floor(Date.now() / 1000) };
   this.tResto = 0;
+  /* día 0 del contador de cargas completas: la de «una cada cinco días» se cuenta
+     desde que arranca la planta, igual que en el simulador de batería */
+  this.diaBase = Math.floor(this.t.epoch / 86400);
   this.meteo = new Meteo(); this.meteo.p = this;
   this.ncu = new NCU(this);
   this.hsus = []; this.tcus = [];
@@ -699,12 +809,15 @@ Planta.prototype.seguidores = function () {
 };
 /* Resumen de flota con el mismo vocabulario que el SCADA. */
 Planta.prototype.resumen = function () {
-  var r = { ok: 0, aviso: 0, alarma: 0, offline: 0, total: 0, socMin: 100, socMedio: 0, moviendo: 0 };
+  var r = { ok: 0, aviso: 0, alarma: 0, offline: 0, total: 0, socMin: 100, socMedio: 0,
+            moviendo: 0, noDisponibles: 0 };
   var T = this.tcus;
   for (var i = 0; i < T.length; i++) {
     var t = T[i]; r.total++; r[t.salud()]++;
     r.socMin = Math.min(r.socMin, t.soc); r.socMedio += t.soc;
     if (t.moviendo) r.moviendo++;
+    /* «no disponible» en el sentido del estudio: en defensa por batería, sin seguir al sol */
+    if (t.parked) r.noDisponibles++;
   }
   r.socMedio /= Math.max(1, T.length);
   return r;
@@ -975,6 +1088,7 @@ var API = {
   CRIT: CRIT, CRIT_TXT: CRIT_TXT, FUENTE_SP: FUENTE_SP, FUENTE_TXT: FUENTE_TXT,
   CHARGER_TXT: CHARGER_TXT,
   posicionSolar: posicionSolar, angulos: angulos, cosAOI: cosAOI,
+  cRateSafeLFP: cRateSafeLFP, hotDerate: hotDerate, heaterW: heaterW, poaAt: poaAt,
   u16: u16, s16: s16, u32: u32, f32: f32, kx10: kx10, bits: bits
 };
 if (typeof window !== 'undefined') window.SIM = API;

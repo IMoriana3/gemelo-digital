@@ -29,15 +29,40 @@ El viento manda sobre manual, que es como se comporta el equipo real. El abander
 
 ## Alimentación y gestión de batería
 
-El mismo seguidor se comporta de forma muy distinta según de qué coma su TCU, y el mapa lo declara (30000, campo *TCU type*). Los tres tipos, con los perfiles del estudio de disponibilidad:
+Es **el mismo modelo que `bateria.html`**, no una versión reducida: mismas constantes, mismas curvas y misma estrategia, aplicados a cada TCU de la planta a la vez y en tiempo continuo en vez de a un equipo hora a hora.
+
+### De qué come el TCU
+
+El mismo seguidor se comporta de forma muy distinta según su alimentación, y el mapa lo declara (30000, campo *TCU type*):
 
 | Tipo | Qué es | Lo que cambia |
 |---|---|---|
 | **SP** (*self-powered*) | panel auxiliar propio de 45 o 60 W sobre el seguidor | lo que entra depende del **ángulo real**: abanderar o quedarse parado también cuesta carga. Es el caso duro |
 | **STRING** | del propio string FV por regulador de 60 W | con sol satura en su tope; la carga la limitan la temperatura y el C-rate, no el panel |
-| **AC** | de alterna | la batería flota al 100 % y solo trabaja si se corta la red. Sin batería, un corte tumba el TCU |
+| **AC** | de alterna | la batería flota en el techo y solo trabaja si se corta la red. Sin batería, un corte tumba el TCU |
 
-Las variantes **LT calefactadas** gastan `1 + 0,15·|T|` W bajo 0 °C y a cambio desbloquean la carga en frío. En el lado caliente se aplica **JEITA**: reduce a 35 °C y bloquea a 45 °C.
+### Estrategia oficial SUNNER
+
+| Parámetro | Por defecto | Qué hace |
+|---|---|---|
+| **SOC objetivo** (techo) | 80 % | con la estrategia activa la batería **no sube de ahí**: por encima del techo no entra carga, aunque sobre sol. Es lo que evita tenerla siempre al 100 % envejeciendo |
+| **Carga completa** | cada 5 días | uno de cada N días el techo sube al 100 %, para reequilibrar |
+| **SOC crítico** | 30 % | por debajo, el seguidor va a **defensa 55°** y cuenta como **no disponible**. Rearma al superar el crítico **+2 %**, que es lo que evita el baile de entrar y salir al rozar el umbral |
+| **Winter mode** | off | el seguidor va al mismo sitio pero con paso tan grueso que consume como si corrigiera **3 °/h en vez de 10** — un 70 % menos de motor |
+| **T mínima de carga** | 0 °C | por debajo no se admite carga… salvo versión LT |
+| **Cut-in del regulador** | 50 W/m² | por debajo de ese POA el regulador no arranca |
+
+### Lo que limita la carga
+
+1. **POA de la posición REAL**, por transposición isotrópica (directa + difusa + albedo 0,2). Un seguidor abanderado o en defensa carga menos, y ese es el coste oculto de cada abanderamiento.
+2. **Rendimiento de carga** η = 0,90.
+3. **C-rate seguro LiFePO₄** según temperatura (1 C sobre 25 °C, 0,2 C a 0 °C, 0,05 C bajo −10 °C).
+4. **JEITA** por el lado caliente: reduce a partir de 35 °C, bloquea a 45 °C.
+5. **Calefactor LT**: `1 + 0,15·|T|` W bajo 0 °C, solo de día — gasta, pero desbloquea la carga.
+
+**Consumo:** electrónica 0,64 W siempre, más el motor con el modelo que se elija — la medición de Factiun (`Wh/° = 0,0503 + 0,000845·|θ|` sobre el ángulo medio del movimiento, tope 50 W) o el consumo SUNNER en mA medios a 25,6 V (2500 / 3250 / 4000).
+
+Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la estrategia: son los umbrales configurables de *alarma* del propio TCU (bits 13/11/12 de 30002 y el *low capacity mode* de 30001), y por debajo de L2 el firmware congela el seguimiento donde esté.
 
 ## Ficheros
 
@@ -45,7 +70,7 @@ Las variantes **LT calefactadas** gastan `1 + 0,15·|T|` W bajo 0 °C y a cambio
 |---|---|
 | `planta.js` | el motor: física, jerarquía y generación de la imagen de registros. Sin DOM — se ejecuta igual en Node |
 | `modbus-map.js` | **generado**, no se toca a mano: 515 direcciones del mapa canónico |
-| `prueba.mjs` | prueba de humo: 58 comprobaciones sobre un día de planta |
+| `prueba.mjs` | prueba de humo: 72 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
 
@@ -60,7 +85,7 @@ La prueba decodifica **al revés** que el motor —como lo haría el colector de
 
 - **Mapa y bits:** ficha `cobertura-zigbee/modbus.html`, que transcribe `NCU_Modbus_Map_R7`, `SUNNER_TCU_ModbusMap_v6` (FW v1.4.3) y `HSU_Modbus_Map_R23`.
 - **Escalas de los registros propios de la TCU:** las que usa la [TCU Toolbox](https://github.com/IMoriana3/scada/tree/main/tools/tcu-toolbox) contra equipo real — tilt ×10, ángulos solares ×100, temperaturas ×10, tensiones mV, corrientes mA, reloj en BCD.
-- **Física y umbrales:** los mismos que `bateria.html` (estudio de disponibilidad de batería de SUNNER + física canónica de SolarGPT): consumo de electrónica 0,64 W, motor Wh/° = 0,0503 + 0,000845·|θ|, giro a 0,17 °/s, deadband de 2,5°, GCR 0,397, tope ±55°.
+- **Física, gestión de batería y umbrales:** los mismos que `bateria.html` (estudio de disponibilidad de batería de SUNNER + física canónica de SolarGPT 00.2t + 11.5b): consumo de electrónica 0,64 W, motor Wh/° = 0,0503 + 0,000845·|θ|, η de carga 0,90, C-rate seguro, JEITA, calefactor LT, giro a 0,17 °/s, deadband de 2,5°, GCR 0,397, tope ±55°. Las funciones `cRateSafeLFP`, `hotDerate`, `heaterW` y `poaAt` son las de allí, sin cambiar una coma.
 - **Criterio de salud** (`ok` / `aviso` / `alarma` / `offline`): el del colector del SCADA y la toolbox.
 
 ## Lo que hay que saber antes de fiarse

@@ -191,6 +191,30 @@
       </div>
 
       <div class="grp">
+        <h3>Gestión de batería</h3>
+        <label class="sw"><input type="checkbox" id="estrOn" checked><span>Estrategia oficial SUNNER</span></label>
+        <div class="fld"><label>SOC objetivo (techo) <span class="rv" id="socTgtV">80 %</span></label>
+          <input type="range" id="socTgt" min="40" max="100" value="80"></div>
+        <div class="fld"><label>SOC crítico (defensa) <span class="rv" id="socCritV">30 %</span></label>
+          <input type="range" id="socCrit" min="5" max="70" value="30"></div>
+        <div class="fld"><label>Carga completa cada <span class="rv" id="fcDaysV">5 días</span></label>
+          <input type="range" id="fcDays" min="1" max="15" value="5"></div>
+        <label class="sw"><input type="checkbox" id="winter"><span>Winter mode (3 °/h)</span></label>
+        <div class="fld"><label>T mínima de carga <span class="rv" id="tMinV">0 °C</span></label>
+          <input type="range" id="tMin" min="-20" max="15" value="0"></div>
+        <div class="fld"><label>Cut-in del regulador <span class="rv" id="poaMinV">50 W/m²</span></label>
+          <input type="range" id="poaMin" min="0" max="250" value="50"></div>
+        <div class="fld"><label>Consumo del motor</label>
+          <select id="motorModel">
+            <option value="factiun">Factiun · Wh/° medidos (0,0503 + 0,000845·|θ|)</option>
+            <option value="2500">SUNNER · 2500 mA medio @25,6 V</option>
+            <option value="3250">SUNNER · 3250 mA medio @25,6 V</option>
+            <option value="4000">SUNNER · 4000 mA medio @25,6 V</option>
+          </select></div>
+        <div class="note">Mismo modelo que <a href="bateria.html" style="color:var(--blue)">bateria.html</a>: techo de carga, carga completa periódica, defensa por SOC crítico con rearme +2 %, C-rate seguro LiFePO₄ y JEITA.</div>
+      </div>
+
+      <div class="grp">
         <h3>Tiempo</h3>
         <div class="fld"><label>Día del año <span class="rv" id="diaV">21 jun</span></label>
           <input type="range" id="dia" min="1" max="365" value="172"></div>
@@ -387,16 +411,43 @@ function construye() {
     nRep: Math.max(0, +$('nRep').value || 0),
     grupos: +$('nGrup').value || 4,
     perfil: $('perfil').value,
+    motorModel: $('motorModel').value === 'factiun' ? 'factiun' : +$('motorModel').value,
+    estrategia: {
+      activa: $('estrOn').checked, socTgt: +$('socTgt').value, socCrit: +$('socCrit').value,
+      fcDays: +$('fcDays').value, winter: $('winter').checked,
+      tMin: +$('tMin').value, poaMin: +$('poaMin').value
+    },
     dia: +$('dia').value, hora: +$('hora').value,
     loc: { n: L.n, lat: L.lat, lon: L.lon, tz: L.tz, dst: L.dst }
   });
-  aplicaMeteo();
+  aplicaMeteo(); aplicaEstrategia();
   P.ncu.acFallo = $('acFallo').checked;
   P.ncu.upsFallo = $('upsFallo').checked;
   var pf = SIM.perfilDe($('perfil').value);
   $('perfilNota').innerHTML = NOTA_TIPO[pf.tipo] + (pf.heated ? ' Versión <b>LT calefactada</b>: bajo 0 °C gasta 1 + 0,15·|T| W y desbloquea la carga.' : '');
   sel = 1; traza = []; previos = {}; destellos = {};
   pintaGrupos(); pintaUnidades(); pintaTodo();
+}
+/* La estrategia se aplica EN CALIENTE: cambiar el techo o el SOC crítico a mitad de
+   una simulación es justo lo que se quiere poder hacer para ver el efecto, sin tener
+   que rehacer la planta y perder el estado. */
+function aplicaEstrategia() {
+  if (!P) return;
+  var E = P.cfg.estrategia;
+  E.activa = $('estrOn').checked;
+  E.socTgt = +$('socTgt').value;
+  E.socCrit = +$('socCrit').value;
+  E.fcDays = +$('fcDays').value;
+  E.winter = $('winter').checked;
+  E.tMin = +$('tMin').value;
+  E.poaMin = +$('poaMin').value;
+  var mm = $('motorModel').value;
+  P.cfg.motorModel = mm === 'factiun' ? 'factiun' : +mm;
+  $('socTgtV').textContent = E.socTgt + ' %';
+  $('socCritV').textContent = E.socCrit + ' %';
+  $('fcDaysV').textContent = E.fcDays + (E.fcDays === 1 ? ' día' : ' días');
+  $('tMinV').textContent = E.tMin + ' °C';
+  $('poaMinV').textContent = E.poaMin + ' W/m²';
 }
 function aplicaMeteo() {
   P.meteo.viento = +$('viento').value;
@@ -473,7 +524,10 @@ function pintaChips() {
     chip('Equipos', r.total, '', P.seguidores().length + ' seguidores + ' + (r.total - P.seguidores().length) + ' repetidores') +
     chip('Salud', r.ok + '/' + r.total, r.alarma ? 'bad' : (r.aviso ? 'warn' : 'ok'), r.alarma + ' alarma · ' + r.offline + ' offline') +
     chip('Moviendo', r.moviendo, r.moviendo ? 'blue' : '', 'motores en marcha') +
-    chip('SoC medio', num(r.socMedio, 0) + ' %', r.socMin < 30 ? 'bad' : (r.socMin < 50 ? 'warn' : 'ok'), 'mínimo ' + num(r.socMin, 0) + ' %') +
+    chip('SoC medio', num(r.socMedio, 0) + ' %', r.socMin < P.cfg.estrategia.socCrit ? 'bad' : (r.socMin < 50 ? 'warn' : 'ok'),
+      'mínimo ' + num(r.socMin, 0) + ' % · techo ' + num(P.tcus[0].techoSoc, 0) + ' %') +
+    chip('No disponibles', r.noDisponibles, r.noDisponibles ? 'bad' : 'ok',
+      r.noDisponibles ? 'en defensa por batería' : 'todos siguiendo') +
     chip('Viento', num(h0.viento * 3.6, 0) + ' km/h', n.nivelVientoGlobal >= 2 ? 'bad' : (n.nivelVientoGlobal ? 'warn' : 'ok'), nivelTxt) +
     chip('Nieve', num(P.meteo.nieve * 100, 1) + ' cm', n.alarmaNieve ? 'bad' : '', n.alarmaNieve ? 'alarma de nieve' : 'sin alarma') +
     chip('Alimentación', TIPO_TXT[P.tcus[0].perfil.tipo], n.acFallo && P.tcus[0].perfil.tipo === 'ac' ? 'bad' : '',
@@ -742,7 +796,9 @@ function pintaDetalle() {
     ['2 · SP3 nieve', e.nieve || e.forzado === 3, t.sp === 3, e.nieve ? 'alarma de nieve' : (e.forzado === 3 ? 'forzado' : '—')],
     ['3 · SP4 limpieza', e.limpieza || e.forzado === 4, t.sp === 4, e.limpieza ? 'interruptor del grupo ' + t.grupo : (e.forzado === 4 ? 'forzado' : '—')],
     ['4 · SP2/5/6/7 forzadas', !!e.forzado && [2, 5, 6, 7].indexOf(e.forzado) >= 0, [2, 5, 6, 7].indexOf(t.sp) >= 0, e.forzado ? 'SP' + e.forzado : '—'],
-    ['5 · Restricción de batería', t.bajaCapacidad > 0, t.criterio === SIM.CRIT.BATERIA, ['normal', 'baja (L1)', 'muy baja (L2)', 'crítica (L3)'][t.bajaCapacidad]],
+    ['5 · Restricción de batería', t.bajaCapacidad > 0 || t.parked, t.criterio === SIM.CRIT.BATERIA,
+      t.parked ? ('defensa: SoC < ' + P.cfg.estrategia.socCrit + ' % crítico')
+               : ['normal', 'baja (L1)', 'muy baja (L2)', 'crítica (L3)'][t.bajaCapacidad]],
     ['6 · Manual', t.modo === SIM.MODO.MANUAL, t.criterio === SIM.CRIT.MANUAL, 'consigna ' + num(t.manual, 1) + '°'],
     ['7 · Auto (solar)', t.modo === SIM.MODO.AUTO, t.criterio === SIM.CRIT.SEGUIMIENTO || t.criterio === SIM.CRIT.BACKTRACKING || t.criterio === SIM.CRIT.NOCHE,
       t.solar.dia ? (t.bt ? 'backtracking ' + num(t.solar.bt, 1) + '°' : 'seguimiento ' + num(t.solar.real, 1) + '°') : 'noche → ' + SIM.K.NIGHT_POS + '°']
@@ -763,6 +819,10 @@ function pintaDetalle() {
     kv('Alimentación', TIPO_TXT[t.perfil.tipo]) +
     kv('Perfil', t.perfil.n) +
     kv('Capacidad', t.ah ? num(t.ah, 1) + ' Ah (' + num(t.perfil.wh, 1) + ' Wh)' : 'sin batería') +
+    kv('Techo de carga', num(t.techoSoc, 0) + ' %' + (t.cargaCompletaHoy ? ' · hoy toca carga completa' : '')) +
+    kv('Balance del paso', '+' + num(t.whCarga * 1000, 1) + ' / −' + num(t.whConsumo * 1000, 1) + ' mWh') +
+    kv('C-rate admisible', num(SIM.cRateSafeLFP(t.tBat) * SIM.hotDerate(t.tBat), 2) + ' C a ' + num(t.tBat, 1) + ' °C') +
+    kv('Disponibilidad', t.parked ? 'NO DISPONIBLE (defensa por batería)' : 'siguiendo al sol') +
     kv('Cargador (30153)', SIM.CHARGER_TXT[t.cargador] || '—') +
     kv('Calefactor de batería', t.calefactor ? 'ON' : 'off') +
     kv('T. PCB', num(t.tPcb, 1) + ' °C') +
@@ -795,6 +855,19 @@ function grafica() {
   g.strokeStyle = '#32485d'; g.setLineDash([3, 3]); g.beginPath();
   traza.forEach(function (p, i) { i ? g.lineTo(x(i), yAng(p.tt)) : g.moveTo(x(i), yAng(p.tt)); });
   g.stroke(); g.setLineDash([]);
+  /* techo de carga y SOC crítico de la estrategia: las dos rayas entre las que se
+     mueve la batería si la estrategia está puesta */
+  var E = P.cfg.estrategia;
+  if (E.activa) {
+    g.strokeStyle = '#4a3a10'; g.setLineDash([2, 4]);
+    [E.socTgt, E.socCrit].forEach(function (v) {
+      g.beginPath(); g.moveTo(pad, yS(v)); g.lineTo(pad + w, yS(v)); g.stroke();
+    });
+    g.setLineDash([]);
+    g.fillStyle = '#4a3a10';
+    g.fillText('techo ' + E.socTgt + '%', pad + w - 62, yS(E.socTgt) - 3);
+    g.fillText('crítico ' + E.socCrit + '%', pad + w - 62, yS(E.socCrit) - 3);
+  }
   /* SoC */
   g.strokeStyle = '#e0a52b'; g.beginPath();
   traza.forEach(function (p, i) { i ? g.lineTo(x(i), yS(p.s)) : g.moveTo(x(i), yS(p.s)); });
@@ -936,10 +1009,15 @@ $('loc').onchange = construye;
 ['nTcu', 'nHsu', 'nRep'].forEach(function (id) { $(id).onchange = construye; });
 $('nGrup').onchange = construye;
 $('perfil').onchange = construye;
+['estrOn', 'socTgt', 'socCrit', 'fcDays', 'winter', 'tMin', 'poaMin', 'motorModel'].forEach(function (id) {
+  $(id).oninput = function () { aplicaEstrategia(); toca(); };
+  $(id).onchange = function () { aplicaEstrategia(); toca(); };
+});
 $('acFallo').onchange = function () { P.ncu.acFallo = this.checked; toca(); };
 
 /* en marcha */
 construye();
+aplicaEstrategia();
 sincronizaAverias();
 etiquetaTiempo();
 requestAnimationFrame(bucle);

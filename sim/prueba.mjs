@@ -150,8 +150,82 @@ function noche(perfil, opts = {}) {
 const sp = noche('SP_45W_3Ah'), st = noche('STRING_60W_3Ah'), ac = noche('AC_6Ah');
 console.log('   SoC tras 24 h de invierno nublado — SP:', sp.soc.toFixed(1) + '%',
             '· STRING:', st.soc.toFixed(1) + '%', '· AC:', ac.soc.toFixed(1) + '%');
-ok(st.soc > sp.soc, 'con STRING la batería acaba mejor que con panel propio');
-ok(ac.soc > 99, 'el TCU de alterna se queda en flotación', ac.soc.toFixed(1) + '%');
+/* con la estrategia puesta los tres topan en el mismo techo del 80 %, así que para
+   ver la diferencia entre fuentes hay que apretar: tres días muy cerrados */
+function apretado(perfil) {
+  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 350, hora: 8, perfil,
+                             estrategia: { activa: false } });
+  p.meteo.nubes = 92; p.tcu(1).soc = 60;
+  for (let i = 0; i < 3 * 24 * 60; i++) p.paso(60);
+  return p.tcu(1).soc;
+}
+const spA = apretado('SP_45W_3Ah'), stA = apretado('STRING_60W_3Ah');
+console.log('   tres días al 92 % de nubes — SP:', spA.toFixed(1) + '% · STRING:', stA.toFixed(1) + '%');
+ok(stA > spA + 5, 'con poca luz, el STRING aguanta bastante mejor que el panel propio');
+ok(ac.soc > 79 && ac.soc <= 80.01, 'el TCU de alterna se queda clavado en el techo de la estrategia', ac.soc.toFixed(1) + '%');
+
+console.log('\n── estrategia oficial SUNNER (la de bateria.html) ──');
+function conEstrategia(e, dias = 2, perfil = 'SP_60W_6Ah') {
+  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 6, perfil, estrategia: e });
+  p.meteo.nubes = 5;
+  const serie = [];
+  for (let i = 0; i < dias * 24 * 60; i++) { p.paso(60); if (i % 60 === 0) serie.push(p.tcu(1).soc); }
+  return { t: p.tcu(1), p, max: Math.max(...serie), serie };
+}
+const techo = conEstrategia({ activa: true, socTgt: 80, fcDays: 5 });
+ok(techo.max <= 80.5, 'con la estrategia, la batería NO pasa del SOC objetivo', 'máximo ' + techo.max.toFixed(1) + '%');
+const sinE = conEstrategia({ activa: false });
+ok(sinE.max > 95, 'sin estrategia sí se va al 100 %', 'máximo ' + sinE.max.toFixed(1) + '%');
+const fc = conEstrategia({ activa: true, socTgt: 80, fcDays: 1 });   /* todos los días son de carga completa */
+ok(fc.max > 95, 'el día de carga completa sí sube por encima del techo', 'máximo ' + fc.max.toFixed(1) + '%');
+
+/* de noche, para que la comprobación del rearme no se la lleve por delante el sol
+   cargando la batería a mitad de prueba */
+const pCrit = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 22,
+                               estrategia: { activa: true, socCrit: 30 } });
+pCrit.tcu(1).soc = 28; pCrit.paso(60);
+ok(pCrit.tcu(1).parked, 'bajo el SOC crítico entra en defensa');
+for (let i = 0; i < 30; i++) pCrit.paso(60);
+ok(Math.abs(pCrit.tcu(1).objetivo) === 55, 'y el objetivo pasa a defensa 55°', pCrit.tcu(1).objetivo + '°');
+ok(pCrit.resumen().noDisponibles === 1, 'cuenta como no disponible en el resumen de flota');
+pCrit.tcu(1).soc = 31; pCrit.paso(60);
+ok(pCrit.tcu(1).parked, 'a 31 % sigue en defensa (rearme +2 %)');
+pCrit.tcu(1).soc = 33; pCrit.paso(60);
+ok(!pCrit.tcu(1).parked, 'a 33 % rearma y vuelve a seguir');
+
+/* winter mode: mismo día, mismo sol, un tercio de correcciones */
+function motorDia(winter) {
+  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 5,
+                             estrategia: { activa: true, winter } });
+  p.meteo.nubes = 5;
+  for (let i = 0; i < 16 * 60; i++) p.paso(60);
+  return p.tcu(1).energiaMotorHoy / 3600;
+}
+const whNormal = motorDia(false), whWinter = motorDia(true);
+console.log('   energía de motor en un día — normal:', whNormal.toFixed(2), 'Wh · winter:', whWinter.toFixed(2), 'Wh');
+ok(whWinter < whNormal, 'el winter mode gasta menos motor que el modo normal');
+
+/* C-rate y JEITA: las curvas canónicas, comprobadas en sus puntos */
+ok(SIM.cRateSafeLFP(30) === 1 && Math.abs(SIM.cRateSafeLFP(10) - 0.5) < 1e-9 &&
+   Math.abs(SIM.cRateSafeLFP(0) - 0.2) < 1e-9 && SIM.cRateSafeLFP(-20) === 0.05,
+   'C-rate seguro LiFePO4 en sus puntos de quiebre (25/10/0/−10 °C)');
+ok(SIM.hotDerate(30) === 1 && SIM.hotDerate(46) === 0 && Math.abs(SIM.hotDerate(40) - 0.65) < 1e-9,
+   'JEITA caliente: entero hasta 35 °C, 0 a partir de 45');
+ok(Math.abs(SIM.heaterW(-10) - 2.5) < 1e-9 && SIM.heaterW(5) === 0, 'calefactor LT: 1 + 0,15·|T| bajo cero');
+
+/* frío: a −5 °C sin calefactar no entra carga; la versión LT sí carga */
+function frio(perfil) {
+  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 15, hora: 12, perfil });
+  p.meteo.tMedia = -12; p.meteo.nubes = 0; p.tcu(1).soc = 50; p.tcu(1).tBat = -5;
+  for (let i = 0; i < 180; i++) p.paso(60);
+  return p.tcu(1);
+}
+const sinLt = frio('SP_45W_6Ah'), conLt = frio('SP_45W_6Ah_LT');
+console.log('   3 h a −5 °C — sin LT:', sinLt.soc.toFixed(2) + '% · con LT:', conLt.soc.toFixed(2) + '%');
+ok(sinLt.soc < 50, 'sin calefactar, a −5 °C no carga y el SoC baja');
+ok(conLt.soc > sinLt.soc, 'la versión LT calefactada sí consigue cargar', 'calefactor ' + (conLt.calefactor ? 'ON' : 'off'));
+
+console.log('\n── un día entero sin explotar ──');
 ok(Math.abs(sp.ah - 3) < 0.01 && Math.abs(ac.ah - 6) < 0.01, 'la capacidad sale del perfil (3 Ah / 6 Ah)');
 const pSp = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, perfil: 'SP_60W_6Ah' });
 ok(bitde(pSp.regsTCU(pSp.tcu(1))[30000], 0, 3) === SIM.TIPO_REG.sp, 'un TCU autoalimentado se declara tipo BAT en 30000');
