@@ -118,6 +118,8 @@
         <option value="3250">SUNNER · 3250 mA medio @25,6 V</option>
         <option value="4000">SUNNER · 4000 mA medio @25,6 V</option>
       </select></div>
+    <div class="fld"><label>Irradiancia mínima de carga <span class="rv" id="poaMinV">50 W/m²</span></label>
+      <input type="range" id="poaMin" min="0" max="200" step="10" value="50"></div>
     <div class="note" id="profNote"></div>
   </div>
   <div class="grp"><h3>Meteorología · periodo</h3>
@@ -129,6 +131,9 @@
         <option value="synth">Sintético (cielo claro + nubes)</option>
       </select></div>
     <div class="fld" id="yearFld"><label>Año histórico</label><select id="year"></select></div>
+    <div class="fld" id="sweepFld" style="display:none"><label>Barrido desde el año</label>
+      <input type="number" id="sweepFrom" value="2013" min="1940" step="1">
+      <div class="note">Open-Meteo tiene histórico desde 1940. El estudio SUNNER usa 2013–2024. Más años = más peticiones (van por lotes de 8).</div></div>
     <div class="fld" id="daysFld" style="display:none"><label>Días de simulación <span class="rv" id="daysV">7</span></label>
       <input type="range" id="days" min="3" max="16" step="1" value="7"></div>
     <div class="fld" id="fileFld" style="display:none"><label>Fichero _HourlyRes de PVSyst (.csv)</label>
@@ -344,7 +349,7 @@ function parsePVSyst(text){
 function simulate(meteo,prof,loc,soc0,opts){
   var latR=loc.lat*D2R, capWh=prof.wh, n=meteo.length;
   var soc=soc0, parked=false, prevPos=null, stow=0, stowHold=0;
-  var rows=[], poaPotSum=0, poaLostSum=0;
+  var rows=[];
   for(var h=0;h<n;h++){
     var m=meteo[h];
     var N=Math.floor((m.t-Date.UTC(m.t.getUTCFullYear(),0,0))/864e5);
@@ -399,7 +404,7 @@ function simulate(meteo,prof,loc,soc0,opts){
     else if(sun.el>0 && m.dhi>0) poaChg=poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi);
     else poaChg=(m.poa!=null)?m.poa:m.ghi;
     var chgWh=0;
-    if(day && tEff>=opts.tMin){
+    if(day && tEff>=opts.tMin && poaChg>=opts.poaMin){   /* cut-in del regulador: bajo el umbral no carga */
       chgWh=prof.chgW*Math.min(poaChg/1000,1)*ETA_CHG;
       chgWh=Math.min(chgWh,cRateSafeLFP(tEff)*hotDerate(tEff)*capWh);
     }
@@ -412,19 +417,19 @@ function simulate(meteo,prof,loc,soc0,opts){
     soc=Math.max(0,Math.min(1,soc+(chgEff-consWh)/capWh));
 
     /* — Producción perdida: POA seguimiento vs POA defensa en horas no disponibles — */
+    var poaPot=0, poaLost=0;
     if(sun.el>0){
-      var poaTrk=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
-      poaPotSum+=poaTrk;
+      poaPot=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
       if(parked && !stow){                        /* pérdida por batería; el abanderamiento no cuenta */
         var poaDef=poaAt(DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi);
-        poaLostSum+=Math.max(0,poaTrk-poaDef);
+        poaLost=Math.max(0,poaPot-poaDef);
       }
     }
 
     rows.push({t:m.t,ghi:m.ghi,temp:m.temp,wind:m.wind,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
-               heat:heatWh,net:chgEff-consWh,pos:target,parked:parked,stow:stow>0,mov:deltaEff});
+               heat:heatWh,net:chgEff-consWh,pos:target,parked:parked,stow:stow>0,mov:deltaEff,
+               poaPot:poaPot,poaLost:poaLost});
   }
-  rows.poaPotSum=poaPotSum; rows.poaLostSum=poaLostSum;
   return rows;
 }
 
@@ -490,7 +495,7 @@ function summarize(rows){
     hZero:soc.filter(function(v){return v<=0.001}).length,
     hParked:hPark, hStow:hStow, inactivePct:100*hPark/rows.length,
     heatWh:sum('heat'),
-    prodLostPct:rows.poaPotSum>0?100*rows.poaLostSum/rows.poaPotSum:0,
+    prodLostPct:(function(){var p=sum('poaPot'),l=sum('poaLost');return p>0?100*l/p:0})(),
     chg:sum('chg'), base:sum('base'), motor:sum('motor'), net:sum('net'),
     cyc:cyclesAnalysis(rows), rf:rainflow(soc)
   };
@@ -637,14 +642,15 @@ function getLoc(){
 }
 $('prof').value=1;   /* SP_45W_6Ah por defecto */
 (function(){var y=new Date().getFullYear();
-  $('year').add(new Option('🏆 Peor año — barrido '+(y-10)+'–'+(y-1),'worst'));
+  $('year').add(new Option('🏆 Peor año — barrido histórico','worst'));
   for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
+$('year').onchange=function(){$('sweepFld').style.display=this.value==='worst'?'':'none'};
 function profNote(){
   var P=PROFILES[$('prof').value];
   $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · calefactor '+(P.heated?'<b>sí (LT)</b> — carga bajo 0 °C':'no');
 }
 profNote();$('prof').onchange=profNote;
-[['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
+[['poaMin','poaMinV',' W/m²'],['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
  ['socCrit','socCritV','%'],['fc','fcV',''],['doy','doyV',''],['sdays','sdaysV','']].forEach(function(a){
   $(a[0]).oninput=function(){$(a[1]).textContent=this.value+a[2]};
 });
@@ -653,6 +659,7 @@ $('socCrit').addEventListener('input',function(){
 $('src').onchange=function(){
   var v=this.value;
   $('yearFld').style.display=v==='archive'?'':'none';
+  $('sweepFld').style.display=(v==='archive'&&$('year').value==='worst')?'':'none';
   $('daysFld').style.display=v==='openmeteo'?'':'none';
   $('fileFld').style.display=v==='pvsyst'?'':'none';
   $('cloudsFld').style.display=v==='synth'?'':'none';
@@ -695,18 +702,29 @@ $('run').onclick=function(){
   var mm=$('motor').value; mm=(mm==='factiun')?'factiun':+mm;
   var opts={motorModel:mm, winter:$('winter').checked, strategy:true,
             socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
-            fcDays:+$('fc').value, tMin:+$('tmin').value};
+            fcDays:+$('fc').value, tMin:+$('tmin').value, poaMin:+$('poaMin').value};
   var refOpts={motorModel:mm, winter:false, strategy:false,
-            socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value};
+            socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value, poaMin:+$('poaMin').value};
   var soc0=+$('soc0').value/100;
   var job;
   if($('src').value==='archive' && $('year').value==='worst'){
     /* Barrido multi-año como el Battery Availability Study: simula cada año,
        elige el peor por % tiempo no disponible (desempate: % prod. perdida, SOC mín) */
-    var yEnd=new Date().getFullYear()-1, yIni=yEnd-9;
-    $('srcTag').textContent='Barrido '+yIni+'–'+yEnd+'…';
+    var yEnd=new Date().getFullYear()-1;
+    var yIni=Math.max(1940,Math.min(+$('sweepFrom').value||2013,yEnd-1));
     var years=[]; for(var y=yIni;y<=yEnd;y++)years.push(y);
-    job=Promise.all(years.map(function(y){return fetchYearOrNull(loc,y)})).then(function(list){
+    var fetchBatched=function(){
+      var out=[],i=0;
+      function next(){
+        if(i>=years.length)return Promise.resolve(out);
+        var batch=years.slice(i,i+8); i+=8;
+        $('srcTag').textContent='Barrido '+yIni+'–'+yEnd+' · '+Math.min(i,years.length)+'/'+years.length+'…';
+        return Promise.all(batch.map(function(y){return fetchYearOrNull(loc,y)}))
+          .then(function(r){out.push.apply(out,r);return next()});
+      }
+      return next();
+    };
+    job=fetchBatched().then(function(list){
       var res=[];
       list.forEach(function(meteo,i){
         if(!meteo||meteo.length<8000)return;
@@ -720,12 +738,14 @@ $('run').onclick=function(){
       var mng=simulate(worst.meteo,prof,loc,soc0,opts);
       var ref=simulate(worst.meteo,prof,loc,soc0,refOpts);
       $('srcTag').textContent='Peor año '+worst.year+' · '+loc.n;
-      render(worst.meteo,mng,ref,prof,loc,opts,{list:res,worst:worst.year});
+      LAST={meteo:worst.meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:{list:res,worst:worst.year}};
+      render(worst.meteo,mng,ref,prof,loc,opts,LAST.sweep);
     });
   }else{
     job=getMeteo(loc).then(function(meteo){
       var mng=simulate(meteo,prof,loc,soc0,opts);
       var ref=simulate(meteo,prof,loc,soc0,refOpts);
+      LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:null};
       render(meteo,mng,ref,prof,loc,opts);
     });
   }
@@ -734,7 +754,30 @@ $('run').onclick=function(){
   }).then(function(){btn.disabled=false;btn.textContent='▶ Simular'});
 };
 
-function render(meteo,mng,ref,prof,loc,opts,sweep){
+var LAST=null;
+function isoDay(t){return t.toISOString().slice(0,10)}
+function zoomTo(d0,d1){
+  if(!LAST)return;
+  var a=Date.parse(d0+'T00:00:00Z'), b=Date.parse(d1+'T23:59:59Z');
+  if(!(a<b))return;
+  var idx=[];
+  LAST.mng.forEach(function(r,i){var t=+r.t;if(t>=a&&t<=b)idx.push(i)});
+  if(idx.length<12)return;
+  var i0=idx[0], i1=idx[idx.length-1]+1;
+  render(LAST.meteo.slice(i0,i1),LAST.mng.slice(i0,i1),LAST.ref.slice(i0,i1),
+         LAST.prof,LAST.loc,LAST.opts,null,{d0:d0,d1:d1});
+}
+function zoomWorstDay(){
+  if(!LAST)return;
+  var mi=0;LAST.mng.forEach(function(r,i){if(r.soc<LAST.mng[mi].soc)mi=i});
+  var t=+LAST.mng[mi].t;
+  zoomTo(isoDay(new Date(t-3*864e5)),isoDay(new Date(t+3*864e5)));
+}
+function zoomFull(){
+  if(!LAST)return;
+  render(LAST.meteo,LAST.mng,LAST.ref,LAST.prof,LAST.loc,LAST.opts,LAST.sweep);
+}
+function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
   var S=summarize(mng), R=summarize(ref);
   var out=$('out');out.innerHTML='';
   var days=mng.length/24, LONG=mng.length>1200;
@@ -759,6 +802,21 @@ function render(meteo,mng,ref,prof,loc,opts,sweep){
     chip('Vida estimada',fmt(S.cyc.years,1)+' años',S.cyc.years<10?'warn':'ok',
          fmt(S.cyc.efc,1)+' EFC · fade '+fmt(S.cyc.fadeYr,1)+'%/año');
   out.appendChild(chips);
+
+  /* — Zoom: día o rango concreto (como las vistas de día crítico del estudio) — */
+  var zc=document.createElement('div');zc.className='card';
+  var zd0=isoDay(mng[0].t), zd1=isoDay(mng[mng.length-1].t);
+  zc.innerHTML='<h2>🔍 Detalle de un día o rango</h2>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">'+
+    '<input type="date" id="zd0" value="'+zd0+'" style="background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:5px 8px;font:inherit;font-size:13px">'+
+    '<span style="color:var(--tx3)">→</span>'+
+    '<input type="date" id="zd1" value="'+zd1+'" style="background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:5px 8px;font:inherit;font-size:13px">'+
+    '<button class="btn" style="width:auto;padding:6px 14px" onclick="zoomTo(document.getElementById(\'zd0\').value,document.getElementById(\'zd1\').value)">Aplicar</button>'+
+    '<button class="btn" style="width:auto;padding:6px 14px;background:var(--card2);color:var(--tx);border:1px solid var(--line2)" onclick="zoomWorstDay()">📉 Día de SOC mínimo ±3</button>'+
+    (zoom?'<button class="btn" style="width:auto;padding:6px 14px;background:var(--card2);color:var(--tx);border:1px solid var(--line2)" onclick="zoomFull()">Periodo completo</button>':'')+
+    '</div>'+
+    (zoom?'<div class="sub" style="margin-top:6px">Mostrando '+zoom.d0+' → '+zoom.d1+' en resolución horaria; las métricas de arriba son de este rango.</div>':'');
+  out.appendChild(zc);
 
   /* — Barrido multi-año: tabla por año + estadística TMY ± 2σ (como el estudio) — */
   if(sweep){
