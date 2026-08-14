@@ -113,9 +113,10 @@
     <div class="fld"><select id="prof"></select></div>
     <div class="fld"><label>Montaje del panel / fuente de carga</label>
       <select id="mount">
-        <option value="trk">Solidario al seguidor (plano del generador)</option>
-        <option value="fix">Fijo orientado al ecuador</option>
-      </select></div>
+        <option value="trk">Solidario al seguidor — montaje real (plano del generador)</option>
+        <option value="fix">Fijo orientado al ecuador (hipotético)</option>
+      </select>
+      <div class="note">En las TCU de Factiun el panel dedicado va <b>solidario a la estructura</b>: gira con el seguidor y ve el mismo plano que los módulos. La opción de panel fijo queda para estudiar configuraciones alternativas.</div></div>
     <div class="fld" id="tiltFld" style="display:none"><label>Inclinación del panel fijo <span class="rv" id="tiltV">30°</span></label>
       <input type="range" id="tilt" min="0" max="60" step="5" value="30">
       <div class="note">Un panel fijo capta ~10 % menos al año pero ~14 % más en invierno y en los días críticos, que es cuando decide la disponibilidad.</div></div>
@@ -180,7 +181,10 @@
   </div>
   <button class="btn" id="run">▶ Simular</button>
   <div class="note">
-    <b>Metodología</b>: estrategia oficial SUNNER (Battery Availability Study) — CASO 1: crítico&lt;SOC&lt;objetivo,
+    <b>Metodología</b>: el panel dedicado de las TCU SP va solidario al seguidor (confirmado), de modo que su
+    captación es la del plano del generador y cae cuando el seguidor va a defensa o abanderado; los TCU String
+    toman su potencia nominal de un string de varios kW, disponible desde muy poca luz.
+    Estrategia oficial SUNNER (Battery Availability Study) — CASO 1: crítico&lt;SOC&lt;objetivo,
     carga + consumo; CASO 2: SOC&gt;objetivo, sin carga; CASO 3: SOC&lt;crítico → <b>defensa 55°</b>,
     tracker no disponible, solo electrónica. Sin carga bajo la Tª mínima; por encima, C-rate seguro LiFePO₄
     según Tª (11.5b). Consumo de electrónica (0,64 W) y curva de motor I(|θ|) medidos por Factiun: 36 W a 0° y 67,2 W a 55°. Comparativa contra el mismo TCU
