@@ -278,6 +278,9 @@ function fetchOpenMeteo(loc,days){
     "&hourly="+OM_VARS+"&forecast_days="+days+"&timezone=UTC";
   return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM);
 }
+function fetchYearOrNull(loc,y){
+  return fetchOpenMeteoYear(loc,y).catch(function(){return null});
+}
 function fetchOpenMeteoYear(loc,year){
   var u="https://archive-api.open-meteo.com/v1/archive?latitude="+loc.lat+"&longitude="+loc.lon+
     "&start_date="+year+"-01-01&end_date="+year+"-12-31&hourly="+OM_VARS+"&timezone=UTC";
@@ -556,6 +559,11 @@ function hline(g,f,v,color,dash,label){
   if(label){x.fillStyle=color;x.font='9.5px IBM Plex Mono,monospace';x.textAlign='left';x.textBaseline='bottom';
     x.fillText(label,CH.pad.l+4,f.Y(v)-2);}
 }
+function rightAxis(g,f,vMin,vMax,color,fmtFn){
+  var x=g.x;x.font='10px IBM Plex Mono,monospace';x.textAlign='left';x.textBaseline='middle';
+  x.fillStyle=color;
+  for(var k=0;k<=4;k++){var v=vMin+(vMax-vMin)*k/4;x.fillText(fmtFn(v),g.w-CH.pad.r+5,f.Y(v));}
+}
 function bandParked(g,f,rows,color,key){
   key=key||function(r){return r.parked};
   var x=g.x,H=g.h,p=CH.pad,i=0;
@@ -628,7 +636,9 @@ function getLoc(){
   return {n:($('cname').value||'Personalizado').trim(),lat:la,lon:lo};
 }
 $('prof').value=1;   /* SP_45W_6Ah por defecto */
-(function(){var y=new Date().getFullYear();for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
+(function(){var y=new Date().getFullYear();
+  $('year').add(new Option('🏆 Peor año — barrido '+(y-10)+'–'+(y-1),'worst'));
+  for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
 function profNote(){
   var P=PROFILES[$('prof').value];
   $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · calefactor '+(P.heated?'<b>sí (LT)</b> — carga bajo 0 °C':'no');
@@ -688,17 +698,43 @@ $('run').onclick=function(){
             fcDays:+$('fc').value, tMin:+$('tmin').value};
   var refOpts={motorModel:mm, winter:false, strategy:false,
             socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value};
-  getMeteo(loc).then(function(meteo){
-    var soc0=+$('soc0').value/100;
-    var mng=simulate(meteo,prof,loc,soc0,opts);
-    var ref=simulate(meteo,prof,loc,soc0,refOpts);
-    render(meteo,mng,ref,prof,loc,opts);
-  }).catch(function(e){
+  var soc0=+$('soc0').value/100;
+  var job;
+  if($('src').value==='archive' && $('year').value==='worst'){
+    /* Barrido multi-año como el Battery Availability Study: simula cada año,
+       elige el peor por % tiempo no disponible (desempate: % prod. perdida, SOC mín) */
+    var yEnd=new Date().getFullYear()-1, yIni=yEnd-9;
+    $('srcTag').textContent='Barrido '+yIni+'–'+yEnd+'…';
+    var years=[]; for(var y=yIni;y<=yEnd;y++)years.push(y);
+    job=Promise.all(years.map(function(y){return fetchYearOrNull(loc,y)})).then(function(list){
+      var res=[];
+      list.forEach(function(meteo,i){
+        if(!meteo||meteo.length<8000)return;
+        var S=summarize(simulate(meteo,prof,loc,soc0,opts));
+        res.push({year:years[i],meteo:meteo,inact:S.inactivePct,lost:S.prodLostPct,
+                  socMin:S.socMin,hZero:S.hZero,hStow:S.hStow});
+      });
+      if(!res.length)throw new Error('Sin datos históricos (¿sin red?)');
+      var rank=res.slice().sort(function(a,b){return b.inact-a.inact||b.lost-a.lost||a.socMin-b.socMin});
+      var worst=rank[0];
+      var mng=simulate(worst.meteo,prof,loc,soc0,opts);
+      var ref=simulate(worst.meteo,prof,loc,soc0,refOpts);
+      $('srcTag').textContent='Peor año '+worst.year+' · '+loc.n;
+      render(worst.meteo,mng,ref,prof,loc,opts,{list:res,worst:worst.year});
+    });
+  }else{
+    job=getMeteo(loc).then(function(meteo){
+      var mng=simulate(meteo,prof,loc,soc0,opts);
+      var ref=simulate(meteo,prof,loc,soc0,refOpts);
+      render(meteo,mng,ref,prof,loc,opts);
+    });
+  }
+  job.catch(function(e){
     $('out').innerHTML='<div class="empty">❌ '+e.message+'</div>';
   }).then(function(){btn.disabled=false;btn.textContent='▶ Simular'});
 };
 
-function render(meteo,mng,ref,prof,loc,opts){
+function render(meteo,mng,ref,prof,loc,opts,sweep){
   var S=summarize(mng), R=summarize(ref);
   var out=$('out');out.innerHTML='';
   var days=mng.length/24, LONG=mng.length>1200;
@@ -724,9 +760,32 @@ function render(meteo,mng,ref,prof,loc,opts){
          fmt(S.cyc.efc,1)+' EFC · fade '+fmt(S.cyc.fadeYr,1)+'%/año');
   out.appendChild(chips);
 
+  /* — Barrido multi-año: tabla por año + estadística TMY ± 2σ (como el estudio) — */
+  if(sweep){
+    var cS=document.createElement('div');cS.className='card';
+    cS.innerHTML='<h2>🏆 Barrido multi-año — peor año: '+sweep.worst+'</h2><div class="sub">Un año simulado por fila con la configuración actual; el peor se elige por % tiempo no disponible (desempate: % producción perdida y SOC mínimo). Debajo, el detalle del peor año.</div>';
+    var vals=sweep.list;
+    var mean=function(k){return vals.reduce(function(a,r){return a+r[k]},0)/vals.length};
+    var std=function(k){var m=mean(k);return Math.sqrt(vals.reduce(function(a,r){return a+(r[k]-m)*(r[k]-m)},0)/vals.length)};
+    var mi=mean('inact'), si=std('inact'), ml=mean('lost'), sl=std('lost');
+    var tb='<table class="cmp"><tr><th>Año</th><th>% no disponible</th><th>% prod. perdida</th><th>SOC mín</th><th>h SOC=0</th><th>h abanderado</th></tr>';
+    vals.forEach(function(r){
+      var w=r.year===sweep.worst;
+      tb+='<tr'+(w?' style="outline:1px solid var(--danger)"':'')+'><td>'+(w?'🏆 ':'')+r.year+'</td>'+
+        '<td class="'+(r.inact>0.5?'bad':(r.inact>0.05?'wn':''))+'">'+fmt(r.inact,4)+'</td>'+
+        '<td>'+fmt(r.lost,4)+'</td><td class="'+(r.socMin<0.15?'bad':'')+'">'+fmt(r.socMin*100)+'%</td>'+
+        '<td class="'+(r.hZero>0?'bad':'')+'">'+fmt(r.hZero)+'</td><td>'+fmt(r.hStow)+'</td></tr>';
+    });
+    tb+='<tr><td><b>Media (TMY)</b></td><td>'+fmt(mi,4)+'</td><td>'+fmt(ml,4)+'</td><td colspan="3"></td></tr>';
+    tb+='<tr><td><b>TMY + 2σ (97,5 %)</b></td><td>'+fmt(mi+2*si,4)+'</td><td>'+fmt(ml+2*sl,4)+'</td><td colspan="3"></td></tr>';
+    tb+='</table>';
+    cS.insertAdjacentHTML('beforeend',tb);
+    out.appendChild(cS);
+  }
+
   /* — Gráfica 1: SOC — */
   var c1=document.createElement('div');c1.className='card';
-  c1.innerHTML='<h2>Estado de carga (SOC) — '+fmt(days)+' días</h2><div class="sub">'+prof.id+' · '+loc.n+
+  c1.innerHTML='<h2>Estado de carga (SOC) — '+(sweep?('peor año '+sweep.worst):fmt(days)+' días')+'</h2><div class="sub">'+prof.id+' · '+loc.n+
     ' · estrategia SUNNER (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días)'+
     (opts.winter?' · winter mode':'')+'</div>';
   out.appendChild(c1);
@@ -765,6 +824,7 @@ function render(meteo,mng,ref,prof,loc,opts){
   c3.innerHTML='<h2>Meteorología</h2><div class="sub">'+(LONG?'Irradiación diaria (kWh/m²·día) y Tª mín/máx diaria':'GHI (W/m²) y Tª ambiente')+' — la Tª limita la carga (mín '+opts.tMin+' °C + C-rate LiFePO₄)</div>';
   out.appendChild(c3);
   if(LONG){
+    var oldR=CH.pad.r; CH.pad.r=46;
     var maxI=Math.max(2,Math.max.apply(null,dm.map(function(r){return r.ghiKwh})));
     var g3=mkCanvas(c3,165), f3=frame(g3,0,maxI,dm,function(v){return fmt(v,1)});
     line(g3,f3,dm,'ghiKwh','#f0a93b',1.2);
@@ -773,13 +833,16 @@ function render(meteo,mng,ref,prof,loc,opts){
     var fT={X:f3.X,Y:function(v){return CH.pad.t+(165-CH.pad.t-CH.pad.b)*(1-(v-(tLo-2))/((tHi+2)-(tLo-2)))}};
     line(g3,fT,dm,'tMin','#3aa0ff',1);
     line(g3,fT,dm,'tMax','#e2574c',1);
+    rightAxis(g3,fT,tLo-2,tHi+2,'#3aa0ff',function(v){return fmt(v)+'°C'});
     if(opts.tMin>tLo)hline(g3,fT,opts.tMin,'#3aa0ff',true,'Tª mín carga '+opts.tMin+'°C');
     var wMax=Math.max(18,Math.max.apply(null,dm.map(function(r){return r.windMax})));
     var fW={X:f3.X,Y:function(v){return CH.pad.t+(165-CH.pad.t-CH.pad.b)*(1-v/wMax)}};
     line(g3,fW,dm,'windMax','#8093A4',0.9);
-    hline(g3,fW,WIND_T1,'#8093A4',true,'40 km/h');
-    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>Irradiación</span><span><i style="background:#3aa0ff"></i>Tª mín</span><span><i style="background:#e2574c"></i>Tª máx</span><span><i style="background:#8093A4"></i>Viento máx (m/s)</span></div>');
+    hline(g3,fW,WIND_T1,'#8093A4',true,'abanderamiento 40 km/h');
+    CH.pad.r=oldR;
+    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>Irradiación (kWh/m²·día, eje izq.)</span><span><i style="background:#3aa0ff"></i>Tª mín (°C, eje der.)</span><span><i style="background:#e2574c"></i>Tª máx (°C, eje der.)</span><span><i style="background:#8093A4"></i>Viento máx (0–'+fmt(wMax)+' m/s)</span></div>');
   }else{
+    var oldR2=CH.pad.r; CH.pad.r=46;
     var maxG=Math.max(200,Math.max.apply(null,mng.map(function(r){return r.ghi})));
     var g3b=mkCanvas(c3,160), f3b=frame(g3b,0,maxG,mng,function(v){return fmt(v)});
     line(g3b,f3b,mng,'ghi','#f0a93b',1.5);
@@ -787,7 +850,9 @@ function render(meteo,mng,ref,prof,loc,opts){
         tMax2=Math.max.apply(null,mng.map(function(r){return r.temp}));
     var fT2={X:f3b.X,Y:function(v){return CH.pad.t+(160-CH.pad.t-CH.pad.b)*(1-(v-(tMin2-2))/((tMax2+2)-(tMin2-2)))}};
     line(g3b,fT2,mng,'temp','#3aa0ff',1.5);
-    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>GHI</span><span><i style="background:#3aa0ff"></i>Tª ambiente</span></div>');
+    rightAxis(g3b,fT2,tMin2-2,tMax2+2,'#3aa0ff',function(v){return fmt(v)+'°C'});
+    CH.pad.r=oldR2;
+    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>GHI (W/m², eje izq.)</span><span><i style="background:#3aa0ff"></i>Tª ambiente (°C, eje der.)</span></div>');
   }
 
   /* — Gráfica 4: posición / movimiento — */
