@@ -191,6 +191,8 @@
     sin estrategia (siempre seguimiento). Rainflow según el estudio; posición nocturna −5°.
     Envejecimiento: ciclado LFP (Nf = 6000/DoD^1,2) más calendario integrado con el SOC y la temperatura
     de celda (Arrhenius × factor de SOC), 1,5 %/año en el punto de referencia 25 °C y SOC 50 %.
+    <b>El viento sólo dispara el abanderamiento: no se valora su efecto sobre el par del motor</b>, así que en
+    emplazamientos ventosos el consumo real será mayor que el simulado.
   </div>
 </div>
 
@@ -1195,6 +1197,7 @@ function buildReport(){
      ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes (medido Factiun)'}],
      ['Modelo de consumo de motor',{v:motorTxt}],
      ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55°'}],
+     ['Efecto del viento sobre el consumo',{v:'NO considerado — ver limitaciones',cls:'wn'}],
      ['Tª mínima de carga',{v:opts.tMin+' °C'}],
      ['Umbral duro de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
      ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA'}],
@@ -1288,7 +1291,8 @@ function buildReport(){
   H+='<h2>11. Hipótesis y limitaciones</h2><ul>'+
      '<li>La transposición al plano del generador es isotrópica; en cielos muy anisótropos subestima ligeramente la captación directa.</li>'+
      '<li>La temperatura de la batería se toma igual a la ambiente, salvo en las versiones -LT con el calefactor activo.</li>'+
-     '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V; no recoge dispersión entre unidades ni el efecto del viento sobre el par.</li>'+
+     '<li><b>No se valora el efecto del viento sobre el consumo del motor.</b> El viento interviene únicamente para disparar el abanderamiento; el par adicional que opone sobre la estructura, y por tanto la corriente extra que exige al motor, no se modelan. El consumo simulado es en consecuencia un <b>límite inferior</b> en emplazamientos ventosos: la metodología de referencia declara 2 m/s como velocidad de viento de referencia para ese efecto, que aquí no se aplica. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
+     '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades.</li>'+
      '<li>La suciedad y la nieve acumulada no penalizan la captación del panel de la TCU.</li>'+
      '<li>Los resultados dependen de la serie meteorológica empleada; para decisiones de compra conviene el barrido multianual del apartado 8.</li>'+
      '</ul>';
