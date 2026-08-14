@@ -227,6 +227,12 @@ var K0=0.0503, K1=0.000845, IDLE_W=0.64, SLEEP_W=0.64, ETA_CHG=0.90, V_NOM=25.6;
 var MOTOR_ANG=[0,2.5,7.5,12.5,17.5,22.5,27.5,32.5,37.5,42.5,47.5,52.5,55];
 var MOTOR_MA =[1500,1588,1600,1714,1860,1975,2135,2277,2409,2497,2651,2740,2800];
 var MOTOR_V_MEAS=24.0, MOTOR_PEAK_W=2800/1000*24.0;      /* 67,2 W medidos */
+/* Un TCU STRING no se alimenta de un panel dedicado sino de un string completo de varios kW:
+   sus 60 W son una fracción mínima de lo que el string produce, así que dispone de la potencia
+   nominal en cuanto hay generación apreciable, en vez de escalar con la irradiancia como el
+   panel de 45 W de un SP. Ese es el motivo de que los modelos String salgan mucho mejor en los
+   estudios de referencia. Se satura a partir de POA_STRING_FULL. */
+var POA_STRING_FULL=100;
 function motorW(ang){
   var a=Math.min(MOTOR_ANG[MOTOR_ANG.length-1],Math.abs(ang||0)), i=0;
   while(i<MOTOR_ANG.length-2 && MOTOR_ANG[i+1]<a) i++;
@@ -239,10 +245,10 @@ var PROFILES=[
  {id:"SP_45W_3Ah",       n:"SP · panel 45 W · 3 Ah (76,8 Wh)",       wh:76.8,  chgW:45},
  {id:"SP_45W_6Ah",       n:"SP · panel 45 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:45},
  {id:"SP_60W_6Ah",       n:"SP · panel 60 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:60},
- {id:"STRING_60W_3Ah",   n:"STRING · regulador 60 W · 3 Ah",         wh:76.8,  chgW:60},
- {id:"STRING_60W_6Ah",   n:"STRING · regulador 60 W · 6 Ah",         wh:153.6, chgW:60},
+ {id:"STRING_60W_3Ah",   n:"STRING · regulador 60 W · 3 Ah",         wh:76.8,  chgW:60, string:true},
+ {id:"STRING_60W_6Ah",   n:"STRING · regulador 60 W · 6 Ah",         wh:153.6, chgW:60, string:true},
  {id:"SP_45W_6Ah_LT",    n:"SP · 45 W · 6 Ah · LT calefactada",      wh:153.6, chgW:45, heated:true},
- {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6 Ah · LT calefactada",  wh:153.6, chgW:60, heated:true}
+ {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6 Ah · LT calefactada",  wh:153.6, chgW:60, heated:true, string:true}
 ];
 
 /* ═══════════ Tracker (constantes del estudio SUNNER + gemelo) ═══════════ */
@@ -537,7 +543,8 @@ function simulate(meteo,prof,loc,soc0,opts){
     else poaChg=(m.poa!=null)?m.poa:m.ghi;
     var chgWh=0, cRateNow=0;
     if(day && tEff>=opts.tMin && poaChg>=opts.poaMin){   /* cut-in del regulador: bajo el umbral no carga */
-      var chgP=prof.chgW*Math.min(poaChg/1000,1);                   /* W que da el panel/string */
+      var chgP=prof.string ? prof.chgW*Math.min(poaChg/POA_STRING_FULL,1)   /* string: potencia nominal desde muy poca luz */
+                           : prof.chgW*Math.min(poaChg/1000,1);            /* panel dedicado: escala con la irradiancia */
       /* límite de la batería: C-rate seguro por Tª (11.5b) × JEITA caliente × derate CC/CV por SOC */
       var pMax=cRateSafeLFP(tEff)*hotDerate(tEff)*capWh*socDerateCharge(soc);
       chgP=Math.min(chgP,pMax);
