@@ -546,12 +546,15 @@ function pintaUnidades() {
 /* Imagen de registros que toca según el dispositivo elegido. Para la NCU es la suya
    (incluye lo que republica de TCUs y HSUs); para TCU y HSU, su mapa propio, más la
    de la NCU para las secciones «vía NCU». */
+var imgActual = {};      /* imagen del dispositivo que se está pintando: la usa el
+                            decodificador del reloj BCD, que necesita los tres registros */
 function imagenes(dev) {
   var uni = +$('mbUnidad').value || 1;
   var img = { propia: {}, ncu: P.regsNCU(), unidad: uni };
   if (dev === 'tcu') { var t = P.tcu(uni); img.propia = t ? P.regsTCU(t) : {}; }
   else if (dev === 'hsu') { var h = P.hsus[uni - 1]; img.propia = h ? P.regsHSU(h) : {}; }
   else img.propia = img.ncu;
+  imgActual = img.propia;
   return img;
 }
 /* Decodifica un registro del mapa a partir de la imagen. Devuelve null si no está
@@ -572,10 +575,39 @@ function decodifica(r, dir, img, viaNcu) {
   val *= esc;
   return { crudo: crudo, val: val, tipo: tipo, uni: uni };
 }
-/* Presentación legible: aplica las conversiones que el propio mapa anuncia. */
-function legible(d, r) {
+/* Escalas de los registros PROPIOS de la TCU. El documento v6 los nombra pero no
+   transcribe su unidad, así que un «26279» no dice nada. Estas son las que usa la
+   TCU Toolbox contra equipo real (scada/tools/tcu-toolbox, tabla $ESTADO):
+   tensiones en mV, corrientes en mA, temperaturas ×10, tilt ×10 y ángulos solares
+   ×100. Sin esto el mapa se lee, pero no se entiende. */
+var ESCALAS_TCU = {
+  30011: ['mA', 1], 30083: ['mV', 1], 30084: ['mA', 1], 30085: ['mA', 1],
+  30091: ['mV', 1], 30092: ['mV', 1], 30093: ['mA', 1], 30094: ['mV', 1], 30095: ['mA', 1],
+  30097: ['°C', 10], 30098: ['°C', 10], 30099: ['mAh', 1], 30100: ['mAh', 1],
+  30110: ['°', 10], 30111: ['°', 10], 30112: ['°', 10],
+  30115: ['°', 100], 30116: ['°', 100], 30117: ['°', 100], 30118: ['°', 100],
+  30146: ['°/s', 1000], 30015: ['J', 1], 30086: ['J', 1], 30088: ['J', 1]
+};
+var BCD_TCU = { 30076: 'primer arranque', 30079: 'reloj de la TCU' };
+
+/* Presentación legible: aplica las conversiones que el propio mapa anuncia y, en el
+   mapa propio de la TCU, las de la toolbox. */
+function legible(d, r, dev, dir) {
   if (!d) return '—';
   var u = d.uni, v = d.val, n = (r[1] || '').toLowerCase();
+  if (dev === 'tcu' && !u && ESCALAS_TCU[dir]) {
+    var e = ESCALAS_TCU[dir], val = v / e[1];
+    if (e[0] === 'mV') return num(val / 1000, 2) + ' V';
+    return num(val, e[1] > 1 ? (e[1] >= 100 ? 2 : 1) : 0) + ' ' + e[0];
+  }
+  if (dev === 'tcu' && BCD_TCU[dir]) {
+    /* reloj en BCD: [mes|año] [hora|día] [seg|min] — tres registros seguidos */
+    var b = function (x) { return (x >> 4) * 10 + (x & 0x0F); }, f = imgActual;
+    var r0 = d.crudo[0], r1 = f[dir + 1], r2 = f[dir + 2];
+    if (r1 == null || r2 == null) return '—';
+    return '20' + dosD(b(r0 >> 8)) + '-' + dosD(b(r0 & 0xFF)) + '-' + dosD(b(r1 >> 8)) +
+           ' ' + dosD(b(r1 & 0xFF)) + ':' + dosD(b(r2 >> 8)) + ':' + dosD(b(r2 & 0xFF));
+  }
   if (/rad/.test(u)) return num(v * 180 / Math.PI, 2) + ' °';
   if (/Kx10|K×10/.test(u)) return num(v / 10 - 273.15, 1) + ' °C';
   if (u === 'K' || /Kelvin/.test(u)) return num(v - 273.15, 1) + ' °C';
@@ -647,7 +679,7 @@ function pintaModbus() {
         if (destellos[clave] > 0) { cambia = true; destellos[clave]--; }
       }
       var aprox = (dev === 'tcu' && (dir === 30113 || dir === 30114));
-      var valor = d ? legible(d, r) : '—';
+      var valor = d ? legible(d, r, dev, dir) : '—';
       if (aprox && d) {
         valor = '<span class="aprox">' + (dir === 30113 ? SIM.CRIT_TXT[d.val] : SIM.FUENTE_TXT[d.val]) + '</span>';
       }
@@ -679,7 +711,7 @@ function exportaCsv() {
     for (var fi = 0; fi < (s.f || []).length; fi++) {
       var r = s.f[fi], dir = s.stride ? s.base + (idx - 1) * s.stride + r[0] : r[0];
       var d = decodifica(r, dir, img, true);
-      l.push([s.t, dir, r[1], r[2], r[3] || '', d ? d.crudo.join(' ') : '', d ? legible(d, r).replace(/<[^>]+>/g, '') : ''].join(';'));
+      l.push([s.t, dir, r[1], r[2], r[3] || '', d ? d.crudo.join(' ') : '', d ? legible(d, r, dev, dir).replace(/<[^>]+>/g, '') : ''].join(';'));
     }
   }
   var b = new Blob(['﻿' + l.join('\n')], { type: 'text/csv;charset=utf-8' });

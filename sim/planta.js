@@ -659,9 +659,15 @@ function Planta(cfg) {
     this.tcus.push(new TCU(this.cfg.nTcu + i, this, { grupo: 1, repetidor: true }));
   }
   this.ncu.paso();
-  /* un paso de arranque: sin él, el estado derivado (sol, objetivo, alarmas) sigue
-     en su valor de construcción y la planta recién creada se lee como si fuera de
-     noche aunque el reloj marque mediodía */
+  /* La planta no acaba de nacer: lleva funcionando. Se arranca a cada seguidor en el
+     ángulo que le tocaría a esta hora — si no, una planta creada a mediodía sale
+     entera en posición nocturna y con desviación de 50°, o sea toda en aviso, hasta
+     que la simulación tarda diez minutos en recuperarla. */
+  var ang0 = angulos(this.loc, this.t.dia, this.t.hora);
+  for (i = 0; i < this.tcus.length; i++) {
+    if (!this.tcus[i].repetidor) this.tcus[i].angulo = this.tcus[i].objetivo = ang0.sel;
+  }
+  /* y un paso mínimo para que el estado derivado (sol, objetivo, alarmas) exista */
   this.paso(0.001);
 }
 
