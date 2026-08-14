@@ -263,6 +263,21 @@ function poaAt(Rdeg,el,az,bh,dh,gh){
   return Math.max(0,bh)*rb + Math.max(0,dh)*(1+cb)/2 + ALBEDO*Math.max(0,gh)*(1-cb)/2;
 }
 
+/* ═══════════ Curva de carga CC/CV — BatteryModel v2 canónico (notebook 11.0) ═══════════
+   La corriente admisible cae en SOC altos (fase CV): sin esto la batería sube en línea
+   recta hasta el 100 %, que es la crítica clásica a los modelos de balance simple.
+   Ref: Plett (2015) Battery Management Systems, cap. 4 */
+function socDerateCharge(soc){
+  if(soc>0.95)return 0.20;
+  if(soc>0.90)return 0.50;
+  if(soc>0.85)return 0.80;
+  return 1.0;
+}
+/* η de carga según C-rate real: η = η_nom − 0,06·(C − 0,5), saturada (Plett 2015, Smith 2017) */
+function etaAtCrate(etaNom,cRate){
+  return Math.max(0.80,Math.min(0.995,etaNom-0.06*(cRate-0.5)));
+}
+
 /* ═══════════ C-rate seguro LiFePO4 según temperatura (11.5b) ═══════════ */
 function cRateSafeLFP(t){
   if(t>25)return 1.0;
@@ -380,6 +395,7 @@ function simulate(meteo,prof,loc,soc0,opts){
   var dtH=n>1?((+meteo[1].t)-(+meteo[0].t))/36e5:1;      /* paso en horas (uniforme) */
   var t0Day=Math.floor((+meteo[0].t)/864e5);
   var soc=soc0, parked=false, prevPos=null, stow=0, stowHold=0;
+  var lastFullDay=-1, nCalib=0, daysNoCalib=0;      /* calibración: última lograda, nº y peor racha */
   var holdSteps=Math.max(1,Math.round(DESTOW_HOLD_H/dtH));
   var rows=[];
   for(var h=0;h<n;h++){
@@ -438,20 +454,31 @@ function simulate(meteo,prof,loc,soc0,opts){
     if(target===trackPos && m.poa!=null) poaChg=m.poa;
     else if(sun.el>0 && m.dhi>0) poaChg=poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi);
     else poaChg=(m.poa!=null)?m.poa:m.ghi;
-    var chgWh=0;
+    var chgWh=0, cRateNow=0;
     if(day && tEff>=opts.tMin && poaChg>=opts.poaMin){   /* cut-in del regulador: bajo el umbral no carga */
-      var chgP=prof.chgW*Math.min(poaChg/1000,1)*ETA_CHG;          /* W */
-      chgP=Math.min(chgP,cRateSafeLFP(tEff)*hotDerate(tEff)*capWh); /* límite C-rate (W) */
-      chgWh=chgP*dtH;
+      var chgP=prof.chgW*Math.min(poaChg/1000,1);                   /* W que da el panel/string */
+      /* límite de la batería: C-rate seguro por Tª (11.5b) × JEITA caliente × derate CC/CV por SOC */
+      var pMax=cRateSafeLFP(tEff)*hotDerate(tEff)*capWh*socDerateCharge(soc);
+      chgP=Math.min(chgP,pMax);
+      cRateNow=capWh>0?chgP/capWh:0;
+      chgWh=chgP*etaAtCrate(ETA_CHG,cRateNow)*dtH;                  /* Wh que entran de verdad */
     }
+    /* Carga completa (calibración del SoC): toca cada fcDays días DESDE LA ÚLTIMA LOGRADA.
+       Si el día no da para llegar al 100 %, la ventana sigue abierta y se reintenta al día
+       siguiente — no se espera otro ciclo completo. */
     var dayIdx=Math.floor((+m.t)/864e5)-t0Day;
-    var fullDay=opts.strategy && (dayIdx%opts.fcDays===opts.fcDays-1);
+    var fullDay=opts.strategy && (dayIdx-lastFullDay>=opts.fcDays);
     var ceil=opts.strategy?(fullDay?1.0:opts.socTgt/100):1.0;
     /* CASO 2: por encima del techo no entra carga (el consumo sí sigue) */
     var room=Math.max(0,(ceil-soc))*capWh+consWh;
     var chgEff=Math.min(chgWh,room);
 
     soc=Math.max(0,Math.min(1,soc+(chgEff-consWh)/capWh));
+
+    /* Calibración lograda: reinicia el contador el día en que se alcanza el 100 % */
+    var calibNow=false;
+    if(soc>=0.995 && lastFullDay!==dayIdx){lastFullDay=dayIdx;nCalib++;calibNow=true;}
+    daysNoCalib=Math.max(daysNoCalib,dayIdx-lastFullDay);
 
     /* — Producción perdida: POA seguimiento vs POA defensa en horas no disponibles — */
     var poaPot=0, poaLost=0;
@@ -465,8 +492,9 @@ function simulate(meteo,prof,loc,soc0,opts){
 
     rows.push({t:m.t,ghi:m.ghi,temp:m.temp,wind:m.wind,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
                heat:heatWh,net:chgEff-consWh,pos:target,parked:parked,stow:stow>0,mov:deltaEff,
-               poaPot:poaPot,poaLost:poaLost});
+               poaPot:poaPot,poaLost:poaLost,cal:calibNow,fullWin:!!fullDay,cRate:cRateNow});
   }
+  rows.nCalib=nCalib; rows.daysNoCalib=daysNoCalib;
   return rows;
 }
 
@@ -520,6 +548,18 @@ function cyclesAnalysis(rows){
   }
   return {efc:efc,dodMean:dodMean,toEol:toEol,fadeYr:fade,years:years};
 }
+/* Calibraciones (cargas al 100 %) logradas y peor racha sin calibrar — se recalcula
+   sobre las filas, así funciona igual con el periodo completo o con un recorte del zoom */
+function calibStats(rows){
+  var d0=Math.floor((+rows[0].t)/864e5), last=d0, n=0, worst=0, pend=0;
+  rows.forEach(function(r){
+    var d=Math.floor((+r.t)/864e5);
+    if(r.cal){n++;last=d;}
+    worst=Math.max(worst,d-last);
+    if(r.fullWin)pend=Math.max(pend,d-last);
+  });
+  return {n:n,worstGap:worst,pendGap:pend};
+}
 function summarize(rows){
   var dtH=rows.length>1?((+rows[1].t)-(+rows[0].t))/36e5:1;
   var soc=rows.map(function(r){return r.soc});
@@ -535,7 +575,7 @@ function summarize(rows){
     heatWh:sum('heat'),
     prodLostPct:(function(){var p=sum('poaPot'),l=sum('poaLost');return p>0?100*l/p:0})(),
     chg:sum('chg'), base:sum('base'), motor:sum('motor'), net:sum('net'),
-    cyc:cyclesAnalysis(rows), rf:rainflow(soc)
+    cyc:cyclesAnalysis(rows), rf:rainflow(soc), cal:calibStats(rows)
   };
 }
 function aggDaily(rows){
@@ -735,12 +775,14 @@ function getMeteo(loc){
     .then(function(m){$('srcTag').textContent='Sintético · '+loc.n;return m});
 }
 
+var STEP_NOTE='';
 function applyStep(meteo){
+  STEP_NOTE='';
   var v=$('step').value;
   if(v==='auto'||meteo.length<2)return meteo;
   var stepMin=+v;
   var spanD=((+meteo[meteo.length-1].t)-(+meteo[0].t))/864e5;
-  if(stepMin===1&&spanD>35){stepMin=15;$('srcTag').textContent+=' · 1 min→15 min (rango >35 días)';}
+  if(stepMin===1&&spanD>35){stepMin=15;STEP_NOTE=' · 1 min→15 min (rango de '+Math.round(spanD)+' días)';}
   if(stepMin===15&&spanD>750)return meteo;
   var dtMin=((+meteo[1].t)-(+meteo[0].t))/60000;
   if(dtMin<=stepMin)return meteo;                 /* los datos ya son más finos */
@@ -788,13 +830,14 @@ $('run').onclick=function(){
       var wMeteo=applyStep(worst.meteo);           /* el barrido se evalúa horario; el detalle, al paso elegido */
       var mng=simulate(wMeteo,prof,loc,soc0,opts);
       var ref=simulate(wMeteo,prof,loc,soc0,refOpts);
-      $('srcTag').textContent='Peor año '+worst.year+' · '+loc.n;
+      $('srcTag').textContent='Peor año '+worst.year+' · '+loc.n+STEP_NOTE;
       LAST={meteo:wMeteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:{list:res,worst:worst.year}};
       render(wMeteo,mng,ref,prof,loc,opts,LAST.sweep);
     });
   }else{
     job=getMeteo(loc).then(function(meteo){
       meteo=applyStep(meteo);
+      if(STEP_NOTE)$('srcTag').textContent+=STEP_NOTE;
       var mng=simulate(meteo,prof,loc,soc0,opts);
       var ref=simulate(meteo,prof,loc,soc0,refOpts);
       LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:null};
@@ -849,6 +892,8 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
     chip('Horas SOC = 0',fmt(S.hZero),S.hZero>0?'bad':'ok')+
     chip('Balance neto',(S.net>=0?'+':'')+fmt(S.net)+' Wh',S.net>=0?'ok':'warn',
          'carga '+fmt(S.chg)+' / consumo '+fmt(S.base+S.motor))+
+    chip('Cargas completas',fmt(S.cal.n),S.cal.worstGap>2*opts.fcDays?'warn':'ok',
+         'peor racha sin calibrar: '+fmt(S.cal.worstGap)+' d (objetivo '+opts.fcDays+')')+
     chip('Abanderamiento',fmt(S.hStow)+' h',S.hStow>0?'warn':'ok','viento ≥40/60 km/h (B2)')+
     (S.heatWh>0?chip('Calefactor LT',fmt(S.heatWh)+' Wh','','P = 1 + 0,15·|T| bajo 0 °C'):'')+
     chip('Rainflow',fmt(S.rf.total)+' ciclos','', '≥30% DoD: '+fmt(S.rf.dod30)+' · ≥60%: '+fmt(S.rf.dod60))+
@@ -897,7 +942,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
   /* — Gráfica 1: SOC — */
   var c1=document.createElement('div');c1.className='card';
   c1.innerHTML='<h2>Estado de carga (SOC) — '+(sweep?('peor año '+sweep.worst):fmt(days)+' días')+'</h2><div class="sub">'+prof.id+' · '+loc.n+
-    ' · estrategia SUNNER (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días)'+
+    ' · paso '+fmt(dtH*60)+' min · estrategia SUNNER (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días, reintentando a diario)'+
     (opts.winter?' · winter mode':'')+'</div>';
   out.appendChild(c1);
   var g1=mkCanvas(c1,210), f1=frame(g1,0,100,mng,function(v){return fmt(v)+'%'});
@@ -907,7 +952,9 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
   hline(g1,f1,opts.socCrit,'#e2574c',true,'crítico '+opts.socCrit+'%');
   line(g1,f1,ref,function(r){return r.soc*100},'#5e7388',1);
   line(g1,f1,mng,function(r){return r.soc*100},'#36D399',LONG?1.1:2);
-  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con estrategia</span><span><i style="background:#5e7388"></i>Sin estrategia (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>No disponible (defensa 55°)</span><span><i style="background:rgba(58,160,255,.5)"></i>Abanderado (viento)</span></div>');
+  g1.x.fillStyle='#e0a52b';                       /* ✦ calibraciones (carga al 100 %) logradas */
+  mng.forEach(function(r,i){if(r.cal){g1.x.beginPath();g1.x.arc(f1.X(i),f1.Y(100),2.2,0,6.284);g1.x.fill();}});
+  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con estrategia</span><span><i style="background:#5e7388"></i>Sin estrategia (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>No disponible (defensa 55°)</span><span><i style="background:rgba(58,160,255,.5)"></i>Abanderado (viento)</span><span><i style="background:#e0a52b;border-radius:50%;width:6px;height:6px"></i>Carga completa lograda</span></div>');
 
   /* — Gráfica 2: balance energético — */
   var c2=document.createElement('div');c2.className='card';
