@@ -153,7 +153,7 @@
     <div class="fld"><label>Tª mínima de carga (°C)</label>
       <input type="number" id="tmin" value="0" step="1"></div>
     <label class="sw"><input type="checkbox" id="winter">
-      <span>Winter mode<small>Correcciones gruesas: 3°/h en vez de 10°/h solar (11.5b)</small></span></label>
+      <span>Winter mode<small>Correcciones gruesas 3°/h · política canónica: objetivo 90 % y carga completa cada 3 días · calefactor auto en LT</small></span></label>
   </div>
   <button class="btn" id="run">▶ Simular</button>
   <div class="note">
@@ -179,19 +179,17 @@ var $=function(id){return document.getElementById(id)};
 function fmt(n,d){return n.toFixed(d==null?0:d).replace('.',',')}
 var D2R=Math.PI/180;
 
-/* ═══════════ Emplazamientos (presets del gemelo + plantas de los estudios SUNNER) ═══════════ */
+/* ═══════════ Emplazamientos — plantas Factiun con nº de proyecto (coords de cobertura-zigbee/<planta>_layout.json) ═══════════ */
 var LOCS=[
+ {n:"23003 · El Burgo I (Zaragoza, ES)",lat:41.5763,lon:-0.7981},
+ {n:"24007 · Fayón (Zaragoza, ES)",lat:41.2269,lon:0.3242},
+ {n:"24019 · San José (Arequipa, PE)",lat:-16.5958,lon:-71.8064},
+ {n:"24021 · Túnez (Gabès, TN)",lat:33.8792,lon:9.8736},
+ {n:"24025 · Ayora (Valencia, ES)",lat:39.1182,lon:-1.1599},
+ {n:"24030 · Bagnarelli (Apulia, IT)",lat:41.5156,lon:15.2676},
+ {n:"25019 · Páramo (León, ES)",lat:42.3206,lon:-5.5998},
  {n:"Gorraiz · Navarra (ES)",lat:42.81,lon:-1.58},
- {n:"El Burgo · Zaragoza (ES)",lat:41.576,lon:-0.798},
- {n:"Ayora · Valencia (ES)",lat:39.115,lon:-1.169},
- {n:"Villamañán · León (ES)",lat:42.317,lon:-5.582},
- {n:"Alconadre · Huesca (ES)",lat:41.85,lon:-0.15},
- {n:"La Joya · Arequipa (PE)",lat:-16.60,lon:-71.803},
- {n:"El Hamma · Gabès (TN)",lat:33.879,lon:9.874},
- {n:"Trani · Apulia (IT)",lat:41.254,lon:16.351},
  {n:"Latina · Lacio (IT)",lat:41.468,lon:12.904},
- {n:"Benante · Sicilia (IT)",lat:37.373,lon:14.898},
- {n:"Valle de Moinhos (PT)",lat:39.210,lon:-8.774},
  {n:"Jodhpur · Rajastán (IN)",lat:26.264,lon:73.008}
 ];
 
@@ -199,15 +197,26 @@ var LOCS=[
 var K0=0.0503, K1=0.000845, MOTOR_PEAK_W=50, IDLE_W=0.64, SLEEP_W=0.64, ETA_CHG=0.90, V_NOM=25.6;
 var SLEW_DPS=0.17;                      /* velocidad real de giro (°/s) — misma que el gemelo */
 var PROFILES=[
- {id:"SP_45W_3Ah",     n:"SP · panel 45 W · 3 Ah (76,8 Wh)",          wh:76.8,  chgW:45},
- {id:"SP_45W_6Ah",     n:"SP · panel 45 W · 6 Ah (153,6 Wh) — Fayón", wh:153.6, chgW:45},
- {id:"SP_60W_6Ah",     n:"SP · panel 60 W · 6 Ah (153,6 Wh)",         wh:153.6, chgW:60},
- {id:"STRING_60W_3Ah", n:"STRING · regulador 60 W · 3 Ah",            wh:76.8,  chgW:60},
- {id:"STRING_60W_6Ah", n:"STRING · regulador 60 W · 6 Ah",            wh:153.6, chgW:60}
+ {id:"SP_45W_3Ah",       n:"SP · panel 45 W · 3 Ah (76,8 Wh)",       wh:76.8,  chgW:45},
+ {id:"SP_45W_6Ah",       n:"SP · panel 45 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:45},
+ {id:"SP_60W_6Ah",       n:"SP · panel 60 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:60},
+ {id:"STRING_60W_3Ah",   n:"STRING · regulador 60 W · 3 Ah",         wh:76.8,  chgW:60},
+ {id:"STRING_60W_6Ah",   n:"STRING · regulador 60 W · 6 Ah",         wh:153.6, chgW:60},
+ {id:"SP_45W_6Ah_LT",    n:"SP · 45 W · 6 Ah · LT calefactada",      wh:153.6, chgW:45, heated:true},
+ {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6 Ah · LT calefactada",  wh:153.6, chgW:60, heated:true}
 ];
 
 /* ═══════════ Tracker (constantes del estudio SUNNER + gemelo) ═══════════ */
 var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
+/* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies):
+   parcial ≥40 km/h (±30° mín), full ≥60 km/h (±55°), histéresis destow ~30 min (1 h aquí),
+   signo hacia el sol (az<0 este → θ negativo) */
+var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=1;
+/* Calefactor -LT (PS26002_RevA): P = 1,0 + 0,15·|T| W si T<0°C, solo de día; desbloquea carga (T efectiva ≥1°C) */
+function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
+/* JEITA lado caliente (§04.1a): T3=35°C reduce, T4=45°C bloquea carga */
+var JEITA_T3=35, JEITA_T4=45;
+function hotDerate(t){if(t>=JEITA_T4)return 0;if(t>JEITA_T3)return 1-0.7*(t-JEITA_T3)/(JEITA_T4-JEITA_T3);return 1;}
 var DEG_H_NORMAL=10.0, DEG_H_WINTER=3.0;      /* °/h solar por modo (11.5b) */
 var ALBEDO=0.2;
 
@@ -263,7 +272,7 @@ function parseOM(j){
   }
   return out;
 }
-var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m";
+var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m&windspeed_unit=ms";
 function fetchOpenMeteo(loc,days){
   var u="https://api.open-meteo.com/v1/forecast?latitude="+loc.lat+"&longitude="+loc.lon+
     "&hourly="+OM_VARS+"&forecast_days="+days+"&timezone=UTC";
@@ -289,7 +298,9 @@ function synthMeteo(loc,days,doy0,clouds){
     var ghi=cs*(1-0.75*Math.pow(cf,1.5));
     var tSeason=12-hemi*8*Math.cos(2*Math.PI*(N-15)/365);
     var tDay=5*Math.sin(2*Math.PI*(d.getUTCHours()+loc.lon/15-9)/24);
-    out.push({t:d,ghi:ghi,dhi:ghi*(0.15+0.75*cf),temp:tSeason+tDay,wind:2});
+    var storm=Math.max(0,Math.sin(i*0.0313)+Math.sin(i*0.0071))>1.62?10+6*Math.abs(Math.sin(i*1.7)):0;
+    var wind=Math.max(0,2.5+2*Math.sin(i*0.9)+1.5*Math.sin(i*0.23)+storm);
+    out.push({t:d,ghi:ghi,dhi:ghi*(0.15+0.75*cf),temp:tSeason+tDay,wind:wind});
   }
   return out;
 }
@@ -329,7 +340,7 @@ function parsePVSyst(text){
    opts: {motorModel:'factiun'|mA(number), winter, socTgt, socCrit, fcDays, tMin, strategy:bool} */
 function simulate(meteo,prof,loc,soc0,opts){
   var latR=loc.lat*D2R, capWh=prof.wh, n=meteo.length;
-  var soc=soc0, parked=false, prevPos=null;
+  var soc=soc0, parked=false, prevPos=null, stow=0, stowHold=0;
   var rows=[], poaPotSum=0, poaLostSum=0;
   for(var h=0;h<n;h++){
     var m=meteo[h];
@@ -345,12 +356,23 @@ function simulate(meteo,prof,loc,soc0,opts){
       else if(parked && soc>=opts.socCrit/100+0.02) parked=false;   /* rearme +2% anti-rebote */
     }
 
-    /* — Posición: seguimiento (PhiAng real si hay CSV) o defensa 55° — */
+    /* — Abanderamiento por viento (B2): parcial ≥40 km/h, full ≥60 km/h, destow hold — */
+    if(m.wind>=WIND_T2){stow=2;stowHold=DESTOW_HOLD_H;}
+    else if(m.wind>=WIND_T1){stow=Math.max(stow,1);stowHold=DESTOW_HOLD_H;}
+    else if(stowHold>0){stowHold--;}
+    else stow=0;
+
+    /* — Posición: abanderamiento > defensa por batería > seguimiento (PhiAng real si hay CSV) — */
     var trackPos=(m.phi!=null)?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,m.phi)):trackAngleFrom(sun.el,sun.az);
-    var target=parked?DEFENSE_POS:trackPos;
+    var target;
+    if(stow>0){
+      var sSign=(sun.az<0)?-1:1;                     /* cara al sol: este por la mañana */
+      target=sSign*(stow===2?AXIS_MAX:Math.max(PARTIAL_STOW_DEG,Math.abs(trackPos)));
+      target=Math.max(-AXIS_MAX,Math.min(AXIS_MAX,target));
+    }else target=parked?DEFENSE_POS:trackPos;
     if(prevPos==null)prevPos=target;
     var deltaEff=Math.abs(target-prevPos);
-    if(!parked && opts.winter) deltaEff*=DEG_H_WINTER/DEG_H_NORMAL;
+    if(!parked && !stow && opts.winter) deltaEff*=DEG_H_WINTER/DEG_H_NORMAL;
     var avgPos=(target+prevPos)/2;
     prevPos=target;
 
@@ -363,14 +385,20 @@ function simulate(meteo,prof,loc,soc0,opts){
         motorWh=(opts.motorModel/1000)*V_NOM*(deltaEff/SLEW_DPS)/3600;
     }
     var baseWh=day?IDLE_W:SLEEP_W;
-    var consWh=baseWh+motorWh;
+    /* — Calefactor -LT (solo de día, con fuente de carga): P=1+0,15·|T| y desbloquea la carga — */
+    var heatWh=0, tEff=m.temp;
+    if(prof.heated && day && m.temp<0){heatWh=heaterW(m.temp); tEff=Math.max(m.temp,1);}
+    var consWh=baseWh+motorWh+heatWh;
 
-    /* — Carga: POA real (CSV) o GHI; Tª mín + C-rate seguro; techo objetivo/carga completa — */
-    var poaChg=(m.poa!=null)?m.poa:m.ghi;
+    /* — Carga: POA de la posición REAL (abanderado/defensa reduce), JEITA frío+calor, techo — */
+    var poaChg;
+    if(target===trackPos && m.poa!=null) poaChg=m.poa;
+    else if(sun.el>0 && m.dhi>0) poaChg=poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi);
+    else poaChg=(m.poa!=null)?m.poa:m.ghi;
     var chgWh=0;
-    if(day && m.temp>=opts.tMin){
+    if(day && tEff>=opts.tMin){
       chgWh=prof.chgW*Math.min(poaChg/1000,1)*ETA_CHG;
-      chgWh=Math.min(chgWh,cRateSafeLFP(m.temp)*capWh);
+      chgWh=Math.min(chgWh,cRateSafeLFP(tEff)*hotDerate(tEff)*capWh);
     }
     var fullDay=opts.strategy && (Math.floor(h/24)%opts.fcDays===opts.fcDays-1);
     var ceil=opts.strategy?(fullDay?1.0:opts.socTgt/100):1.0;
@@ -384,14 +412,14 @@ function simulate(meteo,prof,loc,soc0,opts){
     if(sun.el>0){
       var poaTrk=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
       poaPotSum+=poaTrk;
-      if(parked){
+      if(parked && !stow){                        /* pérdida por batería; el abanderamiento no cuenta */
         var poaDef=poaAt(DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi);
         poaLostSum+=Math.max(0,poaTrk-poaDef);
       }
     }
 
-    rows.push({t:m.t,ghi:m.ghi,temp:m.temp,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
-               net:chgEff-consWh,pos:target,parked:parked,mov:deltaEff});
+    rows.push({t:m.t,ghi:m.ghi,temp:m.temp,wind:m.wind,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
+               heat:heatWh,net:chgEff-consWh,pos:target,parked:parked,stow:stow>0,mov:deltaEff});
   }
   rows.poaPotSum=poaPotSum; rows.poaLostSum=poaLostSum;
   return rows;
@@ -451,12 +479,14 @@ function summarize(rows){
   var soc=rows.map(function(r){return r.soc});
   var sum=function(k){return rows.reduce(function(a,r){return a+r[k]},0)};
   var minI=0; soc.forEach(function(v,i){if(v<soc[minI])minI=i});
-  var hPark=rows.filter(function(r){return r.parked}).length;
+  var hPark=rows.filter(function(r){return r.parked&&!r.stow}).length;
+  var hStow=rows.filter(function(r){return r.stow}).length;
   return {
     socFinal:soc[soc.length-1], socMin:soc[minI], socMinT:rows[minI].t,
     hBelow15:soc.filter(function(v){return v<0.15}).length,
     hZero:soc.filter(function(v){return v<=0.001}).length,
-    hParked:hPark, inactivePct:100*hPark/rows.length,
+    hParked:hPark, hStow:hStow, inactivePct:100*hPark/rows.length,
+    heatWh:sum('heat'),
     prodLostPct:rows.poaPotSum>0?100*rows.poaLostSum/rows.poaPotSum:0,
     chg:sum('chg'), base:sum('base'), motor:sum('motor'), net:sum('net'),
     cyc:cyclesAnalysis(rows), rf:rainflow(soc)
@@ -467,8 +497,9 @@ function aggDaily(rows){
   rows.forEach(function(r){
     var k=r.t.getUTCFullYear()*1000+Math.floor((r.t-Date.UTC(r.t.getUTCFullYear(),0,0))/864e5);
     if(k!==key){key=k;cur={t:new Date(Date.UTC(r.t.getUTCFullYear(),r.t.getUTCMonth(),r.t.getUTCDate())),
-      chg:0,base:0,motor:0,net:0,mov:0,ghiKwh:0,tMin:1e9,tMax:-1e9,socMin:1,socMax:0,parkedH:0};out.push(cur);}
+      chg:0,base:0,motor:0,net:0,mov:0,heat:0,windMax:0,stowH:0,ghiKwh:0,tMin:1e9,tMax:-1e9,socMin:1,socMax:0,parkedH:0};out.push(cur);}
     cur.chg+=r.chg;cur.base+=r.base;cur.motor+=r.motor;cur.net+=r.net;cur.mov+=r.mov;
+    cur.heat+=r.heat||0;cur.windMax=Math.max(cur.windMax,r.wind||0);if(r.stow)cur.stowH++;
     cur.ghiKwh+=r.ghi/1000;cur.tMin=Math.min(cur.tMin,r.temp);cur.tMax=Math.max(cur.tMax,r.temp);
     cur.socMin=Math.min(cur.socMin,r.soc);cur.socMax=Math.max(cur.socMax,r.soc);
     if(r.parked)cur.parkedH++;
@@ -596,11 +627,11 @@ function getLoc(){
       lo=Math.max(-180,Math.min(180,+$('clon').value||0));
   return {n:($('cname').value||'Personalizado').trim(),lat:la,lon:lo};
 }
-$('prof').value=1;   /* SP_45W_6Ah — configuración Fayón */
+$('prof').value=1;   /* SP_45W_6Ah por defecto */
 (function(){var y=new Date().getFullYear();for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
 function profNote(){
   var P=PROFILES[$('prof').value];
-  $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W';
+  $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · calefactor '+(P.heated?'<b>sí (LT)</b> — carga bajo 0 °C':'no');
 }
 profNote();$('prof').onchange=profNote;
 [['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
@@ -618,6 +649,10 @@ $('src').onchange=function(){
   $('doyFld').style.display=v==='synth'?'':'none';
   $('sdaysFld').style.display=v==='synth'?'':'none';
 };
+$('winter').addEventListener('change',function(){
+  $('socTgt').value=this.checked?90:80; $('socTgtV').textContent=$('socTgt').value+'%';
+  $('fc').value=this.checked?3:5;       $('fcV').textContent=$('fc').value;
+});
 setInterval(function(){var d=new Date();$('clock').textContent=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)},1000);
 
 function chip(lab,val,cls,sub){
@@ -682,6 +717,8 @@ function render(meteo,mng,ref,prof,loc,opts){
     chip('Horas SOC = 0',fmt(S.hZero),S.hZero>0?'bad':'ok')+
     chip('Balance neto',(S.net>=0?'+':'')+fmt(S.net)+' Wh',S.net>=0?'ok':'warn',
          'carga '+fmt(S.chg)+' / consumo '+fmt(S.base+S.motor))+
+    chip('Abanderamiento',fmt(S.hStow)+' h',S.hStow>0?'warn':'ok','viento ≥40/60 km/h (B2)')+
+    (S.heatWh>0?chip('Calefactor LT',fmt(S.heatWh)+' Wh','','P = 1 + 0,15·|T| bajo 0 °C'):'')+
     chip('Rainflow',fmt(S.rf.total)+' ciclos','', '≥30% DoD: '+fmt(S.rf.dod30)+' · ≥60%: '+fmt(S.rf.dod60))+
     chip('Vida estimada',fmt(S.cyc.years,1)+' años',S.cyc.years<10?'warn':'ok',
          fmt(S.cyc.efc,1)+' EFC · fade '+fmt(S.cyc.fadeYr,1)+'%/año');
@@ -694,19 +731,20 @@ function render(meteo,mng,ref,prof,loc,opts){
     (opts.winter?' · winter mode':'')+'</div>';
   out.appendChild(c1);
   var g1=mkCanvas(c1,210), f1=frame(g1,0,100,mng,function(v){return fmt(v)+'%'});
-  bandParked(g1,f1,mng,'rgba(226,87,76,.12)');
+  bandParked(g1,f1,mng,'rgba(58,160,255,.10)',function(r){return r.stow});
+  bandParked(g1,f1,mng,'rgba(226,87,76,.12)',function(r){return r.parked&&!r.stow});
   hline(g1,f1,opts.socTgt,'#37b87c',true,'objetivo '+opts.socTgt+'%');
   hline(g1,f1,opts.socCrit,'#e2574c',true,'crítico '+opts.socCrit+'%');
   line(g1,f1,ref,function(r){return r.soc*100},'#5e7388',1);
   line(g1,f1,mng,function(r){return r.soc*100},'#36D399',LONG?1.1:2);
-  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con estrategia</span><span><i style="background:#5e7388"></i>Sin estrategia (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>No disponible (defensa 55°)</span></div>');
+  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con estrategia</span><span><i style="background:#5e7388"></i>Sin estrategia (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>No disponible (defensa 55°)</span><span><i style="background:rgba(58,160,255,.5)"></i>Abanderado (viento)</span></div>');
 
   /* — Gráfica 2: balance energético — */
   var c2=document.createElement('div');c2.className='card';
   c2.innerHTML='<h2>Balance energético '+(LONG?'diario':'horario')+'</h2><div class="sub">Carga solar vs consumo (electrónica + motor) — Wh por '+(LONG?'día':'hora')+'</div>';
   out.appendChild(c2);
   var bRows=LONG?dm:mng;
-  var maxE=Math.max(4,Math.max.apply(null,bRows.map(function(r){return Math.max(r.chg,r.base+r.motor)})));
+  var maxE=Math.max(4,Math.max.apply(null,bRows.map(function(r){return Math.max(r.chg,r.base+r.motor+(r.heat||0))})));
   var g2=mkCanvas(c2,175), f2=frame(g2,-maxE,maxE,bRows,function(v){return fmt(v)});
   var bw=Math.max(1,(g2.w-CH.pad.l-CH.pad.r)/bRows.length-0.4);
   bRows.forEach(function(r,i){
@@ -717,8 +755,10 @@ function render(meteo,mng,ref,prof,loc,opts){
     g2.x.fillRect(x0,f2.Y(0),bw,f2.Y(-r.base)-f2.Y(0));
     g2.x.fillStyle='rgba(226,87,76,.85)';
     g2.x.fillRect(x0,f2.Y(-r.base),bw,f2.Y(-r.base-r.motor)-f2.Y(-r.base));
+    if(r.heat>0){g2.x.fillStyle='rgba(58,160,255,.85)';
+      g2.x.fillRect(x0,f2.Y(-r.base-r.motor),bw,f2.Y(-r.base-r.motor-r.heat)-f2.Y(-r.base-r.motor));}
   });
-  c2.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:rgba(54,211,153,.75)"></i>Carga solar</span><span><i style="background:rgba(224,165,43,.8)"></i>Electrónica (0,64 W)</span><span><i style="background:rgba(226,87,76,.85)"></i>Motor</span></div>');
+  c2.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:rgba(54,211,153,.75)"></i>Carga solar</span><span><i style="background:rgba(224,165,43,.8)"></i>Electrónica (0,64 W)</span><span><i style="background:rgba(226,87,76,.85)"></i>Motor</span><span><i style="background:rgba(58,160,255,.85)"></i>Calefactor LT</span></div>');
 
   /* — Gráfica 3: meteo — */
   var c3=document.createElement('div');c3.className='card';
@@ -734,7 +774,11 @@ function render(meteo,mng,ref,prof,loc,opts){
     line(g3,fT,dm,'tMin','#3aa0ff',1);
     line(g3,fT,dm,'tMax','#e2574c',1);
     if(opts.tMin>tLo)hline(g3,fT,opts.tMin,'#3aa0ff',true,'Tª mín carga '+opts.tMin+'°C');
-    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>Irradiación</span><span><i style="background:#3aa0ff"></i>Tª mín</span><span><i style="background:#e2574c"></i>Tª máx</span></div>');
+    var wMax=Math.max(18,Math.max.apply(null,dm.map(function(r){return r.windMax})));
+    var fW={X:f3.X,Y:function(v){return CH.pad.t+(165-CH.pad.t-CH.pad.b)*(1-v/wMax)}};
+    line(g3,fW,dm,'windMax','#8093A4',0.9);
+    hline(g3,fW,WIND_T1,'#8093A4',true,'40 km/h');
+    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>Irradiación</span><span><i style="background:#3aa0ff"></i>Tª mín</span><span><i style="background:#e2574c"></i>Tª máx</span><span><i style="background:#8093A4"></i>Viento máx (m/s)</span></div>');
   }else{
     var maxG=Math.max(200,Math.max.apply(null,mng.map(function(r){return r.ghi})));
     var g3b=mkCanvas(c3,160), f3b=frame(g3b,0,maxG,mng,function(v){return fmt(v)});
@@ -769,19 +813,20 @@ function render(meteo,mng,ref,prof,loc,opts){
     var months={};
     mng.forEach(function(r){
       var k=r.t.getUTCFullYear()+'-'+r.t.getUTCMonth();
-      if(!months[k])months[k]={m:r.t.getUTCMonth(),chg:0,motor:0,base:0,net:0,socMin:1,hPark:0};
+      if(!months[k])months[k]={m:r.t.getUTCMonth(),chg:0,motor:0,base:0,net:0,socMin:1,hPark:0,hStow:0};
       var M=months[k];M.chg+=r.chg;M.motor+=r.motor;M.base+=r.base;M.net+=r.net;
-      M.socMin=Math.min(M.socMin,r.soc);if(r.parked)M.hPark++;
+      M.socMin=Math.min(M.socMin,r.soc);if(r.parked&&!r.stow)M.hPark++;if(r.stow)M.hStow++;
     });
     var cM=document.createElement('div');cM.className='card';
     cM.innerHTML='<h2>Balance mensual</h2><div class="sub">Con estrategia — el mes crítico es el de menor SOC mínimo</div>';
-    var tb='<table class="cmp"><tr><th>Mes</th><th>Carga (Wh)</th><th>Motor (Wh)</th><th>Electr. (Wh)</th><th>Neto (Wh)</th><th>SOC mín</th><th>h defensa</th></tr>';
+    var tb='<table class="cmp"><tr><th>Mes</th><th>Carga (Wh)</th><th>Motor (Wh)</th><th>Electr. (Wh)</th><th>Neto (Wh)</th><th>SOC mín</th><th>h defensa</th><th>h aband.</th></tr>';
     Object.keys(months).forEach(function(k){
       var M=months[k];
       tb+='<tr><td>'+MES[M.m]+'</td><td>'+fmt(M.chg)+'</td><td>'+fmt(M.motor)+'</td><td>'+fmt(M.base)+'</td>'+
         '<td class="'+(M.net>=0?'ok':'bad')+'">'+(M.net>=0?'+':'')+fmt(M.net)+'</td>'+
         '<td class="'+(M.socMin<crit?'bad':(M.socMin<crit+0.1?'wn':''))+'">'+fmt(M.socMin*100)+'%</td>'+
-        '<td class="'+(M.hPark>0?'bad':'')+'">'+fmt(M.hPark)+'</td></tr>';
+        '<td class="'+(M.hPark>0?'bad':'')+'">'+fmt(M.hPark)+'</td>'+
+        '<td class="'+(M.hStow>0?'wn':'')+'">'+fmt(M.hStow)+'</td></tr>';
     });
     cM.insertAdjacentHTML('beforeend',tb+'</table>');
     out.appendChild(cM);
@@ -792,6 +837,7 @@ function render(meteo,mng,ref,prof,loc,opts){
   c5.innerHTML='<h2>Comparativa: sin estrategia vs con estrategia</h2><div class="sub">Mismo TCU y misma meteo; cambia solo la operación (estrategia SUNNER'+(opts.winter?' + winter mode':'')+')</div>';
   var rows=[
     ['Tiempo no disponible',fmt(R.inactivePct,4)+'%',fmt(S.inactivePct,4)+'%',null],
+    ['Horas abanderado (viento)',fmt(R.hStow),fmt(S.hStow),null],
     ['Producción perdida',fmt(R.prodLostPct,4)+'%',fmt(S.prodLostPct,4)+'%',null],
     ['SOC final',fmt(R.socFinal*100)+'%',fmt(S.socFinal*100)+'%',S.socFinal>=R.socFinal],
     ['SOC mínimo',fmt(R.socMin*100)+'%',fmt(S.socMin*100)+'%',S.socMin>=R.socMin],
