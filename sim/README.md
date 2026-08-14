@@ -113,7 +113,34 @@ Lo que hace que valga la pena no es copiar sin manos: es que **contrasta lo que 
 
 La cuarta fuente entró por un caso real: `tcu_compare.py` llevaba `p_sleep = 0,45 W` mientras `tcu.py` decía 0,64, y el generador no lo veía porque solo contrastaba `tcu.py` contra `bateria.html`. **Un divergente escondido en la fuente que nadie coteja son ~2 puntos de SOC.**
 
-Hay una segunda categoría, los **avisos**: divergencias reales que no bloquean la generación porque la decisión no es del generador. Hoy solo hay una — la velocidad del actuador, **0,17 °/s** medidos en campo (gemelo, terreno, `bateria.html`) contra el **0,16** que trae por defecto el port del cuaderno. No es cosmético: el motor gasta `P(θ)·Δθ/v`, o sea un **6,3 % más de Wh** con el valor lento.
+La segunda que salió al cotejar fue la **velocidad del actuador**: `tcu_compare.py` traía **0,16 °/s** por defecto frente a los **0,17** medidos en campo, que ya usaban `poa.py`, `bankable_config.py` y los scripts de validación desde siempre (`tracker.CANONICAL_SLEW_RATE_DEG_PER_S`). No es cosmético: el motor gasta `P(θ)·Δθ/v`, así que el valor lento inflaba un **6,3 %** la energía de **cada** movimiento del año. Resuelto a 0,17.
+
+Y el generador ya no se conforma con que los números coincidan: exige que `tcu_compare.py` los escriba como **nombre del canónico**, no como cifra. Un número que hoy coincide es el que mañana se queda atrás — que es literalmente lo que pasó con el sleep y con el slew. Si alguien vuelve a escribir `0.16` ahí, el generador se planta:
+
+```
+✗ LAS FUENTES NO DICEN LO MISMO — no se genera nada:
+  velocidad del actuador:  el canon = 0.17   ≠   tcu_compare.py = 0.16
+  velocidad del actuador: tcu_compare.py lo escribe como número (0.16) en vez de
+  importar el canónico. Hoy coincide; mañana es el que se queda atrás.
+```
+
+## El canon es el defecto, no el dogma
+
+Ninguna constante está clavada. `K` nace del canon, pero **todo** se puede apartar en caliente:
+
+```js
+SIM.ajusta({ SLEW_DPS: 0.16, WIND_T1: 8 });   // surte efecto en el paso siguiente
+SIM.tocados();                                 // { SLEW_DPS: {canon: 0.17, ahora: 0.16}, … }
+SIM.restauraCanon();                           // y vuelta atrás
+```
+
+Se pisa el **mismo** objeto `K`, no una copia, porque el motor lee `K.LO_QUE_SEA` en el momento de usarlo: mover un valor con la planta andando no obliga a rehacer nada. Lo único con estado propio son las máquinas de abanderamiento, que releen sus umbrales en cada paso (`sincronizaBandera`) para no perder ni el estado ni el lado ya fijado.
+
+El panel de la interfaz **no lleva escrito ni un control**: se pinta de `SIM.PARAMS`, el catálogo que da etiqueta, unidad, decimales, grupo y procedencia (`canon` = generado de SolarGPT · `del gemelo` = propio, porque el estudio de batería no lo necesita pero un equipo que sirve Modbus sí). Una constante nueva en `K` aparece sola en el panel — y si nadie la cataloga, el módulo **no carga**: `PARAMS` y `K` tienen que cuadrar exactamente.
+
+Lo que se aparta del canon se marca en ámbar con su valor original al lado, se guarda en el navegador y se avisa: **los números que salgan de ahí ya no son comparables con SolarGPT**. Los controles que dependen de un parámetro lo siguen (el tope de eje manda en la consigna manual; los umbrales, en la nota del abanderamiento).
+
+Del lado de Python la regla es la misma y ya estaba: `run_tcu_sim` toma **todo** de `df_meta`/`config` y solo cae al canónico cuando no se lo configuras. Guard: `tests/test_tcu_compare_defaults_canonical.py` — comprueba las dos mitades, que el default apunte al canon **y** que el override siga existiendo.
 
 ```bash
 node tools/extrae_fisica.mjs   # tras tocar la gestión de batería en SolarGPT

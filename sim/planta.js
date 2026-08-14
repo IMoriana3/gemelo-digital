@@ -99,6 +99,103 @@ var K = {
   SOC_L1: 50, SOC_L2: 35, SOC_L3: 25,  /* umbrales de ALARMA del firmware (41081) */
   SOC_REARME: 5                 /* histéresis de salida de los modos de batería (%) */
 };
+/* ── TODO es configurable ────────────────────────────────────────────────────
+   K sale del canon, pero ninguna de sus constantes está clavada: son valores por
+   defecto, no dogma. Se guarda una copia intacta (K_CANON) y se pueden pisar en
+   caliente con SIM.ajusta({...}); SIM.restauraCanon() las devuelve.
+
+   Se pisa el MISMO objeto K, no una copia, porque todo el motor lee `K.LO_QUE_SEA`
+   en el momento de usarlo: cambiar un valor con la planta andando surte efecto en
+   el siguiente paso, sin rehacer nada. Lo único que hay que refrescar a mano son
+   las máquinas de abanderamiento, que se construyen con sus umbrales dentro — de
+   eso se encarga `refrescaViento` más abajo. */
+var K_CANON = {};
+for (var _k in K) if (Object.prototype.hasOwnProperty.call(K, _k)) K_CANON[_k] = K[_k];
+
+function ajusta(cambios) {
+  var hechos = {}, malas = [];
+  for (var c in cambios) {
+    if (!Object.prototype.hasOwnProperty.call(cambios, c)) continue;
+    if (!Object.prototype.hasOwnProperty.call(K_CANON, c)) { malas.push(c); continue; }
+    var v = Number(cambios[c]);
+    if (!isFinite(v)) { malas.push(c); continue; }
+    if (K[c] !== v) { K[c] = v; hechos[c] = v; }
+  }
+  if (malas.length) throw new Error('parámetros que no existen o no son números: ' + malas.join(', '));
+  return hechos;
+}
+function restauraCanon() {
+  var vuelta = {};
+  for (var c in K_CANON) if (K[c] !== K_CANON[c]) { K[c] = K_CANON[c]; vuelta[c] = K_CANON[c]; }
+  return vuelta;
+}
+/* Catálogo de lo que se puede tocar: etiqueta, unidad, decimales, grupo y de dónde
+   sale el valor por defecto (`canon` = generado de SolarGPT, `sim` = propio del gemelo,
+   porque el estudio de batería no lo necesita pero un equipo que sirve Modbus sí).
+   Existe para que la interfaz pinte los controles SOLA: si mañana entra una constante
+   nueva en K, se añade aquí y aparece en el panel sin tocar el HTML. */
+var PARAMS = [
+  { k: 'AXIS_MAX',      n: 'Tope mecánico del eje',        u: '°',     d: 1, g: 'Geometría y movimiento', o: 'canon' },
+  { k: 'GCR',           n: 'GCR (cuerda/paso)',            u: '',      d: 3, g: 'Geometría y movimiento', o: 'canon' },
+  { k: 'NIGHT_POS',     n: 'Posición nocturna',            u: '°',     d: 1, g: 'Geometría y movimiento', o: 'canon' },
+  { k: 'DEFENSE_POS',   n: 'Defensa por batería',          u: '°',     d: 1, g: 'Geometría y movimiento', o: 'canon' },
+  { k: 'SLEW_DPS',      n: 'Velocidad del actuador',       u: '°/s',   d: 3, g: 'Geometría y movimiento', o: 'canon' },
+  { k: 'HYST_DEG',      n: 'Banda muerta del lazo',        u: '°',     d: 2, g: 'Geometría y movimiento', o: 'canon' },
+  { k: 'VEL_SIN_CARGA', n: 'Velocidad del motor en vacío', u: '°/s',   d: 2, g: 'Geometría y movimiento', o: 'sim' },
+  { k: 'DEG_H_NORMAL',  n: 'Ritmo de seguimiento',         u: '°/h',   d: 1, g: 'Geometría y movimiento', o: 'canon' },
+  { k: 'DEG_H_WINTER',  n: 'Ritmo en modo invierno',       u: '°/h',   d: 1, g: 'Geometría y movimiento', o: 'canon' },
+
+  { k: 'WIND_T1',       n: 'Umbral parcial',               u: 'm/s',   d: 3, g: 'Abanderamiento', o: 'canon' },
+  { k: 'WIND_T2',       n: 'Umbral total',                 u: 'm/s',   d: 3, g: 'Abanderamiento', o: 'canon' },
+  { k: 'PARTIAL_STOW',  n: 'Mínimo del sector parcial',    u: '°',     d: 1, g: 'Abanderamiento', o: 'canon' },
+  { k: 'DESTOW_MIN',    n: 'Histéresis de desabanderar',   u: 'min',   d: 0, g: 'Abanderamiento', o: 'canon' },
+  { k: 'SNOW_ALARM_M',  n: 'Nieve que dispara la alarma',  u: 'm',     d: 3, g: 'Abanderamiento', o: 'sim' },
+
+  { k: 'IDLE_W',        n: 'Consumo de electrónica (día)', u: 'W',     d: 2, g: 'Energía', o: 'canon' },
+  { k: 'SLEEP_W',       n: 'Consumo de reposo (noche)',    u: 'W',     d: 2, g: 'Energía', o: 'canon' },
+  { k: 'MOT_K0',        n: 'Motor · K0',                   u: 'Wh/°',  d: 4, g: 'Energía', o: 'canon' },
+  { k: 'MOT_K1',        n: 'Motor · K1',                   u: 'Wh/°²', d: 6, g: 'Energía', o: 'canon' },
+  { k: 'MOTOR_PEAK_W',  n: 'Pico de motor',                u: 'W',     d: 1, g: 'Energía', o: 'canon' },
+  { k: 'ETA_CHG',       n: 'Rendimiento de carga',         u: '',      d: 3, g: 'Energía', o: 'canon' },
+  { k: 'V_NOM',         n: 'Tensión nominal del bus',      u: 'V',     d: 2, g: 'Energía', o: 'canon' },
+  { k: 'ALBEDO',        n: 'Albedo del suelo',             u: '',      d: 2, g: 'Energía', o: 'canon' },
+
+  { k: 'JEITA_T3',      n: 'JEITA T3 (reduce carga)',      u: '°C',    d: 1, g: 'Batería', o: 'canon' },
+  { k: 'JEITA_T4',      n: 'JEITA T4 (bloquea carga)',     u: '°C',    d: 1, g: 'Batería', o: 'canon' },
+  { k: 'T_CHG_MIN',     n: 'Mínima para cargar',           u: '°C',    d: 1, g: 'Batería', o: 'sim' },
+  { k: 'V_MIN',         n: 'Tensión a SoC 0',              u: 'V',     d: 2, g: 'Batería', o: 'sim' },
+  { k: 'V_MAX',         n: 'Tensión a SoC 100',            u: 'V',     d: 2, g: 'Batería', o: 'sim' },
+  { k: 'V_ABS',         n: 'Tensión de absorción',         u: 'V',     d: 2, g: 'Batería', o: 'sim' },
+  { k: 'SOC_L1',        n: 'Alarma L1',                    u: '%',     d: 0, g: 'Batería', o: 'sim' },
+  { k: 'SOC_L2',        n: 'Alarma L2 (congela)',          u: '%',     d: 0, g: 'Batería', o: 'sim' },
+  { k: 'SOC_L3',        n: 'Alarma L3',                    u: '%',     d: 0, g: 'Batería', o: 'sim' },
+  { k: 'SOC_REARME',    n: 'Rearme de los modos',          u: '%',     d: 0, g: 'Batería', o: 'sim' },
+
+  { k: 'PULSOS_TOPE',      n: 'Pulsos a tope de eje',         u: 'pulsos', d: 0, g: 'Entradas físicas y firmware', o: 'sim' },
+  { k: 'DB_PULSOS',        n: 'Banda muerta normal',          u: 'pulsos', d: 0, g: 'Entradas físicas y firmware', o: 'sim' },
+  { k: 'DB_PULSOS_BAJA',   n: 'Banda muerta en baja carga',   u: 'pulsos', d: 0, g: 'Entradas físicas y firmware', o: 'sim' },
+  { k: 'ANTIRREBOTE_S',    n: 'Antirrebote de la seta',       u: 's',      d: 3, g: 'Entradas físicas y firmware', o: 'sim' },
+  { k: 'EVAL_MOTOR_S',     n: 'Ventana de juicio del motor',  u: 's',      d: 1, g: 'Entradas físicas y firmware', o: 'sim' },
+  { k: 'REINTENTOS_MOTOR', n: 'Reintentos antes de enclavar', u: '',       d: 0, g: 'Entradas físicas y firmware', o: 'sim' }
+];
+/* que el catálogo y K no se separen: si entra una constante y nadie la cataloga, salta */
+(function () {
+  var vistos = {}, faltan = [];
+  for (var i = 0; i < PARAMS.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(K, PARAMS[i].k)) faltan.push(PARAMS[i].k + ' (catalogado y no existe)');
+    vistos[PARAMS[i].k] = true;
+  }
+  for (var c in K) if (!vistos[c]) faltan.push(c + ' (existe y no está catalogado)');
+  if (faltan.length) throw new Error('PARAMS y K no cuadran: ' + faltan.join(', '));
+})();
+
+/* Qué se ha tocado respecto al canon: lo usa la interfaz para marcarlo. */
+function tocados() {
+  var t = {};
+  for (var c in K_CANON) if (K[c] !== K_CANON[c]) t[c] = { canon: K_CANON[c], ahora: K[c] };
+  return t;
+}
+
 /* las cuatro curvas, tal cual salen de bateria.html */
 var cRateSafeLFP = F.cRateSafeLFP, hotDerate = F.hotDerate, heaterW = F.heaterW, poaAt = F.poaAt;
 
@@ -108,6 +205,21 @@ var cRateSafeLFP = F.cRateSafeLFP, hotDerate = F.hotDerate, heaterW = F.heaterW,
 var Abanderamiento = (typeof window !== 'undefined' && window.Abanderamiento) ||
         (typeof require === 'function' ? require('./viento.js') : null);
 if (!Abanderamiento) throw new Error('falta sim/viento.js');
+
+/* Una bandera nueva con los umbrales que haya AHORA en K (que pueden no ser los del
+   canon si se han ajustado). `sincronizaBandera` los refresca en una ya montada, sin
+   perderle el estado: es lo que permite mover un umbral con la planta en marcha. */
+function nuevaBandera(estrategia) {
+  var ab = new Abanderamiento({ estrategia: estrategia });
+  sincronizaBandera(ab);
+  return ab;
+}
+function sincronizaBandera(ab) {
+  ab.t1 = K.WIND_T1; ab.t2 = K.WIND_T2;
+  ab.parcialMin = K.PARTIAL_STOW; ab.total = K.AXIS_MAX;
+  ab.holdS = K.DESTOW_MIN * 60;
+  return ab;
+}
 
 /* ── Alimentación y gestión de batería ──────────────────────────────────────
    Un TCU no siempre come de lo mismo, y eso cambia por completo su gestión de
@@ -387,7 +499,9 @@ function TCU(id, planta, opts) {
   this.fueraRango = false; this.limiteOeste = false; this.limiteEste = false;
   this.velocidadBaja = false; this.relajacion = false;
 
-  this.ab = new Abanderamiento({ estrategia: (planta.cfg && planta.cfg.estrategiaViento) || 'B2' });
+  /* los umbrales se le pasan desde K, no se los busca él en el canon: así el
+     abanderamiento también se puede reconfigurar en caliente como todo lo demás */
+  this.ab = nuevaBandera((planta.cfg && planta.cfg.estrategiaViento) || 'B2');
   this.zbCanal = 15; this.zbAddr = 0x1000 + id;
   this.serie = 'TCU' + String(2400000 + id * 37);
   this.mac = 0x0013A200 * 1 + id;
@@ -466,7 +580,9 @@ TCU.prototype.decide = function (dt, ang) {
      aquí el azimut es 0 en el mediodía solar, negativo al este: az_pvlib = 180 + az */
   var azSol = ang.dia ? (180 + ang.sol.az * R2D) : 180;
   /* el eje A necesita además de dónde VIENE el viento, que es lo que miden las HSU */
-  var rAb = this.ab.paso(dt, this.p.ncu.vientoMax, ang.sel, azSol, this.p.ncu.dirVientoMax);
+  /* los umbrales se releen de K en cada paso: así mover uno con la planta en marcha
+     surte efecto ya, sin perderle el estado a la máquina (ni el lado abanderado) */
+  var rAb = sincronizaBandera(this.ab).paso(dt, this.p.ncu.vientoMax, ang.sel, azSol, this.p.ncu.dirVientoMax);
   this.stow = rAb.estado;
 
   /* modos de batería (L1 baja · L2 muy baja · L3 crítica) con rearme: se entra al
@@ -1302,7 +1418,9 @@ var API = {
   Planta: Planta, TCU: TCU, HSU: HSU, NCU: NCU, Meteo: Meteo,
   PERFILES: PERFILES, perfilDe: perfilDe, TIPO_REG: TIPO_REG, FISICA: F,
   Abanderamiento: Abanderamiento,
-  K: K, MODO: MODO, MODO_TXT: MODO_TXT, SP: SP, SP_TXT: SP_TXT,
+  K: K, K_CANON: K_CANON, ajusta: ajusta, restauraCanon: restauraCanon, tocados: tocados,
+  PARAMS: PARAMS,
+  MODO: MODO, MODO_TXT: MODO_TXT, SP: SP, SP_TXT: SP_TXT,
   CRIT: CRIT, CRIT_TXT: CRIT_TXT, FUENTE_SP: FUENTE_SP, FUENTE_TXT: FUENTE_TXT,
   CHARGER_TXT: CHARGER_TXT,
   posicionSolar: posicionSolar, angulos: angulos, cosAOI: cosAOI,

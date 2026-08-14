@@ -471,5 +471,41 @@ const RT = P2.regsTCU(P2.tcu(1));
 ok(Object.keys(RT).length > 60, 'la imagen de registros de la TCU está poblada', Object.keys(RT).length + ' registros');
 ok(Object.keys(P2.regsNCU()).length > 100, 'y la de la NCU también', Object.keys(P2.regsNCU()).length + ' registros');
 
+/* ───────── todo es configurable ─────────
+   El canon es el valor por defecto, no un dogma: se puede apartar en caliente y se
+   vuelve. Lo que NO puede es apartarse sin enterarse nadie, ni aceptar basura. */
+ok(SIM.PARAMS.length === Object.keys(SIM.K).length,
+   'el catálogo de parámetros cubre todo K', SIM.PARAMS.length + ' parámetros');
+ok(SIM.PARAMS.every(p => Object.prototype.hasOwnProperty.call(SIM.K_CANON, p.k)),
+   'y ninguno del catálogo se ha quedado sin constante');
+ok(SIM.K.SLEW_DPS === 0.17, 'la velocidad del actuador es la medida en campo', SIM.K.SLEW_DPS + ' °/s');
+
+const cambios = SIM.ajusta({ SLEW_DPS: 0.16, WIND_T1: 8 });
+ok(cambios.SLEW_DPS === 0.16 && SIM.K.SLEW_DPS === 0.16, 'ajustar un parámetro lo cambia de verdad');
+const marcados = SIM.tocados();
+ok(marcados.SLEW_DPS && marcados.SLEW_DPS.canon === 0.17,
+   'y queda marcado con su valor canónico al lado', 'canon ' + marcados.SLEW_DPS.canon);
+
+/* el umbral nuevo tiene que llegar a la máquina de abanderamiento YA montada */
+const Pc = new SIM.Planta({ nTCU: 2, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 11, dia: 172,
+                            lat: 42.82, lon: -1.60, tz: 1 });
+Pc.meteo.viento = 9; Pc.meteo.rachas = 0;    /* 32 km/h: bajo el umbral canónico, sobre el ajustado */
+Pc.paso(1); Pc.paso(1);
+ok(Pc.tcu(1).stow > 0, 'un umbral de viento bajado abandera con menos viento', '9 m/s con T1 = 8');
+
+let pegas = 0;
+try { SIM.ajusta({ NO_EXISTE: 1 }); } catch (e) { pegas++; }
+try { SIM.ajusta({ SLEW_DPS: 'rápido' }); } catch (e) { pegas++; }
+ok(pegas === 2, 'rechaza parámetros inventados y valores que no son números');
+ok(SIM.K.SLEW_DPS === 0.16, 'y un ajuste rechazado no deja el motor a medias');
+
+const vuelta = SIM.restauraCanon();
+ok(vuelta.SLEW_DPS === 0.17 && Object.keys(SIM.tocados()).length === 0,
+   'volver al canon devuelve TODO', Object.keys(vuelta).length + ' parámetros restaurados');
+const Pd = new SIM.Planta({ nTCU: 2, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 11, dia: 172,
+                            lat: 42.82, lon: -1.60, tz: 1 });
+Pd.meteo.viento = 9; Pd.meteo.rachas = 0; Pd.paso(1); Pd.paso(1);
+ok(Pd.tcu(1).stow === 0, 'y con el canon puesto, 9 m/s ya no abandera');
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);

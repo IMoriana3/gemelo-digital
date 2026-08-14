@@ -49,6 +49,13 @@
   .content{overflow-y:auto;padding:12px 16px;min-width:0}
 
   .grp{margin-bottom:14px}
+  .pgrp{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--tx3);margin:10px 0 5px;padding-top:7px;border-top:1px solid var(--line)}
+  .pgrp:first-child{margin-top:2px;padding-top:0;border-top:0}
+  .pfld label{align-items:baseline;gap:8px}
+  .pfld .pu{color:var(--tx3);font-family:var(--mono);font-size:10.5px}
+  .pfld .pcanon{color:var(--tx3);font-size:10.5px;white-space:nowrap}
+  .pfld.tocado input{border-color:var(--warn);color:var(--warn)}
+  .pfld.tocado .pcanon{color:var(--warn)}
   .grp h3{margin:0 0 7px;font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--tx3)}
   .fld{margin-bottom:8px}
   .fld label{display:flex;justify-content:space-between;font-size:12px;color:var(--tx2);margin-bottom:3px}
@@ -313,6 +320,14 @@
         <div class="fld"><label>Consigna manual <span class="rv" id="manV">0°</span></label>
           <input type="range" id="manSet" min="-55" max="55" value="0"></div>
       </div>
+
+      <div class="grp">
+        <h3>Parámetros · el canon es el defecto, no el dogma</h3>
+        <div class="note" style="margin-top:0">Todo lo que el motor usa para calcular sale de aquí, y todo se puede tocar <b>en caliente</b>. El valor de partida es el canónico —generado de SolarGPT, no escrito a mano— y lo que se aparte de él se marca en ámbar con su valor original al lado.</div>
+        <div id="paramsBox"></div>
+        <button class="btn sec" id="btnCanon" style="margin-top:8px">↩︎ Volver al canon</button>
+        <div class="note" id="paramsNota"></div>
+      </div>
     </aside>
 
     <section class="content">
@@ -509,7 +524,10 @@ function aplicaEstrategiaViento() {
   for (var i = 0; i < L.length; i++) if (L[i].id === id) e = L[i];
   P.cfg.estrategiaViento = id;
   P.tcus.forEach(function (t) { t.ab = new SIM.Abanderamiento({ estrategia: id }); });
-  var C = SIM.Abanderamiento.CANON;
+  /* los umbrales que se cuentan son los VIGENTES (SIM.K), no los canónicos: si se han
+     ajustado en el panel de parámetros, la nota tiene que decir los de verdad */
+  var C = { t1: SIM.K.WIND_T1, t2: SIM.K.WIND_T2, parcialMin: SIM.K.PARTIAL_STOW,
+            total: SIM.K.AXIS_MAX, holdMin: SIM.K.DESTOW_MIN };
   $('estrNota').innerHTML =
     (e.eje === 'sol' ? 'La bandera mira <b>al sol</b>' : 'La bandera mira <b>al viento</b> (de donde viene)') + '. ' +
     (e.umbrales === 2
@@ -541,6 +559,86 @@ function ve(que) {
    se recalcule antes de repintar. Sin esto, pulsar la seta en pausa no hace nada
    visible hasta darle a Simular. */
 function toca() { if (P) P.paso(0.001); pintaTodo(); }
+
+/* ═══════════════════ parámetros, todos ═══════════════════
+   El panel no lleva escrito ni un control: se pinta del catálogo SIM.PARAMS, así que
+   una constante nueva en el motor aparece aquí sola. Se guarda lo tocado en el
+   navegador para no repetirlo en cada recarga, y lo que se aparta del canon se marca.
+
+   Ojo con el orden: se aplica ANTES de montar la planta, para que nazca ya con los
+   valores puestos (los TCU construyen su bandera con los umbrales que haya en K). */
+var LLAVE_PARAMS = 'gemelo.sim.params';
+function guardaParams() {
+  try {
+    var t = SIM.tocados(), fuera = {};
+    for (var c in t) fuera[c] = t[c].ahora;
+    localStorage.setItem(LLAVE_PARAMS, JSON.stringify(fuera));
+  } catch (e) { /* modo privado o sin almacenamiento: se pierde al recargar, nada más */ }
+}
+function cargaParams() {
+  try {
+    var g = JSON.parse(localStorage.getItem(LLAVE_PARAMS) || '{}');
+    var limpio = {};                     /* filtra lo que ya no exista: el motor cambia */
+    for (var c in g) if (Object.prototype.hasOwnProperty.call(SIM.K_CANON, c)) limpio[c] = g[c];
+    if (Object.keys(limpio).length) SIM.ajusta(limpio);
+  } catch (e) { }
+}
+function fmtParam(v, d) { return (d ? v.toFixed(d) : String(Math.round(v))).replace('.', ','); }
+function pintaParams() {
+  var caja = $('paramsBox');
+  if (!caja.dataset.hecho) {                       /* una sola vez: los controles */
+    var html = '', grupo = null;
+    SIM.PARAMS.forEach(function (p) {
+      if (p.g !== grupo) {
+        grupo = p.g;
+        html += '<div class="pgrp">' + grupo + '</div>';
+      }
+      /* type=text y no number: el campo se escribe con COMA, como el resto de la casa,
+         y un input numérico rechaza la coma dejando el valor vacío. Se acepta cualquiera
+         de los dos separadores al leer. */
+      html += '<div class="fld pfld" data-k="' + p.k + '">' +
+        '<label><span>' + p.n + (p.u ? ' <span class="pu">' + p.u + '</span>' : '') + '</span>' +
+        '<span class="rv pcanon" id="pc_' + p.k + '"></span></label>' +
+        '<input type="text" inputmode="decimal" id="p_' + p.k + '"></div>';
+    });
+    caja.innerHTML = html;
+    SIM.PARAMS.forEach(function (p) {
+      $('p_' + p.k).onchange = function () {
+        var v = parseFloat(String(this.value).replace(',', '.'));
+        if (!isFinite(v)) { this.value = fmtParam(SIM.K[p.k], p.d); return; }
+        try { SIM.ajusta(obj1(p.k, v)); } catch (e) { }
+        guardaParams(); pintaParams();
+        if (P) aplicaEstrategiaViento();     /* la nota del abanderamiento cuenta umbrales */
+        toca();
+      };
+    });
+    caja.dataset.hecho = '1';
+  }
+  var t = SIM.tocados(), n = 0;
+  SIM.PARAMS.forEach(function (p) {
+    var inp = $('p_' + p.k), et = $('pc_' + p.k), fld = inp.parentNode;
+    if (document.activeElement !== inp) inp.value = fmtParam(SIM.K[p.k], p.d);
+    if (t[p.k]) {
+      n++;
+      fld.classList.add('tocado');
+      et.textContent = 'canon ' + fmtParam(t[p.k].canon, p.d);
+    } else {
+      fld.classList.remove('tocado');
+      et.textContent = p.o === 'canon' ? 'canon' : 'del gemelo';
+    }
+  });
+  /* controles que dependen de un parámetro: el tope de eje manda en la consigna manual */
+  var tope = Math.round(SIM.K.AXIS_MAX);
+  if (+$('manSet').max !== tope) {
+    $('manSet').max = tope; $('manSet').min = -tope;
+    $('manSet').value = Math.max(-tope, Math.min(tope, +$('manSet').value));
+  }
+  $('paramsNota').innerHTML = n
+    ? '<b>' + n + '</b> ' + (n === 1 ? 'parámetro apartado' : 'parámetros apartados') +
+      ' del canon. Los números que salgan de aquí ya <b>no</b> son comparables con SolarGPT.'
+    : 'Todo en su valor canónico. Los <span class="pu">del gemelo</span> no vienen de SolarGPT porque el estudio de batería no los necesita: son del equipo que sirve Modbus.';
+}
+function obj1(k, v) { var o = {}; o[k] = v; return o; }
 
 /* ═══════════════════ bucle ═══════════════════
    dt de reloj × velocidad = dt simulado. Se trocea a 60 s como mucho por paso para
@@ -1144,7 +1242,15 @@ $('estrViento').onchange = function () { aplicaEstrategiaViento(); toca(); };
 });
 $('acFallo').onchange = function () { P.ncu.acFallo = this.checked; toca(); };
 
+$('btnCanon').onclick = function () {
+  SIM.restauraCanon(); guardaParams(); pintaParams();
+  if (P) aplicaEstrategiaViento();
+  toca();
+};
+
 /* en marcha */
+cargaParams();      /* ANTES de construir: la planta nace ya con los valores puestos */
+pintaParams();
 construye();
 aplicaEstrategia();
 sincronizaAverias();

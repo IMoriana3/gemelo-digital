@@ -29,6 +29,7 @@ const SGPT = process.argv[2] || path.join(RAIZ, '..', 'SolarGPTfull');
 const TCU_PY = path.join(SGPT, 'solargpt', 'solargpt_core', 'tcu.py');
 const TFM_PY = path.join(SGPT, 'solargpt', 'scripts', 'tfm_constants.py');
 const CMP_PY = path.join(SGPT, 'solargpt', 'solargpt_core', 'tcu_compare.py');
+const TRACKER_PY = path.join(SGPT, 'solargpt', 'solargpt_core', 'tracker.py');
 const BATERIA = path.join(RAIZ, 'bateria.html');
 const SALIDA = path.join(RAIZ, 'sim', 'fisica.js');
 
@@ -53,11 +54,14 @@ function pyStr(src, nombre) {
   const m = src.match(new RegExp('^' + nombre + '\\s*=\\s*["\']([^"\']+)', 'm'));
   return m ? m[1] : null;
 }
-/* Campo con valor por defecto dentro del dataclass TCUProfile (idle_w: float = 0.64) */
+/* Campo con valor por defecto dentro del dataclass TCUProfile. El default puede ser un
+   número (idle_w: float = 0.64) o —mejor— el NOMBRE de un canónico del propio módulo
+   (idle_w: float = TCU_IDLE_W), que es como debe estar para que solo exista en un sitio. */
 function pyCampo(src, nombre) {
-  const m = src.match(new RegExp('^\\s+' + nombre + '\\s*:\\s*\\w+\\s*=\\s*([-\\d.]+)', 'm'));
+  const m = src.match(new RegExp('^\\s+' + nombre + '\\s*:\\s*\\w+\\s*=\\s*([A-Za-z_]\\w*|[-\\d.]+)', 'm'));
   if (!m) throw new Error('no encuentro el campo ' + nombre + ' del dataclass');
-  return parseFloat(m[1]);
+  if (/^[-\d.]+$/.test(m[1])) return parseFloat(m[1]);
+  return pyNum(src, m[1], 'tcu.py (constante ' + m[1] + ', referida por ' + nombre + ')');
 }
 function jsNum(nombre) {
   const m = bat.match(new RegExp('\\b' + nombre + '\\s*=\\s*([-\\d.]+)'));
@@ -222,6 +226,14 @@ cotejar('K1 del motor', canon.motorK1, 'tcu.py', pyNum(tfmPy, 'MOTOR_K1', 'tfm_c
 if (!canon.perfiles.some(p => Math.abs(p.wh - canon.capWhTfm) < 1e-9)) {
   choques.push('  capacidad: tfm_constants.py = ' + canon.capWhTfm + ' Wh no casa con ningún perfil de tcu.py');
 }
+/* La velocidad del actuador es canónica de SolarGPT desde siempre
+   (tracker.py, CANONICAL_SLEW_RATE_DEG_PER_S): 0,17 °/s medidos en campo. Aquí se
+   coteja contra bateria.html, que es de donde la lee el simulador. */
+const canonSlew = fs.existsSync(TRACKER_PY)
+  ? pyNum(fs.readFileSync(TRACKER_PY, 'utf8'), 'CANONICAL_SLEW_RATE_DEG_PER_S', 'tracker.py')
+  : estrategia.SLEW_DPS;
+cotejar('velocidad del actuador', canonSlew, 'tracker.py', estrategia.SLEW_DPS, 'bateria.html');
+
 /* el 3 °/h del winter mode y su techo tienen que ser los canónicos */
 cotejar('techo de verano', canon.verano.socMax, 'tcu.py', 80, 'valor documentado en el README del gemelo');
 
@@ -234,30 +246,48 @@ cotejar('techo de verano', canon.verano.socMax, 'tcu.py', 80, 'valor documentado
    Esto existe por un caso real: tcu_compare.py llevaba p_sleep = 0,45 W mientras
    tcu.py decía 0,64. El generador no lo vio porque solo contrastaba tcu.py contra
    bateria.html. Un divergente escondido en la cuarta fuente son ~2 puntos de SOC. */
-function pyKw(src, nombre, dflt) {              /* p_idle = float(C.get("p_idle", 0.64)) */
-  const m = src.match(new RegExp('"' + nombre + '"\\s*,\\s*([-\\d.]+)\\s*\\)'));
-  if (m) return parseFloat(m[1]);
-  const m2 = src.match(new RegExp('^\\s*' + nombre + '\\s*=\\s*([-\\d.]+)', 'm'));
-  if (m2) return parseFloat(m2[1]);
-  if (dflt !== undefined) return dflt;
-  throw new Error('no encuentro ' + nombre + ' en tcu_compare.py');
+/* Un default de `.get("clave", X)`. X puede ser un número escrito ahí mismo o —lo
+   correcto— el NOMBRE de un canónico importado; en ese caso se resuelve contra el
+   fichero donde vive. Devuelve {valor, porNombre}. */
+function pyKw(src, nombre, resolver) {
+  const m = src.match(new RegExp('"' + nombre + '"\\s*,\\s*([A-Za-z_][\\w.]*|[-\\d.]+)\\s*\\)'));
+  if (!m) throw new Error('no encuentro el default de ' + nombre + ' en tcu_compare.py');
+  const crudo = m[1];
+  if (/^[-\d.]+$/.test(crudo)) return { valor: parseFloat(crudo), porNombre: null };
+  const v = resolver ? resolver(crudo) : NaN;
+  if (!isFinite(v)) throw new Error('el default de ' + nombre + ' apunta a ' + crudo + ', que no sé resolver');
+  return { valor: v, porNombre: crudo };
 }
 if (fs.existsSync(CMP_PY)) {
   const cmp = fs.readFileSync(CMP_PY, 'utf8');
-  cotejar('K0 del motor', canon.motorK0, 'tcu.py', pyKw(cmp, 'motor_k0'), 'tcu_compare.py');
-  cotejar('K1 del motor', canon.motorK1, 'tcu.py', pyKw(cmp, 'motor_k1'), 'tcu_compare.py');
-  cotejar('consumo idle', canon.idleW, 'tcu.py', pyKw(cmp, 'p_idle'), 'tcu_compare.py');
-  cotejar('consumo sleep', canon.sleepW, 'tcu.py', pyKw(cmp, 'p_sleep'), 'tcu_compare.py');
-  /* La velocidad del actuador SÍ diverge: 0,17 °/s medido en campo (y usado por el
-     gemelo, terreno.html y bateria.html) contra el 0,16 que trae por defecto el port
-     del cuaderno. No es cosmético —el motor gasta P(θ)·Δθ/v, o sea un 6 % más de Wh
-     con el valor lento—, pero tampoco es un despiste evidente como lo era el sleep:
-     es una decisión de Ignacio, no mía. Se avisa a voces y no se bloquea. */
-  const vCmp = pyKw(cmp, 'vmax');
-  if (Math.abs(vCmp - estrategia.SLEW_DPS) > 1e-9) {
-    avisos.push('  velocidad del actuador:  bateria.html/gemelo = ' + estrategia.SLEW_DPS +
-                ' °/s   ≠   tcu_compare.py = ' + vCmp + ' °/s' +
-                '   (el lento gasta un ' + ((estrategia.SLEW_DPS / vCmp - 1) * 100).toFixed(1) + ' % más de motor)');
+  const trk = fs.existsSync(TRACKER_PY) ? fs.readFileSync(TRACKER_PY, 'utf8') : '';
+  /* de dónde puede salir un default por nombre: los canónicos de tcu.py y de tracker.py */
+  const resuelve = (n) => {
+    for (const [src, fich] of [[tcuPy, 'tcu.py'], [trk, 'tracker.py']]) {
+      if (!src) continue;
+      const m = src.match(new RegExp('^' + n + '\\s*=\\s*([-\\d.]+)', 'm'));
+      if (m) return parseFloat(m[1]);
+    }
+    return NaN;
+  };
+  /* Cada default tiene que (a) valer lo mismo que el canon y (b) estar escrito como
+     NOMBRE, no como número. Lo segundo importa tanto como lo primero: un número que
+     hoy coincide es el que mañana se queda atrás, que es exactamente lo que pasó con
+     el sleep de 0,45 y con el slew de 0,16. */
+  const esperado = [
+    ['K0 del motor',      'motor_k0', canon.motorK0],
+    ['K1 del motor',      'motor_k1', canon.motorK1],
+    ['consumo idle',      'p_idle',   canon.idleW],
+    ['consumo sleep',     'p_sleep',  canon.sleepW],
+    ['velocidad del actuador', 'vmax', canonSlew]
+  ];
+  for (const [que, clave, valorCanon] of esperado) {
+    const d = pyKw(cmp, clave, resuelve);
+    cotejar(que, valorCanon, 'el canon', d.valor, 'tcu_compare.py');
+    if (!d.porNombre) {
+      choques.push('  ' + que + ': tcu_compare.py lo escribe como número (' + d.valor +
+                   ') en vez de importar el canónico. Hoy coincide; mañana es el que se queda atrás.');
+    }
   }
 } else {
   avisos.push('  no encuentro tcu_compare.py: la cuarta fuente se queda sin cotejar');
