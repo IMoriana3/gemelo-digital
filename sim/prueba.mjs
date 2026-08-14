@@ -67,6 +67,40 @@ ok(t.sp === SIM.SP.VIENTO, 'la TCU entra en SP1 viento', t.estadoTxt());
 ok(Math.abs(Math.abs(t.angulo) - 55) < 1.5, 'el seguidor llega a defensa ±55°', t.angulo.toFixed(1) + '°');
 ok(bitde(P.regsTCU(t)[30001], 13, 15) === 1, 'safe position activa = 1 en bits 15:13');
 
+console.log('\n── el lado se FIJA al abanderar ──');
+/* lección de terreno.html: si abandera por la mañana mirando al este, se queda al
+   este aunque el sol cruce el mediodía. Recalcular el lado a media bandera manda al
+   seguidor a cruzar 110° con viento fuerte — justo lo que el abanderamiento evita. */
+const pl = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 9 });
+pl.meteo.viento = 18.5;                                  /* 67 km/h desde el arranque */
+for (let i = 0; i < 40 * 60; i += 10) pl.paso(10);
+const ladoMañana = Math.sign(pl.tcu(1).anguloReal);
+ok(pl.tcu(1).sp === SIM.SP.VIENTO, 'abandera por la mañana', pl.tcu(1).anguloReal.toFixed(0) + '°');
+/* cara al SOL: por la mañana el sol está al este, así que la bandera va al este (θ<0).
+   El canon usa azimut pvlib (90°=este) y aquí el azimut es 0 en el mediodía solar. */
+ok(ladoMañana < 0, 'y lo hace hacia el ESTE, que es donde está el sol');
+let cruce = 0, prevA = pl.tcu(1).anguloReal;
+while (pl.t.hora < 17) {                                  /* cruzando el mediodía solar */
+  pl.paso(30);
+  cruce = Math.max(cruce, Math.abs(pl.tcu(1).anguloReal - prevA)); prevA = pl.tcu(1).anguloReal;
+}
+ok(Math.sign(pl.tcu(1).anguloReal) === ladoMañana,
+   'sigue en el mismo lado después del mediodía solar', pl.tcu(1).anguloReal.toFixed(0) + '°');
+ok(cruce < 1, 'y no ha dado ningún viaje al otro lado con el viento encima');
+
+console.log('\n── sector parcial: 40-60 km/h ──');
+const pp = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 10 });
+pp.meteo.viento = 13;                                     /* 47 km/h → parcial */
+for (let i = 0; i < 45 * 60; i += 10) pp.paso(10);
+const tp = pp.tcu(1);
+ok(tp.sp === SIM.SP.VIENTO && tp.stow === 1, 'entra en bandera PARCIAL, no total', 'estado ' + tp.stow);
+ok(Math.abs(tp.anguloReal) >= 29 && Math.abs(tp.anguloReal) <= 56,
+   'y se queda dentro del sector [30°, 55°]', tp.anguloReal.toFixed(1) + '°');
+pp.meteo.viento = 18.5;
+for (let i = 0; i < 40 * 60; i += 10) pp.paso(10);
+ok(pp.tcu(1).stow === 2 && Math.abs(pp.tcu(1).anguloReal) > 53, 'y sube a total al pasar de 60 km/h',
+   pp.tcu(1).anguloReal.toFixed(1) + '°');
+
 console.log('\n── el viento manda sobre manual ──');
 t.modo = SIM.MODO.MANUAL; t.manual = 0;
 for (let i = 0; i < 20 * 60; i += 5) P.paso(5);

@@ -102,6 +102,13 @@ var K = {
 /* las cuatro curvas, tal cual salen de bateria.html */
 var cRateSafeLFP = F.cRateSafeLFP, hotDerate = F.hotDerate, heaterW = F.heaterW, poaAt = F.poaAt;
 
+/* El abanderamiento vive en su propio módulo compartido (sim/viento.js), que es el
+   mismo fichero que usan el gemelo 3D y el visor de terreno. Una sola implementación
+   de la estrategia B2 para toda la casa. */
+var Abanderamiento = (typeof window !== 'undefined' && window.Abanderamiento) ||
+        (typeof require === 'function' ? require('./viento.js') : null);
+if (!Abanderamiento) throw new Error('falta sim/viento.js');
+
 /* ── Alimentación y gestión de batería ──────────────────────────────────────
    Un TCU no siempre come de lo mismo, y eso cambia por completo su gestión de
    energía. Los tres tipos que hay en planta:
@@ -380,7 +387,7 @@ function TCU(id, planta, opts) {
   this.fueraRango = false; this.limiteOeste = false; this.limiteEste = false;
   this.velocidadBaja = false; this.relajacion = false;
 
-  this.stow = 0; this.stowHold = 0;        /* 0 · 1 parcial · 2 total, y su histéresis (s) */
+  this.ab = new Abanderamiento();          /* máquina de abanderamiento B2 compartida */
   this.zbCanal = 15; this.zbAddr = 0x1000 + id;
   this.serie = 'TCU' + String(2400000 + id * 37);
   this.mac = 0x0013A200 * 1 + id;
@@ -453,12 +460,13 @@ TCU.prototype.decide = function (dt, ang) {
   var e = this.entradas(), cfg = this.p.cfg, obj, sp = SP.NINGUNA,
       fuente = FUENTE_SP.NINGUNA, crit, inhibido = false;
 
-  /* histéresis del abanderamiento: el nivel sube al instante y baja tras DESTOW_MIN */
-  var nivel = e.nivelViento;
-  if (nivel >= 2) { this.stow = 2; this.stowHold = K.DESTOW_MIN * 60; }
-  else if (nivel >= 1) { this.stow = Math.max(this.stow, 1); this.stowHold = K.DESTOW_MIN * 60; }
-  else if (this.stowHold > 0) { this.stowHold -= dt; }
-  else { this.stow = 0; }
+  /* abanderamiento: lo resuelve el módulo compartido con el viento REAL que ve la
+     NCU (la HSU de más viento) y el azimut del sol, no con el nivel ya digerido */
+  /* el canon usa azimut pvlib (90° = este al amanecer, 270° = oeste al atardecer) y
+     aquí el azimut es 0 en el mediodía solar, negativo al este: az_pvlib = 180 + az */
+  var azSol = ang.dia ? (180 + ang.sol.az * R2D) : 180;
+  var rAb = this.ab.paso(dt, this.p.ncu.vientoMax, ang.sel, azSol);
+  this.stow = rAb.estado;
 
   /* modos de batería (L1 baja · L2 muy baja · L3 crítica) con rearme: se entra al
      cruzar el umbral hacia abajo y no se sale hasta superarlo por SOC_REARME, para
@@ -472,8 +480,8 @@ TCU.prototype.decide = function (dt, ang) {
   if (nivelBat < this.bajaCapacidad && s < salida[this.bajaCapacidad] + K.SOC_REARME) nivelBat = this.bajaCapacidad;
   this.bajaCapacidad = nivelBat;
 
-  /* signo del abanderamiento: cara al sol (este por la mañana), o invertido si la
-     NCU avisa de que el viento sopla del este */
+  /* signo de las posiciones de seguridad que no son la de viento: cara al sol. La
+     de viento la resuelve el módulo, que además FIJA el lado al abanderar. */
   var sSol = ang.dia ? (ang.sol.az < 0 ? -1 : 1) : 1;
   if (e.vientoInvertido) sSol = -sSol;
 
@@ -485,9 +493,11 @@ TCU.prototype.decide = function (dt, ang) {
   if (this.stow > 0 || e.forzado === SP.VIENTO) {
     sp = SP.VIENTO;
     fuente = e.forzado === SP.VIENTO ? FUENTE_SP.NCU : FUENTE_SP.HSU;
-    obj = (e.forzado === SP.VIENTO || this.stow === 2)
+    /* forzado por Modbus = bandera completa; si viene del viento, el objetivo lo
+       da el módulo (sector parcial incluido, y con el lado ya fijado) */
+    obj = (e.forzado === SP.VIENTO && this.stow === 0)
       ? sSol * Math.abs(cfg.spTilt[1])
-      : sSol * Math.max(K.PARTIAL_STOW, Math.abs(ang.sel));
+      : rAb.objetivo;
     crit = CRIT.SEGURIDAD;
 
   /* 2 — SP3 NIEVE */
@@ -831,7 +841,8 @@ function NCU(planta) {
   this.upsFallo = false; this.upsBateriaBaja = false;
   this.acFallo = false;                    /* corte de alterna en planta: solo lo notan los TCU tipo AC */
   this.gw1Alarma = false; this.gw2Alarma = false;
-  this.nivelVientoGlobal = 0; this.alarmaViento = false; this.alarmaNieve = false;
+  this.nivelVientoGlobal = 0; this.vientoMax = 0;   /* m/s de la HSU que más sopla */
+  this.alarmaViento = false; this.alarmaNieve = false;
   this.alarmaRacha = false; this.falloWs = false; this.falloSs = false;
   this.vientoInvertido = false;
   this.timeoutPosicion = 3600;             /* 40080: vuelta a automático (s) */
@@ -848,18 +859,21 @@ NCU.prototype.fuerza = function (sp, grupo, on) {
 };
 NCU.prototype.paso = function () {
   /* la NCU se queda con el nivel MÁS ALTO de todas sus HSU y con el «o» de sus alarmas */
-  var n = 0, av = false, an = false, ar = false, fw = false, fs = false, este = false;
+  var n = 0, av = false, an = false, ar = false, fw = false, fs = false, este = false, vmax = 0;
   var H = this.p.hsus;
   for (var i = 0; i < H.length; i++) {
     var h = H[i];
     if (!h.online) { fw = true; fs = true; continue; }
     if (h.nivel > n) n = h.nivel;
+    /* para decidir un abanderamiento, el peor dato es el que cuenta (CONTRATO.md) */
+    if (Math.max(h.viento, h.racha) > vmax) vmax = Math.max(h.viento, h.racha);
     av = av || h.alarmaViento(); an = an || h.alarmaNieve(); ar = ar || h.alarmaRacha();
     fw = fw || h.falloVientoSensor; fs = fs || h.falloNieveSensor;
     /* dirección de viento del ESTE (45°–135°): el R7 lo republica como «inverted wind» */
     if (h.nivel > 0 && h.dir > 45 && h.dir < 135) este = true;
   }
-  this.nivelVientoGlobal = n; this.alarmaViento = av; this.alarmaNieve = an;
+  this.nivelVientoGlobal = n; this.vientoMax = vmax;
+  this.alarmaViento = av; this.alarmaNieve = an;
   this.alarmaRacha = ar; this.falloWs = fw; this.falloSs = fs; this.vientoInvertido = este;
 };
 

@@ -25,7 +25,22 @@ De más a menos prioritaria. La regla que gana es la que fija el ángulo objetiv
 | 6 | **Manual** | modo 1, consigna del operador | 30001 bits 9:8 = 1 |
 | 7 | **Auto** | seguimiento solar con backtracking; de noche, posición nocturna | 30001 bits 9:8 = 2, bit 0 = backtracking |
 
-El viento manda sobre manual, que es como se comporta el equipo real. El abanderamiento sigue la estrategia canónica **B2**: parcial a partir de 40 km/h (±30° mínimo, cara al sol), total a partir de 60 km/h (±55°), y **una hora de histéresis** antes de desabanderar — el `DESTOW_HOLD_H` canónico, que tampoco se escribe aquí.
+El viento manda sobre manual, que es como se comporta el equipo real.
+
+### Abanderamiento — `viento.js`, compartido entre repos
+
+La estrategia **B2** canónica (`solargpt_core/wind_stow_strategies.py`, *«Defaults canónicos, decisión EPC del proyecto»*) no se implementa aquí: vive en **`sim/viento.js`**, el mismo fichero que usan el gemelo 3D (`index.html`) y el visor de terreno de `cobertura-zigbee`. Mismo criterio que `seguidor.js`: si se toca en un repo, se copia al otro.
+
+| | |
+|---|---|
+| **40 km/h** | bandera **parcial**: el seguidor se queda dentro del **sector [30°, 55°]** del lado del sol. No es irse a 30°: si el seguimiento pide 42°, se queda en 42. Sigue produciendo, pero ya no da la cara plana |
+| **60 km/h** | bandera **total**: ±55° |
+| **30 min** | histéresis para desabanderar (`destow_hold_minutes`) |
+| **cara al sol** | eje B del canon; el eje A sería cara al viento, y no es el nuestro |
+
+Y una regla que **no está en el canon pero sí en el equipo**, aprendida de `terreno.html`: **el lado se fija al abanderar**. Si abandera de mañana mirando al este, se queda al este aunque el sol cruce el mediodía. Recalcularlo a media bandera manda al seguidor a cruzar 110° con el viento encima — justo lo que el abanderamiento existe para evitar. El simulador lo hacía mal hasta que se unificó.
+
+Ojo con el azimut: el canon usa convención pvlib (90° = este al amanecer) y la casa usa 0 en el mediodía solar con negativo al este. La conversión es `az_pvlib = 180 + az`, y equivocarla abandera al lado contrario sin que salte nada.
 
 ## Las dos entradas físicas
 
@@ -147,7 +162,9 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `planta.js` | el motor: física, jerarquía y generación de la imagen de registros. Sin DOM — se ejecuta igual en Node |
 | `modbus-map.js` | **generado**, no se toca a mano: 515 direcciones del mapa canónico |
 | `fisica.js` | **generado**, no se toca a mano: perfiles, constantes medidas, políticas y curvas de carga |
-| `prueba.mjs` | prueba de humo: 111 comprobaciones sobre un día de planta |
+| `viento.js` | **compartido con cobertura-zigbee**: la estrategia B2 de abanderamiento, una sola implementación |
+| `impacto.mjs` | informe de impacto de las divergencias entre los dos cálculos de batería |
+| `prueba.mjs` | prueba de humo: 120 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
 | `../tools/extrae_fisica.mjs` | regenera `fisica.js` desde SolarGPT y `bateria.html`, contrastando las fuentes |

@@ -9,6 +9,7 @@
 <!-- sin fuentes de Google: offline (fuentes del sistema) -->
 <script src="lib/three.min.js"></script><!-- librerías LOCALES (sin CDN): offline -->
 <script src="lib/GLTFLoader.js"></script>
+<script src="sim/viento.js"></script><!-- abanderamiento canónico B2, compartido con el simulador de planta y con terreno.html -->
 <script src="seguidor.js?v=13"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
 <link rel="stylesheet" href="lib/leaflet.css">
 <script src="lib/leaflet.js"></script>
@@ -299,7 +300,8 @@ function isDay(h){return solarPos(h).el>0;}
 function elev(h){return Math.max(0,Math.sin(solarPos(h).el));}     /* brillo proxy 0..1 */
 function fmt(n,d){return n.toFixed(d).replace('.',',')}
 
-var mode='auto', jog=0, wind=0, manSet=0, btOn=true, playing=false, realtime=false;     /* jog: -1 Este (hacia -55), +1 Oeste (hacia +55); btOn=backtracking */
+var mode='auto', jog=0, wind=0, manSet=0, btOn=true, playing=false, realtime=false;
+var AB=new Abanderamiento();   /* máquina de abanderamiento B2 compartida */     /* jog: -1 Este (hacia -55), +1 Oeste (hacia +55); btOn=backtracking */
 var cloud=0, cloudTimer=0, cloudGust=0, cloudSmooth=0, skyT=1; /* meteo: nubosidad 0-100% + nubes que pasan; skyT=transmitancia */
 var precip='none', snowAcc=0;                            /* precipitación: 'none'|'rain'|'snow'; snowAcc=nieve acumulada 0..1 */
 function setModeUI(){var man=(mode==='manual'),b=el('btnMode');
@@ -492,20 +494,24 @@ function step(dt){
      >60 km/h: defensa a tope (-55 mañana / +55 tarde)
      40-60   : limitado (mañana [-55,-30], tarde [+30,+55])
      <=40    : normal (±55) */
-  var am=s.hour<12, lo=-AXIS_MAX, hi=AXIS_MAX; s.windState='';
-  if(wind>60){ lo=hi=(am?-AXIS_MAX:AXIS_MAX); s.windState='defensa'; }
-  else if(wind>40){ if(am){lo=-55;hi=-30;}else{lo=30;hi=55;} s.windState='limitado'; }
+  /* Abanderamiento B2 canónico (sim/viento.js, el MISMO módulo que usan el simulador
+     de planta y terreno.html): parcial a 40 km/h dentro del sector [30°,55°], total a
+     60, cara al sol y con el LADO FIJADO al abanderar — si abandera de mañana no cruza
+     al otro lado al pasar el mediodía. Antes esto se decidía con hour<12. */
+  var azSol=180+solarPos(s.hour).az*180/Math.PI;   /* casa (0 = mediodía solar) → pvlib (90 = este) */
+  var rAb=AB.paso(dt, wind/3.6, trk.R, azSol);
+  s.windState=rAb.estado===2?'defensa':(rAb.estado===1?'limitado':'');
   /* objetivo según modo (el viento manda por encima de auto/manual) */
   var tgt;
-  if(wind>60){ tgt=am?-AXIS_MAX:AXIS_MAX; }
+  if(rAb.estado>0){ tgt=rAb.objetivo; }
   else if(mode==='manual'){
     if(jog!==0 && !lowE) manSet=Math.max(-AXIS_MAX,Math.min(AXIS_MAX, manSet+jog*SLEW_DPS*dt));
     tgt=manSet; s.bt=false;
   }else{ tgt=lowE?s.angle:trk.R; }
-  tgt=Math.max(lo,Math.min(hi,tgt));                  /* acotar a la banda de viento */
+  tgt=Math.max(-AXIS_MAX,Math.min(AXIS_MAX,tgt));
   var err=tgt-s.angle;
   if(reduce||playing||realtime)s.angle=tgt; else s.angle+=Math.sign(err)*Math.min(Math.abs(err),SLEW_DPS*dt);   /* en Play/Tiempo real el seguidor SIGUE al sol (snap); en tiempo comprimido el giro real (0,17°/s) no alcanza */
-  s.target=tgt; cur.moving=Math.abs(err)>0.3 || (mode==='manual'&&jog!==0&&wind<=60) || (playing&&Math.abs(err)>0.01); if(wind>60||mode==='manual')s.bt=false;
+  s.target=tgt; cur.moving=Math.abs(err)>0.3 || (mode==='manual'&&jog!==0&&rAb.estado===0) || (playing&&Math.abs(err)>0.01); if(rAb.estado>0||mode==='manual')s.bt=false;
   /* --- FV (MPPT + AOI): el AOI usa el ÁNGULO REAL del seguidor (no el ideal),
      así en manual fuera de sol cae la captación --- */
   var P=solarPos(s.hour);

@@ -222,7 +222,7 @@ var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
 /* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies):
    parcial ≥40 km/h (±30° mín), full ≥60 km/h (±55°), histéresis destow ~30 min (1 h aquí),
    signo hacia el sol (az<0 este → θ negativo) */
-var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=1;
+var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=0.5;
 /* Calefactor -LT (PS26002_RevA): P = 1,0 + 0,15·|T| W si T<0°C, solo de día; desbloquea carga (T efectiva ≥1°C) */
 function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
 /* JEITA lado caliente (§04.1a): T3=35°C reduce, T4=45°C bloquea carga */
