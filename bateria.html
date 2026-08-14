@@ -6,7 +6,9 @@
 <meta name="theme-color" content="#0B0F14">
 <link rel="icon" href="favicon.svg">
 <title>Gestión de Batería TCU — Simulador</title>
-<!-- Autocontenido: sin librerías externas. Gráficas en canvas 2D. -->
+<!-- Gráficas en canvas 2D sin librerías. Leaflet LOCAL (lib/) solo para elegir emplazamiento. -->
+<link rel="stylesheet" href="lib/leaflet.css">
+<script src="lib/leaflet.js"></script>
 <style>
   :root{
     /* Estándar de la casa Factiun (mismos tokens que index.html) */
@@ -91,12 +93,27 @@
 <div class="side">
   <div class="grp"><h3>Emplazamiento</h3>
     <div class="fld"><select id="loc"></select></div>
+    <div id="customLoc" style="display:none">
+      <div class="fld"><label>Buscar (OpenStreetMap)</label>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="q" placeholder="p. ej. Cáceres, Atacama…" style="flex:1;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px">
+          <button id="qBtn" style="background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 10px;cursor:pointer">🔎</button>
+        </div>
+        <div id="qRes"></div></div>
+      <div id="map" style="height:170px;border-radius:10px;border:1px solid var(--line);margin-bottom:9px"></div>
+      <div class="fld" style="display:flex;gap:6px">
+        <span style="flex:1"><label>Latitud</label><input type="number" id="clat" step="0.001" min="-89" max="89" value="40.0"></span>
+        <span style="flex:1"><label>Longitud</label><input type="number" id="clon" step="0.001" min="-180" max="180" value="-3.7"></span>
+      </div>
+      <div class="fld"><label>Nombre</label><input type="text" id="cname" value="Personalizado" style="width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px"></div>
+      <div class="note">Busca, pulsa en el mapa o teclea lat/lon — cualquier punto del mundo vale (Open-Meteo cubre todo el globo).</div>
+    </div>
   </div>
   <div class="grp"><h3>Perfil TCU (00.2t)</h3>
     <div class="fld"><select id="prof"></select></div>
     <div class="fld"><label>Modelo de consumo del motor</label>
       <select id="motor">
-        <option value="ied">Campaña IED · Wh/° medido (canónico)</option>
+        <option value="factiun">Factiun · Wh/° medido en campaña (canónico)</option>
         <option value="2500">SUNNER · 2500 mA medio @25,6 V</option>
         <option value="3250">SUNNER · 3250 mA medio @25,6 V</option>
         <option value="4000">SUNNER · 4000 mA medio @25,6 V</option>
@@ -143,7 +160,7 @@
     <b>Metodología</b>: estrategia oficial SUNNER (Battery Availability Study) — CASO 1: crítico&lt;SOC&lt;objetivo,
     carga + consumo; CASO 2: SOC&gt;objetivo, sin carga; CASO 3: SOC&lt;crítico → <b>defensa 55°</b>,
     tracker no disponible, solo electrónica. Sin carga bajo la Tª mínima; por encima, C-rate seguro LiFePO₄
-    según Tª (11.5b). Consumo electrónica 0,64 W medido (00.2t). Comparativa contra el mismo TCU
+    según Tª (11.5b). Consumo electrónica 0,64 W y motor Wh/° medidos por Factiun (00.2t). Comparativa contra el mismo TCU
     sin estrategia (siempre seguimiento). Rainflow según el estudio; posición nocturna −5°.
   </div>
 </div>
@@ -178,7 +195,7 @@ var LOCS=[
  {n:"Jodhpur · Rajastán (IN)",lat:26.264,lon:73.008}
 ];
 
-/* ═══════════ Perfiles TCU — 00.2t (medidos, campaña "Consumos motor_02 @24V") ═══════════ */
+/* ═══════════ Perfiles TCU — 00.2t (medidos por Factiun, campaña "Consumos motor_02 @24V") ═══════════ */
 var K0=0.0503, K1=0.000845, MOTOR_PEAK_W=50, IDLE_W=0.64, SLEEP_W=0.64, ETA_CHG=0.90, V_NOM=25.6;
 var SLEW_DPS=0.17;                      /* velocidad real de giro (°/s) — misma que el gemelo */
 var PROFILES=[
@@ -309,7 +326,7 @@ function parsePVSyst(text){
 }
 
 /* ═══════════ SIMULADOR — estrategia oficial SUNNER + winter mode 11.5b ═══════════
-   opts: {motorModel:'ied'|mA(number), winter, socTgt, socCrit, fcDays, tMin, strategy:bool} */
+   opts: {motorModel:'factiun'|mA(number), winter, socTgt, socCrit, fcDays, tMin, strategy:bool} */
 function simulate(meteo,prof,loc,soc0,opts){
   var latR=loc.lat*D2R, capWh=prof.wh, n=meteo.length;
   var soc=soc0, parked=false, prevPos=null;
@@ -337,10 +354,10 @@ function simulate(meteo,prof,loc,soc0,opts){
     var avgPos=(target+prevPos)/2;
     prevPos=target;
 
-    /* — Consumo motor: campaña IED (Wh/°) o SUNNER (mA medio × tiempo de giro) — */
+    /* — Consumo motor: medición Factiun (Wh/°) o SUNNER (mA medio × tiempo de giro) — */
     var motorWh=0;
     if(deltaEff>0.01){
-      if(opts.motorModel==='ied')
+      if(opts.motorModel==='factiun')
         motorWh=Math.min(deltaEff*(K0+K1*Math.abs(avgPos)),MOTOR_PEAK_W);
       else
         motorWh=(opts.motorModel/1000)*V_NOM*(deltaEff/SLEW_DPS)/3600;
@@ -521,7 +538,64 @@ function bandParked(g,f,rows,color,key){
 
 /* ═══════════ UI ═══════════ */
 LOCS.forEach(function(L,i){$('loc').add(new Option(L.n,i))});
+$('loc').add(new Option('✏️ Personalizado — buscar / mapa / lat-lon…','custom'));
 PROFILES.forEach(function(P,i){$('prof').add(new Option(P.n,i))});
+
+/* — Emplazamiento personalizado: Leaflet local + Nominatim (mismo patrón que index.html) — */
+var bmap=null, bmarker=null;
+function setPick(la,lo,name){
+  $('clat').value=(+la).toFixed(3); $('clon').value=(+lo).toFixed(3);
+  if(name)$('cname').value=name;
+  if(bmap){bmarker.setLatLng([la,lo]);}
+  try{localStorage.setItem('bateria_customLoc',JSON.stringify({lat:+la,lon:+lo,n:$('cname').value}))}catch(e){}
+}
+function ensureMap(){
+  if(bmap||typeof L==='undefined')return;
+  bmap=L.map('map',{worldCopyJump:true}).setView([+$('clat').value,+$('clon').value],4);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    {subdomains:'abcd',maxZoom:18,attribution:'© OpenStreetMap · © CARTO'}).addTo(bmap);
+  bmarker=L.marker([+$('clat').value,+$('clon').value]).addTo(bmap);
+  bmap.on('click',function(e){setPick(e.latlng.lat,e.latlng.lng,'('+e.latlng.lat.toFixed(3)+', '+e.latlng.lng.toFixed(3)+')')});
+  setTimeout(function(){bmap.invalidateSize()},90);
+}
+$('loc').onchange=function(){
+  var c=this.value==='custom';
+  $('customLoc').style.display=c?'':'none';
+  if(c)ensureMap();
+};
+try{var sv=JSON.parse(localStorage.getItem('bateria_customLoc'));
+  if(sv){$('clat').value=sv.lat;$('clon').value=sv.lon;$('cname').value=sv.n||'Personalizado';}}catch(e){}
+['clat','clon'].forEach(function(id){$(id).addEventListener('change',function(){
+  if(bmap)bmarker.setLatLng([+$('clat').value,+$('clon').value]);
+  try{localStorage.setItem('bateria_customLoc',JSON.stringify({lat:+$('clat').value,lon:+$('clon').value,n:$('cname').value}))}catch(e){}
+})});
+function doSearch(){
+  var q=($('q').value||'').trim(); if(!q)return;
+  $('qRes').innerHTML='<div class="note">Buscando…</div>';
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=5&q='+encodeURIComponent(q))
+    .then(function(r){return r.json()})
+    .then(function(arr){
+      if(!arr||!arr.length){$('qRes').innerHTML='<div class="note">Sin resultados.</div>';return;}
+      $('qRes').innerHTML='';
+      arr.forEach(function(it){
+        var b=document.createElement('button');
+        b.style.cssText='display:block;width:100%;text-align:left;margin:3px 0;padding:6px 9px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:7px;cursor:pointer;font:inherit;font-size:12px';
+        b.textContent=it.display_name;
+        b.onclick=function(){setPick(+it.lat,+it.lon,(it.display_name||'').split(',')[0]);
+          if(bmap)bmap.setView([+it.lat,+it.lon],9); $('qRes').innerHTML='';};
+        $('qRes').appendChild(b);
+      });
+    })
+    .catch(function(){$('qRes').innerHTML='<div class="note">⛌ Búsqueda no disponible (¿sin red?). Usa el mapa o lat/lon.</div>'});
+}
+$('qBtn').onclick=doSearch;
+$('q').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();doSearch();}});
+function getLoc(){
+  if($('loc').value!=='custom')return LOCS[$('loc').value];
+  var la=Math.max(-89,Math.min(89,+$('clat').value||0)),
+      lo=Math.max(-180,Math.min(180,+$('clon').value||0));
+  return {n:($('cname').value||'Personalizado').trim(),lat:la,lon:lo};
+}
 $('prof').value=1;   /* SP_45W_6Ah — configuración Fayón */
 (function(){var y=new Date().getFullYear();for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
 function profNote(){
@@ -572,8 +646,8 @@ function getMeteo(loc){
 
 $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
-  var loc=LOCS[$('loc').value], prof=PROFILES[$('prof').value];
-  var mm=$('motor').value; mm=(mm==='ied')?'ied':+mm;
+  var loc=getLoc(), prof=PROFILES[$('prof').value];
+  var mm=$('motor').value; mm=(mm==='factiun')?'factiun':+mm;
   var opts={motorModel:mm, winter:$('winter').checked, strategy:true,
             socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
             fcDays:+$('fc').value, tMin:+$('tmin').value};
