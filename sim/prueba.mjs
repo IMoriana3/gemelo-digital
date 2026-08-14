@@ -62,7 +62,9 @@ t = P.tcu(1); R = P.regsNCU();
 ok(P.ncu.nivelVientoGlobal === 2, 'la NCU ve nivel de viento 2', 'nivel ' + P.ncu.nivelVientoGlobal);
 ok(bitde(R[30002], 2, 4) === 2, 'nivel más alto republicado en 30002 bits 4:2');
 ok(t.sp === SIM.SP.VIENTO, 'la TCU entra en SP1 viento', t.estadoTxt());
-ok(Math.abs(Math.abs(t.angulo) - 55) < 1, 'el seguidor llega a defensa ±55°', t.angulo.toFixed(1) + '°');
+/* el lazo para dentro de media banda muerta (0,65°), no clavado: perseguir el
+   objetivo con más finura que el ruido del sensor es lo que lo hacía cacear */
+ok(Math.abs(Math.abs(t.angulo) - 55) < 1.5, 'el seguidor llega a defensa ±55°', t.angulo.toFixed(1) + '°');
 ok(bitde(P.regsTCU(t)[30001], 13, 15) === 1, 'safe position activa = 1 en bits 15:13');
 
 console.log('\n── el viento manda sobre manual ──');
@@ -126,6 +128,17 @@ ok(P.seguidores().filter(x => x.alarmaMotorEnclavada).length === P.seguidores().
 P.tcus.forEach(x => x.limpiaAlarmas());
 for (let i = 0; i < 20 * 60; i += 10) P.paso(10);
 
+console.log('\n── el tope mecánico no es un eje bloqueado ──');
+/* en el tope, el ruido del sensor mantiene un error pequeño contra un objetivo que
+   ya no se puede alcanzar. Con un umbral de llegada más fino que el ruido, el lazo
+   persigue su propio ruido y acaba autodiagnosticándose eje bloqueado — pasaba. */
+const ptop = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 1, hora: 0 });
+ptop.meteo.nubes = 25;
+for (let i = 0; i < 288 * 10; i++) ptop.paso(300);
+ok(!ptop.tcu(1).ejeBloqueado && ptop.tcu(1).motorHabilitado,
+   'diez días seguidos sin enclavar el motor solo', ptop.tcu(1).estadoTxt());
+ok(ptop.tcu(1).salud() !== 'alarma', 'y sin quedarse en alarma');
+
 console.log('\n── inclinómetro: entrada ANALÓGICA ──');
 const ti = P.tcu(3);
 ok(Math.abs(ti.angulo - ti.anguloReal) < 0.3 && ti.angulo !== ti.anguloReal,
@@ -148,7 +161,9 @@ ok(ti.salud() === 'ok', 'y el SCADA lo ve todo verde — este es el fallo que no
 /* calibrarlo con 41058 lo arregla */
 ti.sensor.offsetCfg = 3.0;
 for (let i = 0; i < 30 * 60; i += 10) P.paso(10);
-ok(Math.abs(ti.objetivo - ti.anguloReal) < 1.5, 'compensado en 41058, la mesa vuelve a su sitio',
+/* siguiendo un objetivo que se mueve, el retraso normal es banda muerta (1,3°)
+   más la banda de llegada (0,65°) */
+ok(Math.abs(ti.objetivo - ti.anguloReal) < 3, 'compensado en 41058, la mesa vuelve a su sitio',
    (ti.objetivo - ti.anguloReal).toFixed(2) + '°');
 casi(f32de(P.regsTCU(ti)[41058], P.regsTCU(ti)[41059]) * 180 / Math.PI, 3.0, 0.01,
    'el offset se publica en 41058 (f32 rad)');
@@ -203,7 +218,9 @@ for (let i = 0; i < 30 * 60; i += 10) P.paso(10);
 const g2 = P.seguidores().filter(x => x.grupo === 2), g1 = P.seguidores().filter(x => x.grupo === 1);
 ok(g2.every(x => x.sp === SIM.SP.LIMPIEZA), 'todo el grupo 2 en SP4 limpieza');
 ok(g1.every(x => x.sp === SIM.SP.NINGUNA), 'el grupo 1 sigue a lo suyo');
-ok(Math.abs(g2[0].anguloReal) < 0.5, 'limpieza deja el seguidor horizontal', g2[0].anguloReal.toFixed(2) + '°');
+/* «horizontal» con la banda muerta del firmware (1,3°) y la de llegada (0,65°) no
+   es 0,00°: es 0 ± ~1°. Un seguidor real tampoco se queda clavado en el cero. */
+ok(Math.abs(g2[0].anguloReal) < 1.5, 'limpieza deja el seguidor horizontal', g2[0].anguloReal.toFixed(2) + '°');
 ok(bitde(P.regsNCU()[30100], 4, 4) === 1, 'interruptor de limpieza 2 en la entrada digital');
 P.ncu.limpieza[1] = false;
 

@@ -132,6 +132,20 @@ function perfiles() {
   return out;
 }
 
+
+/* La estrategia de abanderamiento tiene su propio módulo canónico en SolarGPT
+   (wind_stow_strategies.py, «Defaults canónicos (decisión EPC del proyecto)»):
+   B2 = dos umbrales, cara al SOL, 40/60 km/h, parcial ≥30°, total 55°, y 30 min
+   de histéresis para desabanderar. */
+const STOW_PY = path.join(SGPT, 'solargpt', 'solargpt_core', 'wind_stow_strategies.py');
+function destowCanonico() {
+  if (!fs.existsSync(STOW_PY)) throw new Error('no encuentro wind_stow_strategies.py');
+  const src = fs.readFileSync(STOW_PY, 'utf8');
+  const m = src.match(/destow_hold_minutes[^=]*=\s*([\d.]+)/);
+  if (!m) throw new Error('no encuentro destow_hold_minutes en wind_stow_strategies.py');
+  return parseFloat(m[1]);
+}
+
 /* ---------- lectura ---------- */
 /* Regla AUDITADA de tcu.py: según de qué come el TCU, tiene sentido enseñar unas
    cosas u otras. Un equipo de alterna no tiene SoC que enseñar porque no tiene
@@ -176,6 +190,12 @@ const estrategia = {
   WIND_T1: jsNum('WIND_T1'), WIND_T2: jsNum('WIND_T2'),
   PARTIAL_STOW_DEG: jsNum('PARTIAL_STOW_DEG'), DESTOW_HOLD_H: jsNum('DESTOW_HOLD_H'),
   ETA_CHG: jsNum('ETA_CHG'), V_NOM: jsNum('V_NOM'),
+  /* histéresis de desabanderamiento: la canónica son 30 MINUTOS
+     (wind_stow_strategies.py, «destow_hold_minutes (A2/B2) = 30.0»).
+     bateria.html pone 1 h a propósito porque su paso es horario —lo dice su propio
+     comentario, «~30 min (1 h aquí)»— y ese redondeo no vale para un simulador que
+     va en continuo. Se lee del módulo de estrategias, que es quien manda. */
+  DESTOW_HOLD_MIN: destowCanonico(),
   IDLE_W: jsNum('IDLE_W'), SLEEP_W: jsNum('SLEEP_W'),
   K0: jsNum('K0'), K1: jsNum('K1'), MOTOR_PEAK_W: jsNum('MOTOR_PEAK_W'),
   JEITA_T3: jsNum('JEITA_T3'), JEITA_T4: jsNum('JEITA_T4'),

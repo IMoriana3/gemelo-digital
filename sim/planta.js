@@ -72,7 +72,7 @@ var K = {
   WIND_T1: F.e.WIND_T1,         /* 40 km/h → abanderamiento parcial */
   WIND_T2: F.e.WIND_T2,         /* 60 km/h → abanderamiento total */
   PARTIAL_STOW: F.e.PARTIAL_STOW_DEG,
-  DESTOW_MIN: F.e.DESTOW_HOLD_H * 60,     /* histéresis de desabanderamiento (min) */
+  DESTOW_MIN: F.e.DESTOW_HOLD_MIN,        /* histéresis de desabanderamiento (min) — canon EPC */
   IDLE_W: F.idleW, SLEEP_W: F.sleepW,     /* electrónica, de día y de noche (W) */
   MOT_K0: F.motor.K0, MOT_K1: F.motor.K1, /* motor: Wh/° = K0 + K1·|θ| */
   MOTOR_PEAK_W: F.motor.picoW,            /* tope instantáneo del motor (W) */
@@ -564,7 +564,12 @@ TCU.prototype.mueve = function (dt, inhibido) {
     this.tSinMoverse = 0;
     return 0;
   }
-  if (Math.abs(err) <= 0.02) { this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; this.tSinMoverse = 0; return 0; }
+  /* LLEGADA: se da por llegado al entrar en la banda muerta, nunca en un umbral
+     más fino que el propio ruido del sensor. Con un criterio de 0,02° y un ruido de
+     0,04° el seguidor persigue su propio ruido: no llega jamás, sigue mandando
+     micro-movimientos y acaba autodiagnosticándose un eje bloqueado. */
+  var llegada = Math.max(dead * 0.5, 3 * this.sensor.ruidoRms, 2 / this.sensor.pulsosGrado);
+  if (Math.abs(err) <= llegada) { this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; this.tSinMoverse = 0; return 0; }
 
   var dir = signo(err), antes = this.anguloReal;
   var esperado = Math.min(Math.abs(err), K.SLEW_DPS * dt);   /* lo que se le MANDA girar */
@@ -581,7 +586,10 @@ TCU.prototype.mueve = function (dt, inhibido) {
      La comparación es contra el paso MANDADO, no contra la velocidad máxima: si no,
      cualquier corrección pequeña —que por definición mueve poco— se diagnosticaría
      como eje bloqueado. Es justo el fallo que esconde un modelo sin sensor. */
-  if (esperado > 1e-3 && mov < esperado * 0.5) {
+  /* si lo que impide moverse es el TOPE MECÁNICO, no es un eje bloqueado: es un
+     final de carrera, y el equipo lo sabe por sus propios límites (30006 bits 0 y 1) */
+  var enTope = (dir > 0 && antes >= K.AXIS_MAX - 1e-6) || (dir < 0 && antes <= -K.AXIS_MAX + 1e-6);
+  if (!enTope && esperado > 1e-3 && mov < esperado * 0.5) {
     this.tSinMoverse += dt;
     if (this.tSinMoverse >= K.EVAL_MOTOR_S) {
       this.velocidadBaja = true;          /* 30003.14 «motor moves at a lower speed» */
@@ -684,6 +692,10 @@ TCU.prototype.energia = function (dt, ang, whMotor) {
     pEntrada = pf.chgW * frac * K.ETA_CHG;
     this.vPanel = (poaChg > 5 ? 30 + this.rnd.entre(-1, 1) : 0) * 1000;
   }
+
+  /* instrumentación: la irradiancia y la POA de este paso quedan visibles para que
+     se puedan analizar desde fuera sin duplicar aquí el modelo de meteo */
+  this.ghi = ghi; this.dhi = dhi; this.poa = poaChg; this.pEntrada = pEntrada;
 
   /* ── ADMISIÓN de la batería: C-rate seguro y JEITA, y el cut-in del regulador ── */
   var whChg = 0, bloqueoT = false;

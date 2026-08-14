@@ -54,6 +54,7 @@ var FISICA = {
   "DESTOW_HOLD_H": 1,
   "ETA_CHG": 0.9,
   "V_NOM": 25.6,
+  "DESTOW_HOLD_MIN": 30,
   "IDLE_W": 0.64,
   "SLEEP_W": 0.64,
   "K0": 0.0503,
