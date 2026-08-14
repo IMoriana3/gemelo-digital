@@ -224,7 +224,7 @@ var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
 /* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies):
    parcial ≥40 km/h (±30° mín), full ≥60 km/h (±55°), histéresis destow ~30 min (1 h aquí),
    signo hacia el sol (az<0 este → θ negativo) */
-var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=1;
+var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=0.5;
 /* Calefactor -LT (PS26002_RevA): P = 1,0 + 0,15·|T| W si T<0°C, solo de día; desbloquea carga (T efectiva ≥1°C) */
 function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
 /* JEITA lado caliente (§04.1a): T3=35°C reduce, T4=45°C bloquea carga */
@@ -344,12 +344,19 @@ function parsePVSyst(text){
   if(hi<0)throw new Error("No es un CSV horario de PVSyst (falta cabecera 'date;…')");
   var sep=lines[hi].indexOf(';')>=0?';':',';
   var cols=lines[hi].split(sep).map(function(c){return c.trim()});
-  var ix={}; cols.forEach(function(c,k){ix[c]=k});
-  function col(row,name){var k=ix[name];return k==null?null:parseFloat((row[k]||'').replace(',','.'))}
+  var ix={}; cols.forEach(function(c,k){ix[c]=k; ix[c.toLowerCase()]=k;});
+  /* devuelve null (no NaN) si la columna falta o la celda no es numérica: todas las
+     comprobaciones aguas abajo son ==null y NaN se colaba como valor válido */
+  function col(row,name){
+    var k=ix[name]; if(k==null)k=ix[String(name).toLowerCase()];
+    if(k==null)return null;
+    var v=parseFloat(String(row[k]||'').replace(',','.'));
+    return isFinite(v)?v:null;
+  }
   var out=[];
   for(var r=hi+2;r<lines.length;r++){          /* +2: salta la línea de unidades */
     var row=lines[r].split(sep); if(row.length<3)continue;
-    var m=/^(\d{2})\/(\d{2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/.exec(row[ix['date']]);
+    var m=/^(\d{2})\/(\d{2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/.exec(row[ix['date']!=null?ix['date']:ix['Date']]||'');
     if(!m)continue;
     var yy=+m[3]; if(yy<100)yy+=yy<70?2000:1900;
     var t=new Date(Date.UTC(yy,+m[2]-1,+m[1],+m[4],+m[5]));
@@ -360,7 +367,9 @@ function parsePVSyst(text){
     var poa=col(row,'GlobEff'); if(poa==null)poa=col(row,'GlobInc');
     if(poa!=null)e.poa=Math.max(0,poa);
     var hs=col(row,'HSol'), as=col(row,'AzSol');
-    if(hs!=null){e.el=hs*D2R; e.az=(as||0)*D2R;}
+    /* sólo se usa la posición solar del fichero si vienen AMBAS: con AzSol ausente se
+       asumía azimut 0 (sur) a todas horas, que rompe el backtracking y la transposición */
+    if(hs!=null&&as!=null){e.el=hs*D2R; e.az=as*D2R;}
     var phi=col(row,'PhiAng'); if(phi!=null)e.phi=phi;
     out.push(e);
   }
@@ -429,11 +438,22 @@ function simulate(meteo,prof,loc,soc0,opts){
       target=Math.max(-AXIS_MAX,Math.min(AXIS_MAX,target));
     }else target=parked?DEFENSE_POS:trackPos;
     if(prevPos==null)prevPos=target;
+    /* Winter mode (11.5b): correcciones gruesas — el seguimiento se limita a DEG_H_WINTER °/h,
+       de modo que el seguidor va a la zaga del sol. Se aplica a la POSICIÓN, así que el ángulo
+       registrado, la POA de carga y el consumo de motor hablan del mismo giro (antes se
+       descontaba sólo la energía y el seguidor recorría igualmente el ángulo completo). */
+    if(opts.winter && !parked && !stow){
+      var limW=DEG_H_WINTER*dtH;
+      target=Math.max(prevPos-limW,Math.min(prevPos+limW,target));
+    }
+    /* Límite físico de velocidad de giro (0,17°/s): a paso fino el aparcado y el
+       abanderamiento tardan varios pasos en completarse, como en el seguidor real. */
+    var maxSweep=SLEW_DPS*3600*dtH;
+    if(Math.abs(target-prevPos)>maxSweep) target=prevPos+Math.sign(target-prevPos)*maxSweep;
     /* histéresis del lazo: en seguimiento solo corrige si el error ≥ 2,5° (estudio SUNNER) */
     var moveNow=(stow>0||parked)?Math.abs(target-prevPos)>0.01
                                 :Math.abs(target-prevPos)>=HYST_DEG;
     var deltaEff=moveNow?Math.abs(target-prevPos):0;
-    if(!parked && !stow && opts.winter) deltaEff*=DEG_H_WINTER/DEG_H_NORMAL;
     var avgPos=(target+prevPos)/2;
     if(moveNow)prevPos=target;
 
@@ -471,7 +491,13 @@ function simulate(meteo,prof,loc,soc0,opts){
     var dayIdx=Math.floor((+m.t)/864e5)-t0Day;
     var fullDay=opts.strategy && (dayIdx-lastFullDay>=opts.fcDays);
     var ceil=opts.strategy?(fullDay?1.0:opts.socTgt/100):1.0;
-    /* CASO 2: por encima del techo no entra carga (el consumo sí sigue) */
+    /* CASO 2 — con el matiz físico del regulador: de día el panel alimenta PRIMERO la carga
+       (electrónica y motor) y sólo el excedente entra en la batería; el techo limita lo que
+       admite la BATERÍA, no lo que el panel puede dar al consumo. De ahí el "+consWh":
+       equivale a  net_batería = min(chgWh − consWh, hueco_hasta_el_techo),  que puede ser
+       negativo de noche. Sin ese término la batería nunca llega a tocar el techo (se queda
+       un paso de consumo por debajo) y la calibración al 100 % deja de dispararse: medido,
+       20 calibraciones al año con rachas de 51 días en vez de ~73 con rachas de 5. */
     var room=Math.max(0,(ceil-soc))*capWh+consWh;
     var chgEff=Math.min(chgWh,room);
 
@@ -487,8 +513,12 @@ function simulate(meteo,prof,loc,soc0,opts){
     if(sun.el>0){
       poaPot=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
       if(parked && !stow){                        /* pérdida por batería; el abanderamiento no cuenta */
-        var poaDef=poaAt(DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi);
-        poaLost=Math.max(0,poaPot-poaDef);
+        /* La fracción perdida se calcula SIEMPRE con el mismo modelo de transposición y se
+           aplica al POA potencial real: así no se mezcla el GlobEff medido con el calculado. */
+        var poaTrkM=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
+        var poaDefM=poaAt(DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi);
+        var fracLost=poaTrkM>0?Math.max(0,(poaTrkM-poaDefM)/poaTrkM):0;
+        poaLost=poaPot*fracLost;
       }
     }
 
@@ -501,6 +531,7 @@ function simulate(meteo,prof,loc,soc0,opts){
 }
 
 /* ═══════════ Rainflow (ASTM simplificado) + modelo de ciclos LFP (11.5b) ═══════════ */
+var RF_MIN=0.005;                 /* 0,5 % — filtro de amplitud: sin él el conteo depende del paso */
 function rainflow(soc){
   var tp=[],i;
   for(i=0;i<soc.length;i++){
@@ -508,6 +539,7 @@ function rainflow(soc){
     if(tp.length>=2){
       var a=tp[tp.length-2],b=tp[tp.length-1];
       if((b-a)*(v-b)>=0){tp[tp.length-1]=v;continue;}
+      if(Math.abs(v-b)<RF_MIN)continue;        /* oscilación por debajo del umbral: ruido */
     }
     tp.push(v);
   }
@@ -524,7 +556,7 @@ function rainflow(soc){
   }
   for(i=0;i+1<stack.length;i++)cycles.push({r:Math.abs(stack[i+1]-stack[i]),w:0.5});
   var tot=0,d30=0,d60=0;
-  cycles.forEach(function(c){tot+=c.w;if(c.r>=0.30)d30+=c.w;if(c.r>=0.60)d60+=c.w;});
+  cycles.forEach(function(c){if(c.r<RF_MIN)return;tot+=c.w;if(c.r>=0.30)d30+=c.w;if(c.r>=0.60)d60+=c.w;});
   return {total:tot,dod30:d30,dod60:d60};
 }
 var LFP_A=6000, LFP_B=1.2, LFP_EOL=20;   /* Nf = a/DoD^b · EOL = 80% SOH */
@@ -606,7 +638,7 @@ function aggDaily(rows){
     cur.heat+=r.heat||0;cur.windMax=Math.max(cur.windMax,r.wind||0);if(r.stow)cur.stowH+=dtH;
     cur.ghiKwh+=r.ghi*dtH/1000;cur.tMin=Math.min(cur.tMin,r.temp);cur.tMax=Math.max(cur.tMax,r.temp);
     cur.socMin=Math.min(cur.socMin,r.soc);cur.socMax=Math.max(cur.socMax,r.soc);
-    if(r.parked)cur.parkedH+=dtH;
+    if(r.parked&&!r.stow)cur.parkedH+=dtH;
   });
   return out;
 }
@@ -633,8 +665,9 @@ function frame(g,yMin,yMax,rows,yFmt){
     x.strokeStyle='rgba(35,48,61,.8)';x.beginPath();x.moveTo(p.l,yy);x.lineTo(W-p.r,yy);x.stroke();
     x.fillStyle='#5e7388';x.fillText(yFmt(v),p.l-6,yy);
   }
-  var daily=rows.length>1&&(rows[1].t-rows[0].t)>=36e5*10;
-  var totalDays=daily?rows.length:rows.length/24;
+  var stepH=rows.length>1?((+rows[1].t)-(+rows[0].t))/36e5:1;
+  var daily=stepH>=10;
+  var totalDays=rows.length*stepH/24;
   x.textAlign='left';x.textBaseline='top';
   for(var i=0;i<rows.length;i++){
     var t=rows[i].t;
@@ -741,6 +774,7 @@ $('prof').value=1;   /* SP_45W_6Ah por defecto */
   $('year').add(new Option('🏆 Peor año — barrido histórico','worst'));
   for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
 $('year').onchange=function(){$('sweepFld').style.display=this.value==='worst'?'':'none'};
+$('year').onchange();      /* estado inicial coherente con la opción seleccionada */
 function profNote(){
   var P=PROFILES[$('prof').value];
   $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · calefactor '+(P.heated?'<b>sí (LT)</b> — carga bajo 0 °C':'no');
@@ -908,7 +942,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
     chip('SOC final',fmt(S.socFinal*100)+'%',socCls(S.socFinal,crit))+
     chip('Horas SOC = 0',fmt(S.hZero),S.hZero>0?'bad':'ok')+
     chip('Balance neto',(S.net>=0?'+':'')+fmt(S.net)+' Wh',S.net>=0?'ok':'warn',
-         'carga '+fmt(S.chg)+' / consumo '+fmt(S.base+S.motor))+
+         'carga '+fmt(S.chg)+' / consumo '+fmt(S.base+S.motor+S.heatWh))+
     chip('Cargas completas',fmt(S.cal.n),S.cal.worstGap>2*opts.fcDays?'warn':'ok',
          'peor racha sin calibrar: '+fmt(S.cal.worstGap)+' d (objetivo '+opts.fcDays+')')+
     chip('Abanderamiento',fmt(S.hStow)+' h',S.hStow>0?'warn':'ok','viento ≥40/60 km/h (B2)')+
@@ -932,7 +966,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
     '<button class="btn" style="width:auto;padding:6px 14px;background:var(--card2);color:var(--tx);border:1px solid var(--line2)" onclick="zoomWorstDay()">📉 Día de SOC mínimo ±3</button>'+
     (zoom?'<button class="btn" style="width:auto;padding:6px 14px;background:var(--card2);color:var(--tx);border:1px solid var(--line2)" onclick="zoomFull()">Periodo completo</button>':'')+
     '</div>'+
-    (zoom?'<div class="sub" style="margin-top:6px">Mostrando '+zoom.d0+' → '+zoom.d1+' en resolución horaria; las métricas de arriba son de este rango.</div>':'');
+    (zoom?'<div class="sub" style="margin-top:6px">Mostrando '+zoom.d0+' → '+zoom.d1+' con paso de '+fmt(dtH*60)+' min; las métricas de arriba son de este rango.</div>':'');
   out.appendChild(zc);
 
   /* — Barrido multi-año: tabla por año + estadística TMY ± 2σ (como el estudio) — */
@@ -1037,7 +1071,8 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
   out.appendChild(c4);
   if(LONG){
     c4.innerHTML='<h2>Movimiento diario del seguidor</h2><div class="sub">Σ|Δθ| por día (°) — la estrategia y el winter mode reducen el recorrido</div>';
-    var maxM=Math.max(10,Math.max.apply(null,dr.map(function(r){return r.mov})));
+    var maxM=Math.max(10,Math.max.apply(null,dr.map(function(r){return r.mov})),
+                          Math.max.apply(null,dm.map(function(r){return r.mov})));
     var g4=mkCanvas(c4,145), f4=frame(g4,0,maxM,dm,function(v){return fmt(v)+'°'});
     bandParked(g4,f4,dm,'rgba(226,87,76,.10)',function(r){return r.parkedH>0});
     line(g4,f4,dr,'mov','#5e7388',1);
