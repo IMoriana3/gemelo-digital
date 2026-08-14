@@ -244,3 +244,10 @@ console.log('└' + '─'.repeat(90));
 console.log('\nSobre ' + DIAS_V + ' días. El criterio del SCADA solo abandera por encima de 60 km/h,');
 console.log('así que pasa mucho menos tiempo en bandera — pero cada viaje suyo es a ±55° completos,');
 console.log('mientras que B2 se queda en el sector parcial (≥30°) buena parte del tiempo.\n');
+
+console.log('┌─ DECISIÓN ABIERTA ' + '─'.repeat(72));
+console.log('│ La curva de motor NO se adopta todavía. Se espera a contrastarla con la curva');
+console.log('│ medida que tenemos y con los datos de campo de EL BURGO (23003) y AYORA (24025).');
+console.log('│ Lo que desempata son los Wh de MOTOR por día y por TCU: es donde los dos modelos');
+console.log('│ se separan un 14 %. El SoC no sirve — se mueve 0,1 pp, o sea nada.');
+console.log('└' + '─'.repeat(90) + '\n');

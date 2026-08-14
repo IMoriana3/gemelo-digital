@@ -151,6 +151,36 @@ function destowCanonico() {
   return parseFloat(m[1]);
 }
 
+/* La política de DIFUSA (overcast) también es canónica de SolarGPT: la clase
+   DiffuseConfig de tracker.py, con sus umbrales, sus candidatos de alpha y sus
+   ventanas de confirmación/permanencia EN MINUTOS (que es lo que la hace
+   independiente del paso de simulación). Se lee entera, no se copia. */
+function difusaCanonica() {
+  if (!fs.existsSync(TRACKER_PY)) throw new Error('no encuentro tracker.py');
+  const src = fs.readFileSync(TRACKER_PY, 'utf8');
+  const i = src.indexOf('class DiffuseConfig');
+  if (i < 0) throw new Error('no encuentro class DiffuseConfig en tracker.py');
+  const cuerpo = src.slice(i, src.indexOf('\nDEFAULT_TRACKER_CONFIG', i));
+  const campo = (n) => {
+    const m = cuerpo.match(new RegExp('^\\s+' + n + '\\s*:[^=]*=\\s*([-\\d.]+)', 'm'));
+    if (!m) throw new Error('no encuentro ' + n + ' en DiffuseConfig');
+    return parseFloat(m[1]);
+  };
+  const mA = cuerpo.match(/continuous_alpha_candidates\s*:[^=]*=\s*\(([^)]*)\)/);
+  if (!mA) throw new Error('no encuentro continuous_alpha_candidates en DiffuseConfig');
+  const alphas = mA[1].split(',').map(x => x.trim()).filter(Boolean).map(parseFloat);
+  return {
+    ghiMin: campo('ghi_min'),
+    flatEnter: campo('flat_enter_ratio'),
+    limitedHold: campo('limited_hold_ratio'),
+    alphas: alphas,
+    switchEnter: campo('poa_switch_enter_ratio'),
+    switchExit: campo('poa_switch_exit_ratio'),
+    switchConfirmMin: campo('poa_switch_confirm_minutes'),
+    switchDwellMin: campo('poa_switch_dwell_minutes')
+  };
+}
+
 /* ---------- lectura ---------- */
 /* Regla AUDITADA de tcu.py: según de qué come el TCU, tiene sentido enseñar unas
    cosas u otras. Un equipo de alterna no tiene SoC que enseñar porque no tiene
@@ -186,7 +216,8 @@ const canon = {
   invierno: { socMax: pyNum(tcuPy, 'WINTER_SOC_MAX_PCT', 'tcu.py'), calibDias: pyNum(tcuPy, 'WINTER_CALIB_PERIOD_DAYS', 'tcu.py') },
   perfilPorDefecto: pyStr(tcuPy, 'DEFAULT_PROFILE'),
   capWhTfm: pyNum(tfmPy, 'TCU_CAP_WH', 'tfm_constants.py'),
-  perfiles: perfiles()
+  perfiles: perfiles(),
+  difusa: difusaCanonica()
 };
 const estrategia = {
   AXIS_MAX: jsNum('AXIS_MAX'), NIGHT_POS: jsNum('NIGHT_POS'), DEFENSE_POS: jsNum('DEFENSE_POS'),
@@ -339,6 +370,9 @@ var FISICA = {
 
  /* ── perfiles de hardware (PROFILES de tcu.py, en su orden) ── */
  perfilPorDefecto: ${JSON.stringify(canon.perfilPorDefecto)},
+
+ /* política de difusa / overcast (DiffuseConfig de tracker.py) */
+ difusa: ${JSON.stringify(canon.difusa, null, 1).replace(/\n/g, '\n ')},
 
  /* qué tiene sentido enseñar de cada variante (regla auditada de tcu.py) */
  visibilidad: ${JSON.stringify(canon.visibilidad)},

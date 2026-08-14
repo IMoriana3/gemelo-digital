@@ -60,6 +60,51 @@ Y una regla que **no está en el canon pero sí en el equipo**, aprendida de `te
 
 Ojo con el azimut: el canon usa convención pvlib (90° = este al amanecer) y la casa usa 0 en el mediodía solar con negativo al este. La conversión es `az_pvlib = 180 + az`, y equivocarla abandera al lado contrario sin que salte nada.
 
+### Cielo cubierto — `difusa.js`, del canon `DiffuseConfig`
+
+Con el cielo cerrado casi toda la irradiancia es **difusa**, y la difusa no viene de donde está el sol: viene de todo el cielo. Apuntar al sol deja de ser lo mejor, porque un plano de canto ve menos cielo que uno tumbado. Las cuatro políticas de `solargpt_core/tracker.py`, elegibles en la interfaz:
+
+| | |
+|---|---|
+| `none` | no toca nada. La referencia |
+| `poa_switch` | como `flat` pero con máquina de estados: **30 min** confirmando antes de entrar y **90 min** de permanencia mínima. La que se parece a un equipo real — uno que se tumba y se levanta con cada nube se rompe |
+| `flat` | si el plano llano recoge un **2 %** más, se tumba. Sin memoria |
+| `continuous` | barre α ∈ {0, ¼, ½, ¾, 1} sobre θ = (1−α)·θ<sub>bt</sub> y se queda con el mejor POA. Es el **techo teórico**: nunca peor que `flat`, porque `flat` es α = 1 |
+| `limited` | mantiene el ángulo anterior mientras no pierda POA. No busca ganancia: busca **no moverse** |
+
+Las ventanas van en **minutos y no en pasos**, que es lo que las hace independientes del paso de simulación — el canon lo dice explícitamente (schema 2.1.0). Aquí se acumulan minutos de reloj simulado en vez de contar pasos: lo mismo en el límite continuo, y lo correcto cuando el paso es variable.
+
+**Dos reglas que no se negocian**, las dos aprendidas a base de disgusto:
+
+1. **Protección por encima de optimización.** Donde hay abanderamiento, noche o defensa por batería, la difusa **no toca el ángulo**. En SolarGPT se cazó en producción al revés: con 90 km/h el motor devolvía `stow_active=1` y a la vez θ=0°, porque el plano llano recogía un 2 % más. El tracker tumbado en pleno vendaval con el registro diciendo que estaba aparcado.
+2. **Clamp al backtracking.** |θ| nunca por encima de |θ<sub>bt</sub>|. El backtracking ya recortó el ángulo para no sombrear al vecino; dejar que la difusa lo abra otra vez es inventarse energía que se come la fila de al lado.
+
+Medido sobre un día de junio en Gorraiz con el cielo al 95 %:
+
+| política | min al plano | motor/día |
+|---|---|---|
+| `none` | 0 | 13,60 Wh |
+| `flat` | 562 | 7,48 Wh |
+| `poa_switch` | 687 | 5,75 Wh |
+| `continuous` | 672 | 4,36 Wh |
+| `limited` | 354 | 3,49 Wh |
+
+Con el cielo despejado **ninguna interviene**, que es la primera comprobación que hay que exigirle a esto.
+
+### El reparto entre directa y difusa — `cielo.js`, y por qué era lo que faltaba
+
+La política de arriba no se disparaba nunca, y no era culpa suya: el gemelo repartía la global con una regla **inventada**, `dhi = ghi · (0,12 + 0,6·nubes)`. Con el cielo cerrado del todo dejaba un **28 % de directa** que en un día encapotado no existe — y mientras quede directa, apuntar al sol siempre gana.
+
+Ahora usa **Erbs (1982)**, que es el modelo por defecto de `solargpt_core.meteo.decompose_ghi` (*«erbs, default robusto»*) y lo que implementa `pvlib.irradiance.erbs`. Depende solo del índice de claridad `kt = GHI / (I0·cos z)`:
+
+```
+kt ≤ 0,22        kd = 1 − 0,09·kt                                   → casi todo difusa
+0,22 < kt ≤ 0,80 kd = 0,9511 − 0,1604kt + 4,388kt² − 16,638kt³ + 12,336kt⁴
+kt > 0,80        kd = 0,165                                         → cielo limpio
+```
+
+Con el cielo cerrado (kt ≈ 0,15) sale **kd ≈ 0,99**. Esa es la diferencia entre una política que no se activa jamás y una que se activa cuando toca.
+
 ## Las dos entradas físicas
 
 Las entradas que mandan sobre el seguidor no se parecen en nada, y modelarlas igual era lo que impedía representar los fallos que más se ven en planta.
@@ -252,6 +297,29 @@ La prueba decodifica **al revés** que el motor —como lo haría el colector de
 - **Escalas de los registros propios de la TCU:** las que usa la [TCU Toolbox](https://github.com/IMoriana3/scada/tree/main/tools/tcu-toolbox) contra equipo real — tilt ×10, ángulos solares ×100, temperaturas ×10, tensiones mV, corrientes mA, reloj en BCD.
 - **Física, gestión de batería y umbrales:** no se escriben en este repo — llegan por `sim/fisica.js` desde SolarGPT (`solargpt_core/tcu.py`, `tfm_constants.py`) y el bloque canónico de `bateria.html`. Ver la sección de gestión de batería.
 - **Criterio de salud** (`ok` / `aviso` / `alarma` / `offline`): el del colector del SCADA y la toolbox.
+
+## Decisiones abiertas
+
+### La curva de motor — a la espera de tres cosas
+
+El gemelo y `bateria.html` gastan `Wh/° = K0 + K1·|θ|`, un ajuste **lineal** de la campaña *Consumos motor_02 @24V*. El port del cuaderno (`tcu_compare.py`) interpola en cambio la **tabla medida** de corriente: de 1.500 mA a 0° hasta 2.800 mA a 55°. La tabla es convexa y el lineal se queda corto en los extremos, que es donde el seguidor pasa buena parte del día.
+
+Medido sobre 365 días con la misma velocidad de actuador en los dos lados (`node sim/impacto.mjs`):
+
+| | motor/día | SoC mín |
+|---|---|---|
+| ajuste lineal, como está hoy | 16,47 Wh | 72,7 % |
+| tabla medida `I(θ)` | 18,72 Wh (**+14 %**) | 72,6 % (**−0,1 pp**) |
+
+**No se adopta todavía.** Se espera a contrastarla con:
+
+1. la **curva medida** que tenemos,
+2. los datos de campo de **El Burgo** (23003, Zaragoza),
+3. los de **Ayora** (24025, Valencia).
+
+El contraste que decide es directo: **Wh de motor por día y por TCU**, que es lo que separa los dos modelos en un 14 % — y como el SoC apenas se mueve, la autonomía no sirve para desempatar. Cuando lleguen los datos el cambio es de una línea, porque el consumo vive ya en un solo sitio (`consumoTCU`, en el módulo de gestión de batería).
+
+> Mientras tanto, ojo con el histórico: el **+21 %** que se citó antes no era la curva sola. Se medía con el actuador a 0,16 °/s en un lado y a 0,17 en el otro, así que llevaba dentro el 6,3 % del actuador lento. Con la velocidad ya alineada, la curva sola son +14 %.
 
 ## Lo que hay que saber antes de fiarse
 

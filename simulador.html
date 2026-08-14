@@ -249,6 +249,11 @@
           <select id="estrViento"></select>
           <div class="note" id="estrNota" style="margin-top:4px"></div>
         </div>
+        <div class="fld">
+          <label>Cielo cubierto (difusa)</label>
+          <select id="polDifusa"></select>
+          <div class="note" id="difNota" style="margin-top:4px"></div>
+        </div>
         <div class="fld"><label>Nubes <span class="rv" id="nubesV">15 %</span></label>
           <input type="range" id="nubes" min="0" max="100" value="15"></div>
         <div class="fld"><label>Nieve acumulada <span class="rv" id="nieveV">0 cm</span></label>
@@ -412,6 +417,8 @@
 
 <script src="sim/fisica.js"></script>
 <script src="sim/viento.js"></script>
+<script src="sim/cielo.js"></script>
+<script src="sim/difusa.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/planta.js"></script>
 <script>
@@ -434,6 +441,9 @@ SIM.PERFILES.forEach(function (p) { $('perfil').add(new Option(p.n, p.id)); });
    de Streamlit: dos ejes — cara al sol o cara al viento × uno o dos umbrales. */
 SIM.Abanderamiento.ESTRATEGIAS.forEach(function (e) { $('estrViento').add(new Option(e.n, e.id)); });
 $('estrViento').value = 'B2';
+/* Las cuatro políticas de difusa de DiffuseConfig (solargpt_core/tracker.py) */
+SIM.Difusa.POLITICAS.forEach(function (p) { $('polDifusa').add(new Option(p.n, p.id)); });
+$('polDifusa').value = 'none';
 $('perfil').value = SIM.FISICA.perfilPorDefecto;   /* el DEFAULT_PROFILE de tcu.py */
 var TIPO_TXT = { sp: 'panel propio', string: 'del string', ac: 'alterna' };
 var NOTA_TIPO = {
@@ -457,6 +467,7 @@ function construye() {
     perfil: $('perfil').value,
     motorModel: $('motorModel').value === 'factiun' ? 'factiun' : +$('motorModel').value,
     estrategiaViento: $('estrViento').value,
+    politicaDifusa: $('polDifusa').value,
     estrategia: {
       activa: $('estrOn').checked, socCrit: +$('socCrit').value, winter: $('winter').checked,
       tMin: +$('tMin').value, poaMin: +$('poaMin').value,
@@ -518,6 +529,37 @@ function aplicaEstrategia(manual) {
 }
 /* Cambiar de estrategia en caliente: se le pone una máquina nueva a cada TCU y se
    deja constancia de cuál manda. La B2 es la de la casa (decisión EPC). */
+/* Cambia la política de cielo cubierto en caliente. Cada TCU lleva su propia máquina
+   (la de poa_switch tiene memoria: confirmación y permanencia), así que se le pone una
+   nueva a cada uno en vez de rehacer la planta. */
+function aplicaPoliticaDifusa() {
+  if (!P) return;
+  var id = $('polDifusa').value, e = null, L = SIM.Difusa.POLITICAS;
+  for (var i = 0; i < L.length; i++) if (L[i].id === id) e = L[i];
+  P.cfg.politicaDifusa = id;
+  P.tcus.forEach(function (t) { t.dif = new SIM.Difusa({ politica: id }); });
+  var C = SIM.Difusa.CANON, n;
+  if (id === 'none') {
+    n = 'El seguidor apunta al sol siempre, haya nubes o no. Es la referencia contra la que se miden las demás.';
+  } else if (id === 'flat') {
+    n = 'Se tumba en cuanto el plano llano recoge un <b>' + ((C.flatEnter - 1) * 100).toFixed(0) +
+        ' %</b> más. Sin memoria: cada nube que pasa es un viaje.';
+  } else if (id === 'continuous') {
+    n = 'Barre α ∈ {' + C.alphas.join(', ') + '} sobre θ = (1−α)·θ<sub>bt</sub> y se queda con el mejor POA. ' +
+        'Es el <b>techo teórico</b>: nunca peor que «flat», porque «flat» es α = 1.';
+  } else if (id === 'limited') {
+    n = 'Mantiene el ángulo anterior mientras no pierda POA. No busca ganancia: busca <b>no moverse</b>, ' +
+        'que en un equipo a batería es lo que de verdad se nota.';
+  } else {
+    n = 'Como «flat» pero con máquina de estados: <b>' + C.switchConfirmMin + ' min</b> confirmando antes de ' +
+        'entrar y <b>' + C.switchDwellMin + ' min</b> de permanencia mínima. Es la que se parece a un equipo real — ' +
+        'uno que se tumba y se levanta con cada nube se rompe.';
+  }
+  n += '<br><b>Nunca por encima de una maniobra de protección</b>: con abanderamiento, noche o defensa por ' +
+       'batería, la difusa no toca el ángulo.';
+  $('difNota').innerHTML = n;
+}
+
 function aplicaEstrategiaViento() {
   if (!P) return;
   var id = $('estrViento').value, e = null, L = SIM.Abanderamiento.ESTRATEGIAS;
@@ -1235,6 +1277,7 @@ $('loc').onchange = construye;
 $('nGrup').onchange = construye;
 $('perfil').onchange = construye;
 $('estrViento').onchange = function () { aplicaEstrategiaViento(); toca(); };
+$('polDifusa').onchange = function () { aplicaPoliticaDifusa(); toca(); };
 ['estrOn', 'socTgt', 'socCrit', 'fcDays', 'winter', 'tMin', 'poaMin', 'motorModel'].forEach(function (id) {
   var manual = id === 'socTgt' ? 'techo' : (id === 'fcDays' ? 'calib' : null);
   $(id).oninput = function () { aplicaEstrategia(manual); toca(); };
@@ -1253,6 +1296,7 @@ cargaParams();      /* ANTES de construir: la planta nace ya con los valores pue
 pintaParams();
 construye();
 aplicaEstrategia();
+aplicaPoliticaDifusa();
 sincronizaAverias();
 etiquetaTiempo();
 requestAnimationFrame(bucle);

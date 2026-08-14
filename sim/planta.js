@@ -208,6 +208,18 @@ var Abanderamiento = (typeof window !== 'undefined' && window.Abanderamiento) ||
         (typeof require === 'function' ? require('./viento.js') : null);
 if (!Abanderamiento) throw new Error('falta sim/viento.js');
 
+/* Y el seguimiento con cielo cubierto, en el suyo (sim/difusa.js): las cuatro
+   políticas de DiffuseConfig, tal cual las define solargpt_core/tracker.py. */
+var Difusa = (typeof window !== 'undefined' && window.Difusa) ||
+        (typeof require === 'function' ? require('./difusa.js') : null);
+if (!Difusa) throw new Error('falta sim/difusa.js');
+
+/* Y la descomposición de la global en directa y difusa (Erbs, el modelo por defecto
+   de solargpt_core.meteo.decompose_ghi) en sim/cielo.js. */
+var Cielo = (typeof window !== 'undefined' && window.Cielo) ||
+        (typeof require === 'function' ? require('./cielo.js') : null);
+if (!Cielo) throw new Error('falta sim/cielo.js');
+
 /* Una bandera nueva con los umbrales que haya AHORA en K (que pueden no ser los del
    canon si se han ajustado). `sincronizaBandera` los refresca en una ya montada, sin
    perderle el estado: es lo que permite mover un umbral con la planta en marcha. */
@@ -274,9 +286,10 @@ var SP_TXT = ['—', 'SP1 viento', 'SP2', 'SP3 nieve', 'SP4 limpieza', 'SP5', 'S
    ⚠ El documento nombra los dos registros pero NO transcribe su enumerado: esta
    codificación es del simulador. Va marcada como tal en el visor. */
 var CRIT = { SEGUIMIENTO: 0, BACKTRACKING: 1, MANUAL: 2, SEGURIDAD: 3, LIMITE: 4,
-             NOCHE: 5, BATERIA: 6, INHIBIDO: 7 };
+             NOCHE: 5, BATERIA: 6, INHIBIDO: 7, DIFUSA: 8 };
 var CRIT_TXT = ['Seguimiento', 'Backtracking', 'Manual', 'Posición de seguridad',
-                'Límite de tilt', 'Noche', 'Restricción de batería', 'Motor inhibido'];
+                'Límite de tilt', 'Noche', 'Restricción de batería', 'Motor inhibido',
+                'Cielo cubierto'];
 var FUENTE_SP = { NINGUNA: 0, HSU: 1, NCU: 2, LOCAL: 3 };
 var FUENTE_TXT = ['—', 'meteo de la HSU', 'forzado de la NCU', 'decisión local'];
 
@@ -317,13 +330,14 @@ function posicionSolar(loc, N, h) {
 /* True tracking + backtracking (Anderson-Mikofski) sobre eje N-S. */
 function angulos(loc, N, h) {
   var P = posicionSolar(loc, N, h);
-  if (P.el <= 0.0001) return { sol: P, dia: false, real: 0, bt: 0, sel: K.NIGHT_POS, btActivo: false };
+  if (P.el <= 0.0001) return { sol: P, dia: false, real: 0, bt: 0, sel: K.NIGHT_POS, btActivo: false, ghi: 0 };
   var sx = Math.cos(P.el) * Math.sin(P.az), sz = Math.sin(P.el);
   var tt = Math.atan2(sx, sz);
   var temp = Math.min(1, (1 / K.GCR) * Math.cos(tt));
   var bt = tt - signo(tt) * Math.acos(temp);
   var ttD = clamp(tt * R2D, -K.AXIS_MAX, K.AXIS_MAX), btD = clamp(bt * R2D, -K.AXIS_MAX, K.AXIS_MAX);
-  return { sol: P, dia: true, real: ttD, bt: btD, sel: btD, btActivo: Math.abs(btD) < Math.abs(ttD) - 1e-3 };
+  return { sol: P, dia: true, real: ttD, bt: btD, sel: btD,
+           btActivo: Math.abs(btD) < Math.abs(ttD) - 1e-3 };
 }
 /* Coseno del ángulo de incidencia con el ángulo REAL del seguidor: si está
    abanderado o parado, la captación cae — que es justo lo que interesa medir. */
@@ -504,6 +518,8 @@ function TCU(id, planta, opts) {
   /* los umbrales se le pasan desde K, no se los busca él en el canon: así el
      abanderamiento también se puede reconfigurar en caliente como todo lo demás */
   this.ab = nuevaBandera((planta.cfg && planta.cfg.estrategiaViento) || 'B2');
+  this.dif = new Difusa({ politica: (planta.cfg && planta.cfg.politicaDifusa) || 'none' });
+  this.difusaActiva = false; this.difusaAlpha = 0; this.difusaTxt = '';
   this.zbCanal = 15; this.zbAddr = 0x1000 + id;
   this.serie = 'TCU' + String(2400000 + id * 37);
   this.mac = 0x0013A200 * 1 + id;
@@ -660,6 +676,22 @@ TCU.prototype.decide = function (dt, ang) {
     obj = ang.sel; crit = ang.btActivo ? CRIT.BACKTRACKING : CRIT.SEGUIMIENTO;
   }
 
+  /* ── CIELO CUBIERTO ────────────────────────────────────────────────────────
+     La política de difusa solo puede tocar el ángulo cuando la decisión de arriba
+     ha sido SEGUIR AL SOL. Si ha ganado cualquier otra —abanderamiento, nieve,
+     limpieza, un forzado, la defensa por batería, manual, noche o el equipo en
+     OFF— es protección o es una orden, y ahí no se optimiza: se obedece.
+
+     Es la regla que SolarGPT cazó en producción al revés: la difusa corría DESPUÉS
+     y con 90 km/h devolvía «abanderado» y θ=0° a la vez, porque el plano llano
+     recogía un 2 % más. El tracker tumbado en pleno vendaval con el registro
+     diciendo que estaba aparcado. Por eso aquí la difusa se pregunta primero si
+     puede hablar, y casi siempre la respuesta es que no. */
+  var protegido = (crit !== CRIT.SEGUIMIENTO && crit !== CRIT.BACKTRACKING) || this.repetidor;
+  var rD = this.dif.paso(dt / 60, ang.ghi, obj, this.poaDe(ang), protegido);
+  this.difusaActiva = rD.activa; this.difusaAlpha = rD.alpha; this.difusaTxt = rD.modo;
+  if (rD.activa) { obj = rD.theta; crit = CRIT.DIFUSA; }
+
   /* el repetidor no tiene seguidor que mover: se queda plano y solo repite señal */
   if (this.repetidor) { obj = 0; crit = CRIT.INHIBIDO; inhibido = true; sp = SP.NINGUNA; }
 
@@ -776,6 +808,28 @@ TCU.prototype.mueve = function (dt, inhibido) {
         temperatura, JEITA por el lado caliente y cut-in del regulador.
      4. Consumo: electrónica + motor (medición Factiun o mA SUNNER) + calefactor
         de las versiones LT, que gasta pero desbloquea la carga en frío.       */
+/* ── irradiancia del sitio y POA de un ángulo cualquiera ──
+   Se calcula una sola vez por paso porque la usan dos: la política de difusa, para
+   decidir si vale la pena tumbarse, y el balance de energía, para saber qué entra.
+   La proporción de difusa sube con la nubosidad, que es exactamente de lo que va la
+   política: con el cielo cerrado casi todo lo que llega es difusa. */
+TCU.prototype.cielo = function (ang) {
+  var m = this.p.meteo;
+  var ghi = 1000 * Math.max(0, Math.sin(Math.max(0, ang.sol.el))) * m.transmitancia();
+  /* el reparto entre directa y difusa NO se inventa: sale de Erbs, que es lo que
+     usa el canon. Con el cielo cerrado da ~99 % de difusa, no el 72 % que daba la
+     regla lineal que había aquí */
+  this.sky = Cielo.descompon(ghi, ang.sol.el, this.p.t.dia);
+  ang.ghi = ghi;
+  return this.sky;
+};
+/* devuelve la función θ → POA que la política de difusa necesita para puntuar
+   candidatos. La transposición es la canónica (poaAt, de bateria.html). */
+TCU.prototype.poaDe = function (ang) {
+  var s = this.sky, sol = ang.sol;
+  return function (th) { return poaAt(th, sol.el, sol.az, s.bh, s.dhi, s.ghi); };
+};
+
 TCU.prototype.energia = function (dt, ang, whMotor) {
   var m = this.p.meteo, pf = this.perfil, E = this.p.cfg.estrategia;
   var dtH = dt / 3600, capWh = pf.wh;
@@ -786,11 +840,8 @@ TCU.prototype.energia = function (dt, ang, whMotor) {
   this.tBat += (tAmb - this.tBat) * Math.min(1, dt / 1800);
   this.tPcb += (tAmb + (this.moviendo ? 6 : 2) - this.tPcb) * Math.min(1, dt / 600);
 
-  /* ── irradiancia del sitio: global, difusa y directa horizontal ── */
-  var ghi = 1000 * Math.max(0, Math.sin(Math.max(0, ang.sol.el))) * m.transmitancia();
-  var dhi = ghi * (0.12 + 0.6 * (m.nubes / 100));
-  var bh = Math.max(0, ghi - dhi);
-  var dia = ghi > 10;
+  /* la irradiancia ya la calculó cielo() al principio del paso */
+  var ghi = this.sky.ghi, dhi = this.sky.dhi, bh = this.sky.bh, dia = this.sky.dia;
 
   /* ── CONSUMO ──
      Tampoco se calcula aquí. La electrónica y el calefactor los da el mismo consumoTCU
@@ -889,6 +940,7 @@ TCU.prototype.paso = function (dt) {
     return;
   }
   var ang = angulos(this.p.loc, this.p.t.dia, this.p.t.hora);
+  this.cielo(ang);            /* la irradiancia del sitio, UNA vez por paso */
   this.solar = { real: ang.real, bt: ang.bt, zen: ang.sol.zen * R2D, az: ang.sol.az * R2D, dia: ang.dia };
   /* el orden importa: primero se LEEN las entradas (medida analógica y línea binaria),
      después se decide con lo leído, y solo entonces se actúa */
@@ -1041,6 +1093,7 @@ function Planta(cfg) {
        SUNNER a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
     motorModel: cfg.motorModel || 'factiun',
     estrategiaViento: cfg.estrategiaViento || 'B2',   /* A1 · A2 · B1 · B2 */
+    politicaDifusa: cfg.politicaDifusa || 'none',     /* none · flat · continuous · limited · poa_switch */
     /* ESTRATEGIA de gestión de batería — los mismos parámetros y los mismos valores
        por defecto que el simulador de batería (estrategia oficial SUNNER) */
     estrategia: {
@@ -1428,7 +1481,7 @@ Planta.prototype.fechaSim = function () {
 var API = {
   Planta: Planta, TCU: TCU, HSU: HSU, NCU: NCU, Meteo: Meteo,
   PERFILES: PERFILES, perfilDe: perfilDe, TIPO_REG: TIPO_REG, FISICA: F,
-  Abanderamiento: Abanderamiento,
+  Abanderamiento: Abanderamiento, Difusa: Difusa, Cielo: Cielo,
   K: K, K_CANON: K_CANON, ajusta: ajusta, restauraCanon: restauraCanon, tocados: tocados,
   PARAMS: PARAMS,
   MODO: MODO, MODO_TXT: MODO_TXT, SP: SP, SP_TXT: SP_TXT,

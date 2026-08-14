@@ -219,8 +219,14 @@ ok(Math.abs(ti.sensor.crudo / paso1 - Math.round(ti.sensor.crudo / paso1)) < 1e-
 ti.sensor.desajuste = 3.0;                     /* el sensor va montado 3° torcido */
 ti.sensor.offsetCfg = 0;                       /* y nadie lo ha compensado en 41058 */
 for (let i = 0; i < 30 * 60; i += 10) P.paso(10);
-ok(Math.abs(ti.objetivo - ti.angulo) < 1.5, 'el TCU se cree que está donde le mandan',
-   'desviación que publica: ' + (ti.objetivo - ti.angulo).toFixed(2) + '°');
+/* El lazo es de banda muerta: no corrige hasta pasarse de ella, así que siguiendo un
+   objetivo que se mueve la desviación publicada va en diente de sierra entre 0 y la
+   banda. Lo que se comprueba es que se queda DENTRO de la banda —o sea que el TCU se
+   cree en su sitio— no un valor concreto: eso último es una foto de un instante del
+   diente, y salta a la mínima que se toque cualquier cosa aguas arriba. */
+const bandaMuerta = P.cfg.deadband != null ? P.cfg.deadband : SIM.K.DB_PULSOS / ti.sensor.pulsosGrado;
+ok(Math.abs(ti.objetivo - ti.angulo) <= bandaMuerta + 0.2, 'el TCU se cree que está donde le mandan',
+   'desviación que publica: ' + (ti.objetivo - ti.angulo).toFixed(2) + '° · banda muerta ' + bandaMuerta + '°');
 ok(Math.abs(ti.objetivo - ti.anguloReal) > 2, '…pero la mesa está a 3° de donde debería',
    'error real: ' + (ti.objetivo - ti.anguloReal).toFixed(2) + '°');
 ok(ti.salud() === 'ok', 'y el SCADA lo ve todo verde — este es el fallo que no se ve en pantalla');
@@ -554,6 +560,67 @@ ok(p2.wh < p1.wh * 0.9, 'bajar K0 baja lo que gasta el motor, pasando por el mó
    p1.wh.toFixed(4) + ' → ' + p2.wh.toFixed(4) + ' Wh');
 SIM.restauraCanon();
 ok(Math.abs(unPasoMoviendo().wh - p1.wh) < 1e-12, 'y volver al canon lo devuelve exacto');
+
+/* ───────── cielo cubierto (overcast) ─────────
+   Las cuatro políticas de DiffuseConfig, en su módulo. Lo que se comprueba no es
+   que «hagan algo», es que hagan lo suyo: con sol no tocan nada, con el cielo
+   cerrado tumban el seguidor, y NUNCA por encima de una maniobra de protección. */
+function diaDe(pol, nubes, extra) {
+  const P = new SIM.Planta(Object.assign({
+    nTCU: 2, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 6, dia: 172,
+    lat: 42.82, lon: -1.60, tz: 1, politicaDifusa: pol }, extra || {}));
+  P.meteo.nubes = nubes;
+  let act = 0, plano = 0, dia = 0;
+  for (let i = 0; i < 14 * 60; i++) {
+    P.paso(60);
+    const t = P.tcu(1);
+    if (!t.solar.dia) continue;
+    dia++;
+    if (t.difusaActiva) { act++; if (Math.abs(t.objetivo) < 0.5) plano++; }
+  }
+  return { P: P, act: act, plano: plano, dia: dia, motorWh: P.tcu(1).energiaMotorHoy / 3600 };
+}
+
+/* la descomposición es la canónica, no una regla lineal inventada */
+ok(Math.abs(SIM.Cielo.fraccionDifusaErbs(0.15) - (1 - 0.09 * 0.15)) < 1e-12,
+   'Erbs: con el cielo cerrado (kt 0,15) casi todo es difusa',
+   (SIM.Cielo.fraccionDifusaErbs(0.15) * 100).toFixed(1) + ' %');
+ok(SIM.Cielo.fraccionDifusaErbs(0.9) === 0.165,
+   'y con el cielo limpio se queda en el 16,5 % de la rama alta de Erbs');
+
+const sol = diaDe('poa_switch', 0);
+ok(sol.act === 0, 'con sol la política de difusa no toca NADA', sol.dia + ' min de día');
+
+const gris = diaDe('poa_switch', 95);
+ok(gris.act > 300 && gris.plano === gris.act,
+   'con el cielo cerrado poa_switch se tumba y se queda', gris.act + ' min al plano');
+ok(gris.motorWh < diaDe('none', 95).motorWh * 0.6,
+   'y eso le ahorra motor, que es de lo que va en un equipo a batería',
+   gris.motorWh.toFixed(2) + ' Wh frente a ' + diaDe('none', 95).motorWh.toFixed(2));
+
+/* continua ≥ flat: el canon lo dice —flat es el candidato α = 1 de continua— */
+ok(diaDe('continuous', 95).act >= diaDe('flat', 95).act,
+   'la política continua nunca interviene menos que flat, como manda el canon');
+
+/* LA REGLA QUE NO SE NEGOCIA: protección por encima de optimización */
+const vendaval = diaDe('flat', 95);
+vendaval.P.meteo.viento = 20; vendaval.P.meteo.rachas = 0;   /* 72 km/h */
+let tumbados = 0, abanderados = 0;
+for (let i = 0; i < 120; i++) {
+  vendaval.P.paso(60);
+  const t = vendaval.P.tcu(1);
+  if (t.stow > 0) { abanderados++; if (t.difusaActiva || Math.abs(t.objetivo) < 30) tumbados++; }
+}
+ok(abanderados > 60, 'con 72 km/h el seguidor abandera', abanderados + ' min');
+ok(tumbados === 0,
+   'y la difusa NO lo tumba estando abanderado — protección por encima de optimización');
+
+/* el clamp al backtracking tampoco se negocia */
+const d = new SIM.Difusa({ politica: 'flat' });
+const rC = d.paso(1, 800, 20, function (th) { return Math.abs(th) > 30 ? 9999 : 100; }, false);
+ok(Math.abs(rC.theta) <= 20 + 1e-6,
+   'la difusa nunca abre más ángulo del que dejó el backtracking',
+   rC.theta.toFixed(1) + '° con seguimiento en 20°');
 
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);

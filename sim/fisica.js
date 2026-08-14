@@ -26,6 +26,24 @@ var FISICA = {
  /* ── perfiles de hardware (PROFILES de tcu.py, en su orden) ── */
  perfilPorDefecto: "SP_45W_6Ah",
 
+ /* política de difusa / overcast (DiffuseConfig de tracker.py) */
+ difusa: {
+  "ghiMin": 50,
+  "flatEnter": 1.02,
+  "limitedHold": 1,
+  "alphas": [
+   0,
+   0.25,
+   0.5,
+   0.75,
+   1
+  ],
+  "switchEnter": 1.02,
+  "switchExit": 1,
+  "switchConfirmMin": 30,
+  "switchDwellMin": 90
+ },
+
  /* qué tiene sentido enseñar de cada variante (regla auditada de tcu.py) */
  visibilidad: {"sp":{"show_panel":true,"show_battery":true,"show_soc":true,"show_calibration":true},"string":{"show_panel":false,"show_battery":true,"show_soc":true,"show_calibration":true},"ac":{"show_panel":false,"show_battery":false,"show_soc":false,"show_calibration":false}},
  perfiles: [
