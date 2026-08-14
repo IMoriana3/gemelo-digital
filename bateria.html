@@ -173,6 +173,8 @@
     tracker no disponible, solo electrónica. Sin carga bajo la Tª mínima; por encima, C-rate seguro LiFePO₄
     según Tª (11.5b). Consumo electrónica 0,64 W y motor Wh/° medidos por Factiun (00.2t). Comparativa contra el mismo TCU
     sin estrategia (siempre seguimiento). Rainflow según el estudio; posición nocturna −5°.
+    Envejecimiento: ciclado LFP (Nf = 6000/DoD^1,2) más calendario integrado con el SOC y la temperatura
+    de celda (Arrhenius × factor de SOC), 1,5 %/año en el punto de referencia 25 °C y SOC 50 %.
   </div>
 </div>
 
@@ -490,7 +492,7 @@ function simulate(meteo,prof,loc,soc0,opts){
       }
     }
 
-    rows.push({t:m.t,ghi:m.ghi,temp:m.temp,wind:m.wind,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
+    rows.push({t:m.t,ghi:m.ghi,temp:m.temp,tCell:tEff,wind:m.wind,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
                heat:heatWh,net:chgEff-consWh,pos:target,parked:parked,stow:stow>0,mov:deltaEff,
                poaPot:poaPot,poaLost:poaLost,cal:calibNow,fullWin:!!fullDay,cRate:cRateNow});
   }
@@ -526,6 +528,15 @@ function rainflow(soc){
   return {total:tot,dod30:d30,dod60:d60};
 }
 var LFP_A=6000, LFP_B=1.2, LFP_EOL=20;   /* Nf = a/DoD^b · EOL = 80% SOH */
+/* Envejecimiento calendario — BatteryModel v2 canónico (notebook 11.0, _apply_calendar_aging):
+   tasa = base · exp(Ea/R·(1/T_ref − 1/T)) · (1 + 0,8·(SOC − 0,5))
+   Base calibrada a 1,5 %/año para LFP en el punto de referencia 25 °C y SOC 0,5 (Wang 2014, 11.5b),
+   así que un uso "medio" da el mismo número de antes, pero ahora vivir al 100 % penaliza y el frío premia. */
+var CAL_BASE_PCT_YR=1.5, T_REF_K=298.15, EA_OVER_R=3500;
+function calFadeRatePctYr(soc,tC){
+  var arr=Math.exp(EA_OVER_R*(1/T_REF_K-1/(Math.max(-40,tC)+273.15)));
+  return CAL_BASE_PCT_YR*arr*Math.max(0,1+0.8*(soc-0.5));
+}
 function cyclesAnalysis(rows){
   var n=rows.length; if(n<2)return null;
   var thr=0;
@@ -540,13 +551,19 @@ function cyclesAnalysis(rows){
   var dodMean=dods.reduce(function(a,b){return a+b},0)/dods.length;
   var dodM=Math.max(dodMean,0.01);
   var toEol=LFP_A/Math.pow(dodM,LFP_B);
-  var days=n*dtH/24, fade=0, years=30;
+  var days=n*dtH/24, fade=0, years=30, cycYr=0, calYr=CAL_BASE_PCT_YR;
+  /* calendario: se integra paso a paso con el SOC y la temperatura de celda reales */
+  var calAcc=0;
+  rows.forEach(function(r){calAcc+=calFadeRatePctYr(r.soc,(r.tCell!=null?r.tCell:r.temp))*dtH/8760;});
   if(days>=1){
     var cyclesYr=(efc/Math.max(dodM,1e-6))*(365/days);
-    fade=(cyclesYr/toEol)*LFP_EOL+1.5;                     /* cycle aging + calendar LFP ~1,5%/año */
+    cycYr=(cyclesYr/toEol)*LFP_EOL;                        /* fade por ciclado */
+    calYr=calAcc*365/days;                                 /* fade calendario anualizado */
+    fade=cycYr+calYr;
     years=Math.min(30,LFP_EOL/Math.max(fade,0.001));
   }
-  return {efc:efc,dodMean:dodMean,toEol:toEol,fadeYr:fade,years:years};
+  return {efc:efc,dodMean:dodMean,toEol:toEol,fadeYr:fade,cycYr:cycYr,calYr:calYr,
+          socMean:rows.reduce(function(a,r){return a+r.soc},0)/n,years:years};
 }
 /* Calibraciones (cargas al 100 %) logradas y peor racha sin calibrar — se recalcula
    sobre las filas, así funciona igual con el periodo completo o con un recorte del zoom */
@@ -898,7 +915,9 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
     (S.heatWh>0?chip('Calefactor LT',fmt(S.heatWh)+' Wh','','P = 1 + 0,15·|T| bajo 0 °C'):'')+
     chip('Rainflow',fmt(S.rf.total)+' ciclos','', '≥30% DoD: '+fmt(S.rf.dod30)+' · ≥60%: '+fmt(S.rf.dod60))+
     chip('Vida estimada',fmt(S.cyc.years,1)+' años',S.cyc.years<10?'warn':'ok',
-         fmt(S.cyc.efc,1)+' EFC · fade '+fmt(S.cyc.fadeYr,1)+'%/año');
+         'fade '+fmt(S.cyc.fadeYr,2)+'%/año = '+fmt(S.cyc.cycYr,2)+' ciclado + '+fmt(S.cyc.calYr,2)+' calendario')+
+    chip('SOC medio',fmt(S.cyc.socMean*100)+'%',S.cyc.socMean>0.92?'warn':'ok',
+         fmt(S.cyc.efc,1)+' EFC · a más SOC medio, más envejecimiento');
   out.appendChild(chips);
 
   /* — Zoom: día o rango concreto (como las vistas de día crítico del estudio) — */
@@ -1072,7 +1091,10 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
     ['Rainflow: ciclos ≥30% DoD',fmt(R.rf.dod30),fmt(S.rf.dod30),S.rf.dod30<=R.rf.dod30],
     ['Rainflow: ciclos ≥60% DoD',fmt(R.rf.dod60),fmt(S.rf.dod60),S.rf.dod60<=R.rf.dod60],
     ['EFC',fmt(R.cyc.efc,1),fmt(S.cyc.efc,1),S.cyc.efc<=R.cyc.efc],
-    ['Fade anual estimado',fmt(R.cyc.fadeYr,1)+'%',fmt(S.cyc.fadeYr,1)+'%',S.cyc.fadeYr<=R.cyc.fadeYr],
+    ['SOC medio del periodo',fmt(R.cyc.socMean*100)+'%',fmt(S.cyc.socMean*100)+'%',null],
+    ['Fade por ciclado',fmt(R.cyc.cycYr,2)+'%',fmt(S.cyc.cycYr,2)+'%',S.cyc.cycYr<=R.cyc.cycYr],
+    ['Fade calendario (SOC+Tª)',fmt(R.cyc.calYr,2)+'%',fmt(S.cyc.calYr,2)+'%',S.cyc.calYr<=R.cyc.calYr],
+    ['Fade anual estimado',fmt(R.cyc.fadeYr,2)+'%',fmt(S.cyc.fadeYr,2)+'%',S.cyc.fadeYr<=R.cyc.fadeYr],
     ['Vida a 80% SOH (años)',fmt(R.cyc.years,1),fmt(S.cyc.years,1),S.cyc.years>=R.cyc.years]
   ];
   var tb2='<table class="cmp"><tr><th>Métrica</th><th>Sin estrategia</th><th>Con estrategia</th></tr>';
