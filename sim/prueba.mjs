@@ -101,6 +101,37 @@ for (let i = 0; i < 40 * 60; i += 10) pp.paso(10);
 ok(pp.tcu(1).stow === 2 && Math.abs(pp.tcu(1).anguloReal) > 53, 'y sube a total al pasar de 60 km/h',
    pp.tcu(1).anguloReal.toFixed(1) + '°');
 
+console.log('\n── las cuatro estrategias del canon ──');
+/* wind_stow_strategies.py define cuatro sobre dos ejes: cara al sol (B) o al viento
+   (A), con uno o dos umbrales. El selector las ofrece igual que el de Streamlit. */
+const AB = SIM.Abanderamiento;
+ok(AB.ESTRATEGIAS.length === 4 && AB.ESTRATEGIAS.map(e => e.id).sort().join('') === 'A1A2B1B2',
+   'están las cuatro', AB.ESTRATEGIAS.map(e => e.id).join(' '));
+ok(AB.ESTRATEGIAS.filter(e => e.canon)[0].id === 'B2', 'y la marcada como canónica es B2');
+
+/* mismo instante: sol al este (az 90), viento del oeste (az 270), 47 km/h */
+const r = {};
+for (const e of AB.ESTRATEGIAS) r[e.id] = new AB({ estrategia: e.id }).paso(60, 13, 20, 90, 270);
+ok(r.B2.estado === 1 && r.A2.estado === 1, 'con dos umbrales, 47 km/h es bandera PARCIAL');
+ok(r.B1.estado === 2 && r.A1.estado === 2, 'con un umbral, los mismos 47 km/h son bandera COMPLETA');
+ok(r.B2.lado === -1 && r.B1.lado === -1, 'el eje B se orienta al SOL (este, θ<0)');
+ok(r.A2.lado === 1 && r.A1.lado === 1, 'el eje A se orienta al VIENTO (del oeste, θ>0)');
+
+/* un umbral no tiene histéresis: al bajar el viento vuelve al instante */
+const a1 = new AB({ estrategia: 'B1' });
+a1.paso(60, 18, 20, 90, 270);
+ok(a1.paso(60, 5, 20, 90, 270).estado === 0, 'A1/B1 no llevan histéresis: sueltan al bajar del umbral');
+const b2 = new AB({ estrategia: 'B2' });
+b2.paso(60, 18, 20, 90, 270);
+ok(b2.paso(60, 5, 20, 90, 270).estado === 2, 'B2 sí: mantiene la bandera durante el hold');
+
+/* y la planta entera se puede montar con cualquiera */
+const pA = new SIM.Planta({ nTcu: 2, nHsu: 1, nRep: 0, dia: 172, hora: 9, estrategiaViento: 'A2' });
+pA.meteo.viento = 18.5; pA.meteo.dirViento = 270;
+for (let i = 0; i < 40 * 60; i += 10) pA.paso(10);
+ok(pA.tcu(1).ab.estrategia === 'A2' && pA.tcu(1).anguloReal > 50,
+   'una planta con A2 abandera cara al viento del oeste', pA.tcu(1).anguloReal.toFixed(0) + '°');
+
 console.log('\n── el viento manda sobre manual ──');
 t.modo = SIM.MODO.MANUAL; t.manual = 0;
 for (let i = 0; i < 20 * 60; i += 5) P.paso(5);

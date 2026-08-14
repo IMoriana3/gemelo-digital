@@ -387,7 +387,7 @@ function TCU(id, planta, opts) {
   this.fueraRango = false; this.limiteOeste = false; this.limiteEste = false;
   this.velocidadBaja = false; this.relajacion = false;
 
-  this.ab = new Abanderamiento();          /* máquina de abanderamiento B2 compartida */
+  this.ab = new Abanderamiento({ estrategia: (planta.cfg && planta.cfg.estrategiaViento) || 'B2' });
   this.zbCanal = 15; this.zbAddr = 0x1000 + id;
   this.serie = 'TCU' + String(2400000 + id * 37);
   this.mac = 0x0013A200 * 1 + id;
@@ -465,7 +465,8 @@ TCU.prototype.decide = function (dt, ang) {
   /* el canon usa azimut pvlib (90° = este al amanecer, 270° = oeste al atardecer) y
      aquí el azimut es 0 en el mediodía solar, negativo al este: az_pvlib = 180 + az */
   var azSol = ang.dia ? (180 + ang.sol.az * R2D) : 180;
-  var rAb = this.ab.paso(dt, this.p.ncu.vientoMax, ang.sel, azSol);
+  /* el eje A necesita además de dónde VIENE el viento, que es lo que miden las HSU */
+  var rAb = this.ab.paso(dt, this.p.ncu.vientoMax, ang.sel, azSol, this.p.ncu.dirVientoMax);
   this.stow = rAb.estado;
 
   /* modos de batería (L1 baja · L2 muy baja · L3 crítica) con rearme: se entra al
@@ -842,6 +843,7 @@ function NCU(planta) {
   this.acFallo = false;                    /* corte de alterna en planta: solo lo notan los TCU tipo AC */
   this.gw1Alarma = false; this.gw2Alarma = false;
   this.nivelVientoGlobal = 0; this.vientoMax = 0;   /* m/s de la HSU que más sopla */
+  this.dirVientoMax = 180;                          /* y de dónde viene, para el eje A */
   this.alarmaViento = false; this.alarmaNieve = false;
   this.alarmaRacha = false; this.falloWs = false; this.falloSs = false;
   this.vientoInvertido = false;
@@ -859,20 +861,20 @@ NCU.prototype.fuerza = function (sp, grupo, on) {
 };
 NCU.prototype.paso = function () {
   /* la NCU se queda con el nivel MÁS ALTO de todas sus HSU y con el «o» de sus alarmas */
-  var n = 0, av = false, an = false, ar = false, fw = false, fs = false, este = false, vmax = 0;
+  var n = 0, av = false, an = false, ar = false, fw = false, fs = false, este = false, vmax = 0, dmax = 180;
   var H = this.p.hsus;
   for (var i = 0; i < H.length; i++) {
     var h = H[i];
     if (!h.online) { fw = true; fs = true; continue; }
     if (h.nivel > n) n = h.nivel;
     /* para decidir un abanderamiento, el peor dato es el que cuenta (CONTRATO.md) */
-    if (Math.max(h.viento, h.racha) > vmax) vmax = Math.max(h.viento, h.racha);
+    if (Math.max(h.viento, h.racha) > vmax) { vmax = Math.max(h.viento, h.racha); dmax = h.dir; }
     av = av || h.alarmaViento(); an = an || h.alarmaNieve(); ar = ar || h.alarmaRacha();
     fw = fw || h.falloVientoSensor; fs = fs || h.falloNieveSensor;
     /* dirección de viento del ESTE (45°–135°): el R7 lo republica como «inverted wind» */
     if (h.nivel > 0 && h.dir > 45 && h.dir < 135) este = true;
   }
-  this.nivelVientoGlobal = n; this.vientoMax = vmax;
+  this.nivelVientoGlobal = n; this.vientoMax = vmax; this.dirVientoMax = dmax;
   this.alarmaViento = av; this.alarmaNieve = an;
   this.alarmaRacha = ar; this.falloWs = fw; this.falloSs = fs; this.vientoInvertido = este;
 };
@@ -911,6 +913,7 @@ function Planta(cfg) {
     /* modelo de consumo del motor: 'factiun' (Wh/° medidos) o los mA medios de
        SUNNER a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
     motorModel: cfg.motorModel || 'factiun',
+    estrategiaViento: cfg.estrategiaViento || 'B2',   /* A1 · A2 · B1 · B2 */
     /* ESTRATEGIA de gestión de batería — los mismos parámetros y los mismos valores
        por defecto que el simulador de batería (estrategia oficial SUNNER) */
     estrategia: {
@@ -1298,6 +1301,7 @@ Planta.prototype.fechaSim = function () {
 var API = {
   Planta: Planta, TCU: TCU, HSU: HSU, NCU: NCU, Meteo: Meteo,
   PERFILES: PERFILES, perfilDe: perfilDe, TIPO_REG: TIPO_REG, FISICA: F,
+  Abanderamiento: Abanderamiento,
   K: K, MODO: MODO, MODO_TXT: MODO_TXT, SP: SP, SP_TXT: SP_TXT,
   CRIT: CRIT, CRIT_TXT: CRIT_TXT, FUENTE_SP: FUENTE_SP, FUENTE_TXT: FUENTE_TXT,
   CHARGER_TXT: CHARGER_TXT,

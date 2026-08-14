@@ -237,6 +237,11 @@
           <input type="range" id="racha" min="0" max="100" value="20"></div>
         <div class="fld"><label>Dirección <span class="rv" id="dirV">200° SO</span></label>
           <input type="range" id="dirViento" min="0" max="359" value="200"></div>
+        <div class="fld">
+          <label>Estrategia de abanderamiento</label>
+          <select id="estrViento"></select>
+          <div class="note" id="estrNota" style="margin-top:4px"></div>
+        </div>
         <div class="fld"><label>Nubes <span class="rv" id="nubesV">15 %</span></label>
           <input type="range" id="nubes" min="0" max="100" value="15"></div>
         <div class="fld"><label>Nieve acumulada <span class="rv" id="nieveV">0 cm</span></label>
@@ -391,6 +396,7 @@
 </div>
 
 <script src="sim/fisica.js"></script>
+<script src="sim/viento.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/planta.js"></script>
 <script>
@@ -409,6 +415,10 @@ var PLANTAS = [
 ];
 PLANTAS.forEach(function (p, i) { $('loc').add(new Option(p.n, String(i))); });
 SIM.PERFILES.forEach(function (p) { $('perfil').add(new Option(p.n, p.id)); });
+/* Las cuatro estrategias canónicas de wind_stow_strategies.py, igual que el selector
+   de Streamlit: dos ejes — cara al sol o cara al viento × uno o dos umbrales. */
+SIM.Abanderamiento.ESTRATEGIAS.forEach(function (e) { $('estrViento').add(new Option(e.n, e.id)); });
+$('estrViento').value = 'B2';
 $('perfil').value = SIM.FISICA.perfilPorDefecto;   /* el DEFAULT_PROFILE de tcu.py */
 var TIPO_TXT = { sp: 'panel propio', string: 'del string', ac: 'alterna' };
 var NOTA_TIPO = {
@@ -431,6 +441,7 @@ function construye() {
     grupos: +$('nGrup').value || 4,
     perfil: $('perfil').value,
     motorModel: $('motorModel').value === 'factiun' ? 'factiun' : +$('motorModel').value,
+    estrategiaViento: $('estrViento').value,
     estrategia: {
       activa: $('estrOn').checked, socCrit: +$('socCrit').value, winter: $('winter').checked,
       tMin: +$('tMin').value, poaMin: +$('poaMin').value,
@@ -443,7 +454,7 @@ function construye() {
     dia: +$('dia').value, hora: +$('hora').value,
     loc: { n: L.n, lat: L.lat, lon: L.lon, tz: L.tz, dst: L.dst }
   });
-  aplicaMeteo(); aplicaEstrategia();
+  aplicaMeteo(); aplicaEstrategia(); aplicaEstrategiaViento();
   P.ncu.acFallo = $('acFallo').checked;
   P.ncu.upsFallo = $('upsFallo').checked;
   var pf = SIM.perfilDe($('perfil').value);
@@ -489,6 +500,25 @@ function aplicaEstrategia(manual) {
     '<b>solargpt_core/tcu.py</b> (perfiles, motor medido y políticas), <b>tfm_constants.py</b> y el bloque ' +
     'canónico de <a href="bateria.html" style="color:var(--blue)">bateria.html</a> (C-rate, JEITA, calefactor, ' +
     'transposición). El generador se niega a escribir si las tres fuentes no dicen lo mismo.';
+}
+/* Cambiar de estrategia en caliente: se le pone una máquina nueva a cada TCU y se
+   deja constancia de cuál manda. La B2 es la de la casa (decisión EPC). */
+function aplicaEstrategiaViento() {
+  if (!P) return;
+  var id = $('estrViento').value, e = null, L = SIM.Abanderamiento.ESTRATEGIAS;
+  for (var i = 0; i < L.length; i++) if (L[i].id === id) e = L[i];
+  P.cfg.estrategiaViento = id;
+  P.tcus.forEach(function (t) { t.ab = new SIM.Abanderamiento({ estrategia: id }); });
+  var C = SIM.Abanderamiento.CANON;
+  $('estrNota').innerHTML =
+    (e.eje === 'sol' ? 'La bandera mira <b>al sol</b>' : 'La bandera mira <b>al viento</b> (de donde viene)') + '. ' +
+    (e.umbrales === 2
+      ? 'Dos umbrales: parcial a ' + Math.round(C.t1 * 3.6) + ' km/h dentro del sector [' +
+        C.parcialMin + '°, ' + C.total + '°], total a ' + Math.round(C.t2 * 3.6) + ' km/h, con ' +
+        C.holdMin + ' min de histéresis.'
+      : 'Un umbral: por encima de ' + Math.round(C.t1 * 3.6) + ' km/h, bandera completa a ±' +
+        C.total + '°. Sin sector parcial ni histéresis.') +
+    (e.canon ? ' <b>Es la de la casa</b> (decisión EPC).' : '');
 }
 function aplicaMeteo() {
   P.meteo.viento = +$('viento').value;
@@ -1106,6 +1136,7 @@ $('loc').onchange = construye;
 ['nTcu', 'nHsu', 'nRep'].forEach(function (id) { $(id).onchange = construye; });
 $('nGrup').onchange = construye;
 $('perfil').onchange = construye;
+$('estrViento').onchange = function () { aplicaEstrategiaViento(); toca(); };
 ['estrOn', 'socTgt', 'socCrit', 'fcDays', 'winter', 'tMin', 'poaMin', 'motorModel'].forEach(function (id) {
   var manual = id === 'socTgt' ? 'techo' : (id === 'fcDays' ? 'calib' : null);
   $(id).oninput = function () { aplicaEstrategia(manual); toca(); };

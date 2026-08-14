@@ -36,7 +36,16 @@ La estrategia **B2** canónica (`solargpt_core/wind_stow_strategies.py`, *«Defa
 | **40 km/h** | bandera **parcial**: el seguidor se queda dentro del **sector [30°, 55°]** del lado del sol. No es irse a 30°: si el seguimiento pide 42°, se queda en 42. Sigue produciendo, pero ya no da la cara plana |
 | **60 km/h** | bandera **total**: ±55° |
 | **30 min** | histéresis para desabanderar (`destow_hold_minutes`) |
-| **cara al sol** | eje B del canon; el eje A sería cara al viento, y no es el nuestro |
+| **cara al sol** | eje B del canon |
+
+Y están **las cuatro** del canon, elegibles en la interfaz igual que en el selector de Streamlit:
+
+| | 1 umbral · todo o nada | 2 umbrales · sector parcial + histéresis |
+|---|---|---|
+| **cara al SOL** | B1 | **B2** ← la de la casa (decisión EPC) |
+| **cara al VIENTO** | A1 | A2 |
+
+Con un umbral no hay sector parcial ni histéresis: por encima de 40 km/h, bandera completa, y suelta en cuanto baja. Cambiar de estrategia en el simulador es en caliente, sin rehacer la planta.
 
 Y una regla que **no está en el canon pero sí en el equipo**, aprendida de `terreno.html`: **el lado se fija al abanderar**. Si abandera de mañana mirando al este, se queda al este aunque el sol cruce el mediodía. Recalcularlo a media bandera manda al seguidor a cruzar 110° con el viento encima — justo lo que el abanderamiento existe para evitar. El simulador lo hacía mal hasta que se unificó.
 
@@ -164,7 +173,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `fisica.js` | **generado**, no se toca a mano: perfiles, constantes medidas, políticas y curvas de carga |
 | `viento.js` | **compartido con cobertura-zigbee**: la estrategia B2 de abanderamiento, una sola implementación |
 | `impacto.mjs` | informe de impacto de las divergencias entre los dos cálculos de batería |
-| `prueba.mjs` | prueba de humo: 120 comprobaciones sobre un día de planta |
+| `prueba.mjs` | prueba de humo: 129 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
 | `../tools/extrae_fisica.mjs` | regenera `fisica.js` desde SolarGPT y `bateria.html`, contrastando las fuentes |
