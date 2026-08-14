@@ -29,7 +29,16 @@ El viento manda sobre manual, que es como se comporta el equipo real.
 
 ### Abanderamiento — `viento.js`, compartido entre repos
 
-La estrategia **B2** canónica (`solargpt_core/wind_stow_strategies.py`, *«Defaults canónicos, decisión EPC del proyecto»*) no se implementa aquí: vive en **`sim/viento.js`**, el mismo fichero que usan el gemelo 3D (`index.html`) y el visor de terreno de `cobertura-zigbee`. Mismo criterio que `seguidor.js`: si se toca en un repo, se copia al otro.
+La estrategia **B2** canónica (`solargpt_core/wind_stow_strategies.py`, *«Defaults canónicos, decisión EPC del proyecto»*) no se implementa aquí: vive en **`sim/viento.js`**, y es el único sitio de la casa donde está escrita. La usan **cuatro** páginas:
+
+| | |
+|---|---|
+| `simulador.html` | la planta entera, con el selector de las cuatro estrategias |
+| `index.html` | el gemelo 3D de un seguidor |
+| `bateria.html` | el estudio de autonomía (paso horario) |
+| `cobertura-zigbee/terreno.html` | el visor 3D de planta, con su propio selector |
+
+Mismo criterio que `seguidor.js`: si se toca en un repo, se copia al otro.
 
 | | |
 |---|---|
@@ -45,7 +54,7 @@ Y están **las cuatro** del canon, elegibles en la interfaz igual que en el sele
 | **cara al SOL** | B1 | **B2** ← la de la casa (decisión EPC) |
 | **cara al VIENTO** | A1 | A2 |
 
-Con un umbral no hay sector parcial ni histéresis: por encima de 40 km/h, bandera completa, y suelta en cuanto baja. Cambiar de estrategia en el simulador es en caliente, sin rehacer la planta.
+Con un umbral no hay sector parcial ni histéresis: por encima de 40 km/h, bandera completa, y suelta en cuanto baja. Cambiar de estrategia es **en caliente**, sin rehacer la planta. En el eje A (cara al viento) hace falta saber de dónde **viene** el viento, así que el selector saca además el azimut meteorológico (0 N · 90 E · 180 S · 270 O); en el eje B lo esconde, porque no pinta nada.
 
 Y una regla que **no está en el canon pero sí en el equipo**, aprendida de `terreno.html`: **el lado se fija al abanderar**. Si abandera de mañana mirando al este, se queda al este aunque el sol cruce el mediodía. Recalcularlo a media bandera manda al seguidor a cruzar 110° con el viento encima — justo lo que el abanderamiento existe para evitar. El simulador lo hacía mal hasta que se unificó.
 
@@ -98,8 +107,13 @@ No es una copia del modelo canónico: **se lee de él**. `sim/fisica.js` lo gene
 | `SolarGPTfull/solargpt/solargpt_core/tcu.py` | los 8 perfiles de hardware, el motor medido (campaña *Consumos motor_02 @24V*) y las políticas de verano/invierno. El fichero se declara a sí mismo *single source of truth* |
 | `SolarGPTfull/solargpt/scripts/tfm_constants.py` | las constantes del TFM |
 | `bateria.html` | las curvas y umbrales de la estrategia, que solo existen en JS: C-rate, JEITA, calefactor, transposición isotrópica, abanderamiento |
+| `SolarGPTfull/solargpt/solargpt_core/tcu_compare.py` | no aporta nada a `fisica.js` —el simulador no lo usa— pero **se coteja**: es el motor con el que SolarGPT compara variantes, y sus *defaults* tienen que decir lo mismo |
 
-Lo que hace que valga la pena no es copiar sin manos: es que **contrasta lo que aparece en más de una fuente y se niega a generar si divergen** (K0, K1, pico de motor, idle, tensión nominal, capacidad). Que es exactamente el bug que cuenta la cabecera de `tfm_constants.py`: `cap_Wh` copiado en cuatro scripts y arreglado solo en uno.
+Lo que hace que valga la pena no es copiar sin manos: es que **contrasta lo que aparece en más de una fuente y se niega a generar si divergen** (K0, K1, pico de motor, idle, sleep, tensión nominal, capacidad). Que es exactamente el bug que cuenta la cabecera de `tfm_constants.py`: `cap_Wh` copiado en cuatro scripts y arreglado solo en uno.
+
+La cuarta fuente entró por un caso real: `tcu_compare.py` llevaba `p_sleep = 0,45 W` mientras `tcu.py` decía 0,64, y el generador no lo veía porque solo contrastaba `tcu.py` contra `bateria.html`. **Un divergente escondido en la fuente que nadie coteja son ~2 puntos de SOC.**
+
+Hay una segunda categoría, los **avisos**: divergencias reales que no bloquean la generación porque la decisión no es del generador. Hoy solo hay una — la velocidad del actuador, **0,17 °/s** medidos en campo (gemelo, terreno, `bateria.html`) contra el **0,16** que trae por defecto el port del cuaderno. No es cosmético: el motor gasta `P(θ)·Δθ/v`, o sea un **6,3 % más de Wh** con el valor lento.
 
 ```bash
 node tools/extrae_fisica.mjs   # tras tocar la gestión de batería en SolarGPT

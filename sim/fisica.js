@@ -51,7 +51,7 @@ var FISICA = {
   "WIND_T1": 11.111,
   "WIND_T2": 16.667,
   "PARTIAL_STOW_DEG": 30,
-  "DESTOW_HOLD_H": 1,
+  "DESTOW_HOLD_H": 0.5,
   "ETA_CHG": 0.9,
   "V_NOM": 25.6,
   "DESTOW_HOLD_MIN": 30,

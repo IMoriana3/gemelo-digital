@@ -184,6 +184,7 @@
 </div>
 </div>
 
+<script src="sim/viento.js"></script><!-- abanderamiento: el MISMO módulo que el simulador de planta y terreno.html -->
 <script>
 'use strict';
 var $=function(id){return document.getElementById(id)};
@@ -219,9 +220,12 @@ var PROFILES=[
 
 /* ═══════════ Tracker (constantes del estudio SUNNER + gemelo) ═══════════ */
 var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
-/* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies):
-   parcial ≥40 km/h (±30° mín), full ≥60 km/h (±55°), histéresis destow ~30 min (1 h aquí),
-   signo hacia el sol (az<0 este → θ negativo) */
+/* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies): parcial
+   ≥40 km/h (sector [30°,55°]), full ≥60 km/h (±55°), histéresis de desabanderamiento de
+   30 min, bandera hacia el lado del sol. La MÁQUINA está en sim/viento.js (compartida con
+   el simulador de planta y con terreno.html); aquí solo viven sus umbrales, que es lo que
+   coteja el generador de física. Con paso horario los 0,5 h de histéresis se redondean a
+   uno: un paso más de bandera, que es lo que hacía la versión anterior. */
 var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=0.5;
 /* Calefactor -LT (PS26002_RevA): P = 1,0 + 0,15·|T| W si T<0°C, solo de día; desbloquea carga (T efectiva ≥1°C) */
 function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
@@ -379,8 +383,17 @@ function simulate(meteo,prof,loc,soc0,opts){
   var latR=loc.lat*D2R, capWh=prof.wh, n=meteo.length;
   var dtH=n>1?((+meteo[1].t)-(+meteo[0].t))/36e5:1;      /* paso en horas (uniforme) */
   var t0Day=Math.floor((+meteo[0].t)/864e5);
-  var soc=soc0, parked=false, prevPos=null, stow=0, stowHold=0;
-  var holdSteps=Math.max(1,Math.round(DESTOW_HOLD_H/dtH));
+  var soc=soc0, parked=false, prevPos=null, stow=0;
+  /* El abanderamiento lo lleva el módulo compartido (sim/viento.js), el mismo que usan
+     el simulador de planta y terreno.html: una sola implementación para toda la casa.
+     Se le pasan los umbrales de AQUÍ (que el generador de física cotejo contra el canon)
+     y la histéresis en minutos. Lo que aporta de nuevo respecto a la copia que había:
+     el LADO SE FIJA AL ABANDERAR. Antes se recalculaba cada paso del signo del azimut,
+     así que un día de viento que cruzara el mediodía mandaba al seguidor de +55° a −55°
+     —110° de viaje con viento fuerte, justo lo que un abanderamiento existe para evitar—
+     y esos grados se contabilizaban además como consumo de motor. */
+  var AB=new Abanderamiento({t1:WIND_T1,t2:WIND_T2,parcialMin:PARTIAL_STOW_DEG,
+                             total:AXIS_MAX,holdMin:DESTOW_HOLD_H*60});
   var rows=[];
   for(var h=0;h<n;h++){
     var m=meteo[h];
@@ -396,20 +409,15 @@ function simulate(meteo,prof,loc,soc0,opts){
       else if(parked && soc>=opts.socCrit/100+0.02) parked=false;   /* rearme +2% anti-rebote */
     }
 
-    /* — Abanderamiento por viento (B2): parcial ≥40 km/h, full ≥60 km/h, destow hold — */
-    if(m.wind>=WIND_T2){stow=2;stowHold=holdSteps;}
-    else if(m.wind>=WIND_T1){stow=Math.max(stow,1);stowHold=holdSteps;}
-    else if(stowHold>0){stowHold--;}
-    else stow=0;
-
     /* — Posición: abanderamiento > defensa por batería > seguimiento (PhiAng real si hay CSV) — */
     var trackPos=(m.phi!=null)?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,m.phi)):trackAngleFrom(sun.el,sun.az);
-    var target;
-    if(stow>0){
-      var sSign=(sun.az<0)?-1:1;                     /* cara al sol: este por la mañana */
-      target=sSign*(stow===2?AXIS_MAX:Math.max(PARTIAL_STOW_DEG,Math.abs(trackPos)));
-      target=Math.max(-AXIS_MAX,Math.min(AXIS_MAX,target));
-    }else target=parked?DEFENSE_POS:trackPos;
+    /* — Abanderamiento por viento (B2 canónica), en el módulo compartido —
+       sun.az viene en radianes con 0 = sur y negativo = este; el módulo quiere el
+       azimut absoluto 0-360 (0 N · 90 E · 180 S · 270 O) */
+    var ab=AB.paso(dtH*3600,m.wind,trackPos,180+sun.az/D2R);
+    stow=ab.estado;
+    var target=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo))
+                     :(parked?DEFENSE_POS:trackPos);
     if(prevPos==null)prevPos=target;
     /* histéresis del lazo: en seguimiento solo corrige si el error ≥ 2,5° (estudio SUNNER) */
     var moveNow=(stow>0||parked)?Math.abs(target-prevPos)>0.01

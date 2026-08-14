@@ -28,6 +28,7 @@ const RAIZ = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SGPT = process.argv[2] || path.join(RAIZ, '..', 'SolarGPTfull');
 const TCU_PY = path.join(SGPT, 'solargpt', 'solargpt_core', 'tcu.py');
 const TFM_PY = path.join(SGPT, 'solargpt', 'scripts', 'tfm_constants.py');
+const CMP_PY = path.join(SGPT, 'solargpt', 'solargpt_core', 'tcu_compare.py');
 const BATERIA = path.join(RAIZ, 'bateria.html');
 const SALIDA = path.join(RAIZ, 'sim', 'fisica.js');
 
@@ -204,7 +205,8 @@ const estrategia = {
 const funciones = ['cRateSafeLFP', 'hotDerate', 'heaterW', 'poaAt'].map(jsFuncion);
 
 /* ---------- contraste entre fuentes ---------- */
-const choques = [];
+const choques = [];   /* divergencias que impiden generar */
+const avisos = [];    /* divergencias conocidas, pendientes de decisión: se cantan, no bloquean */
 function cotejar(que, a, fa, b, fb) {
   if (Math.abs(a - b) > 1e-9) choques.push('  ' + que + ':  ' + fa + ' = ' + a + '   ≠   ' + fb + ' = ' + b);
 }
@@ -222,6 +224,44 @@ if (!canon.perfiles.some(p => Math.abs(p.wh - canon.capWhTfm) < 1e-9)) {
 }
 /* el 3 °/h del winter mode y su techo tienen que ser los canónicos */
 cotejar('techo de verano', canon.verano.socMax, 'tcu.py', 80, 'valor documentado en el README del gemelo');
+
+/* ---------- cuarta fuente: tcu_compare.py ----------
+   El port del cuaderno (§04.1d) calcula la batería por su cuenta y con sus propios
+   valores por defecto. No entra en fisica.js —el simulador no lo usa— pero SÍ tiene
+   que decir lo mismo en lo que comparte, porque es el motor con el que se comparan
+   variantes en SolarGPT. Aquí se le cotejan sus defaults contra tcu.py.
+
+   Esto existe por un caso real: tcu_compare.py llevaba p_sleep = 0,45 W mientras
+   tcu.py decía 0,64. El generador no lo vio porque solo contrastaba tcu.py contra
+   bateria.html. Un divergente escondido en la cuarta fuente son ~2 puntos de SOC. */
+function pyKw(src, nombre, dflt) {              /* p_idle = float(C.get("p_idle", 0.64)) */
+  const m = src.match(new RegExp('"' + nombre + '"\\s*,\\s*([-\\d.]+)\\s*\\)'));
+  if (m) return parseFloat(m[1]);
+  const m2 = src.match(new RegExp('^\\s*' + nombre + '\\s*=\\s*([-\\d.]+)', 'm'));
+  if (m2) return parseFloat(m2[1]);
+  if (dflt !== undefined) return dflt;
+  throw new Error('no encuentro ' + nombre + ' en tcu_compare.py');
+}
+if (fs.existsSync(CMP_PY)) {
+  const cmp = fs.readFileSync(CMP_PY, 'utf8');
+  cotejar('K0 del motor', canon.motorK0, 'tcu.py', pyKw(cmp, 'motor_k0'), 'tcu_compare.py');
+  cotejar('K1 del motor', canon.motorK1, 'tcu.py', pyKw(cmp, 'motor_k1'), 'tcu_compare.py');
+  cotejar('consumo idle', canon.idleW, 'tcu.py', pyKw(cmp, 'p_idle'), 'tcu_compare.py');
+  cotejar('consumo sleep', canon.sleepW, 'tcu.py', pyKw(cmp, 'p_sleep'), 'tcu_compare.py');
+  /* La velocidad del actuador SÍ diverge: 0,17 °/s medido en campo (y usado por el
+     gemelo, terreno.html y bateria.html) contra el 0,16 que trae por defecto el port
+     del cuaderno. No es cosmético —el motor gasta P(θ)·Δθ/v, o sea un 6 % más de Wh
+     con el valor lento—, pero tampoco es un despiste evidente como lo era el sleep:
+     es una decisión de Ignacio, no mía. Se avisa a voces y no se bloquea. */
+  const vCmp = pyKw(cmp, 'vmax');
+  if (Math.abs(vCmp - estrategia.SLEW_DPS) > 1e-9) {
+    avisos.push('  velocidad del actuador:  bateria.html/gemelo = ' + estrategia.SLEW_DPS +
+                ' °/s   ≠   tcu_compare.py = ' + vCmp + ' °/s' +
+                '   (el lento gasta un ' + ((estrategia.SLEW_DPS / vCmp - 1) * 100).toFixed(1) + ' % más de motor)');
+  }
+} else {
+  avisos.push('  no encuentro tcu_compare.py: la cuarta fuente se queda sin cotejar');
+}
 
 if (choques.length) {
   console.error('\n✗ LAS FUENTES NO DICEN LO MISMO — no se genera nada:\n' + choques.join('\n'));
@@ -307,4 +347,7 @@ console.log('  visib ' + Object.keys(canon.visibilidad).map(function (k) {
   var v = canon.visibilidad[k];
   return k + ': ' + Object.keys(v).filter(function (x) { return v[x]; }).map(function (x) { return x.replace('show_', ''); }).join('+');
 }).join('   ·   '));
-console.log('  ✓ tcu.py, tfm_constants.py y bateria.html dicen lo mismo en todo lo que comparten');
+console.log('  ✓ tcu.py, tfm_constants.py, bateria.html y tcu_compare.py dicen lo mismo en todo lo que comparten');
+if (avisos.length) {
+  console.log('\n  ⚠ salvo en esto, que sigue divergiendo y hay que decidir:\n' + avisos.join('\n'));
+}
