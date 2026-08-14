@@ -111,6 +111,14 @@
   </div>
   <div class="grp"><h3>Perfil TCU (00.2t)</h3>
     <div class="fld"><select id="prof"></select></div>
+    <div class="fld"><label>Montaje del panel / fuente de carga</label>
+      <select id="mount">
+        <option value="trk">Solidario al seguidor (plano del generador)</option>
+        <option value="fix">Fijo orientado al ecuador</option>
+      </select></div>
+    <div class="fld" id="tiltFld" style="display:none"><label>Inclinación del panel fijo <span class="rv" id="tiltV">30°</span></label>
+      <input type="range" id="tilt" min="0" max="60" step="5" value="30">
+      <div class="note">Un panel fijo capta ~10 % menos al año pero ~14 % más en invierno y en los días críticos, que es cuando decide la disponibilidad.</div></div>
     <div class="fld"><label>Modelo de consumo del motor</label>
       <select id="motor">
         <option value="curva">Factiun · curva I(|θ|) medida — TCU 33 @24 V</option>
@@ -119,8 +127,9 @@
         <option value="3250">SUNNER · 3250 mA medio @25,6 V</option>
         <option value="4000">SUNNER · 4000 mA medio @25,6 V</option>
       </select></div>
-    <div class="fld"><label>Irradiancia mínima de carga <span class="rv" id="poaMinV">50 W/m²</span></label>
-      <input type="range" id="poaMin" min="0" max="200" step="10" value="50"></div>
+    <div class="fld"><label>Umbral duro de carga <span class="rv" id="poaMinV">0 W/m²</span></label>
+      <input type="range" id="poaMin" min="0" max="200" step="10" value="0">
+      <div class="note">0 = sólo la curva del regulador η(G) de PS26002_RevA, que ya arranca despacio con poca luz.</div></div>
     <div class="note" id="profNote"></div>
   </div>
   <div class="grp"><h3>Meteorología · periodo</h3>
@@ -282,6 +291,20 @@ function poaAt(Rdeg,el,az,bh,dh,gh){
   return Math.max(0,bh)*rb + Math.max(0,dh)*(1+cb)/2 + ALBEDO*Math.max(0,gh)*(1-cb)/2;
 }
 
+/* ═══════════ Rendimiento del regulador de carga η(G) — PS26002_RevA ═══════════
+   η = 0,96·(1 − e^(−G/100)) con η(0)=0, interpolada sobre los puntos digitalizados.
+   Sustituye al rendimiento plano del 0,90 y al umbral duro de arranque: el propio
+   regulador arranca despacio con irradiancia baja (η≈0,38 a 50 W/m², 0,61 a 100)
+   y llega al 0,96 con sol pleno. */
+var ETA_G=[0,50,100,200,350,500,600,750,850,1000,1100,1350];
+var ETA_V=ETA_G.map(function(g){return 0.96*(1-Math.exp(-g/100))}); ETA_V[0]=0;
+function etaCharger(G){
+  var g=Math.abs(G||0); if(g<=0)return 0;
+  if(g>=ETA_G[ETA_G.length-1])return ETA_V[ETA_V.length-1];
+  var i=0; while(i<ETA_G.length-2 && ETA_G[i+1]<g) i++;
+  return ETA_V[i]+(ETA_V[i+1]-ETA_V[i])*((g-ETA_G[i])/(ETA_G[i+1]-ETA_G[i]));
+}
+
 /* ═══════════ Curva de carga CC/CV — BatteryModel v2 canónico (notebook 11.0) ═══════════
    La corriente admisible cae en SOC altos (fase CV): sin esto la batería sube en línea
    recta hasta el 100 %, que es la crítica clásica a los modelos de balance simple.
@@ -294,7 +317,21 @@ function socDerateCharge(soc){
 }
 /* η de carga según C-rate real: η = η_nom − 0,06·(C − 0,5), saturada (Plett 2015, Smith 2017) */
 function etaAtCrate(etaNom,cRate){
-  return Math.max(0.80,Math.min(0.995,etaNom-0.06*(cRate-0.5)));
+  /* corrección aditiva sobre el rendimiento nominal del regulador; el suelo del 0,80
+     que había aquí borraba la caída a irradiancia baja de la curva η(G) */
+  return Math.max(0,Math.min(0.995,etaNom-0.06*(cRate-0.5)));
+}
+
+/* POA sobre un plano FIJO orientado al ecuador con inclinación beta (mismo modelo isotrópico).
+   El panel dedicado de las TCU SP puede ir solidario a la estructura o fijo sobre poste: la
+   diferencia es pequeña en el año (−10 %) pero grande en invierno (+14 %), y el invierno es
+   el que fija la disponibilidad. */
+function poaFixed(beta,el,az,bh,dh,gh,lat){
+  if(el<=0)return 0;
+  var b=beta*D2R, s=(lat<0)?-1:1;
+  var cosAOI=Math.max(0,Math.sin(el)*Math.cos(b)+Math.cos(el)*Math.cos(az)*Math.sin(b)*s);
+  return Math.max(0,bh)*(cosAOI/Math.max(Math.sin(el),0.087))
+       + Math.max(0,dh)*(1+Math.cos(b))/2 + ALBEDO*Math.max(0,gh)*(1-Math.cos(b))/2;
 }
 
 /* ═══════════ C-rate seguro LiFePO4 según temperatura (11.5b) ═══════════ */
@@ -494,7 +531,8 @@ function simulate(meteo,prof,loc,soc0,opts){
 
     /* — Carga: POA de la posición REAL (abanderado/defensa reduce), JEITA frío+calor, techo — */
     var poaChg;
-    if(target===trackPos && m.poa!=null) poaChg=m.poa;
+    if(opts.mountTilt!=null) poaChg=poaFixed(opts.mountTilt,sun.el,sun.az,bh,m.dhi,m.ghi,loc.lat);
+    else if(target===trackPos && m.poa!=null) poaChg=m.poa;
     else if(sun.el>0 && m.dhi>0) poaChg=poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi);
     else poaChg=(m.poa!=null)?m.poa:m.ghi;
     var chgWh=0, cRateNow=0;
@@ -504,7 +542,7 @@ function simulate(meteo,prof,loc,soc0,opts){
       var pMax=cRateSafeLFP(tEff)*hotDerate(tEff)*capWh*socDerateCharge(soc);
       chgP=Math.min(chgP,pMax);
       cRateNow=capWh>0?chgP/capWh:0;
-      chgWh=chgP*etaAtCrate(ETA_CHG,cRateNow)*dtH;                  /* Wh que entran de verdad */
+      chgWh=chgP*etaAtCrate(etaCharger(poaChg),cRateNow)*dtH;       /* Wh que entran de verdad */
     }
     /* Carga completa (calibración del SoC): toca cada fcDays días DESDE LA ÚLTIMA LOGRADA.
        Si el día no da para llegar al 100 %, la ventana sigue abierta y se reintenta al día
@@ -830,15 +868,16 @@ $('prof').value=1;   /* SP_45W_6Ah por defecto */
 (function(){var y=new Date().getFullYear();
   $('year').add(new Option('🏆 Peor año — barrido histórico','worst'));
   for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
+$('mount').onchange=function(){$('tiltFld').style.display=this.value==='fix'?'':'none'};
 $('year').onchange=function(){$('sweepFld').style.display=this.value==='worst'?'':'none'};
 $('year').onchange();      /* estado inicial coherente con la opción seleccionada */
 function profNote(){
   var P=PROFILES[$('prof').value];
   $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · calefactor '+(P.heated?'<b>sí (LT)</b> — carga bajo 0 °C':'no')+
-    ' · motor 36 W a 0° … 67,2 W a 55° (curva medida)';
+    ' · motor 36 W a 0° … 67,2 W a 55° · regulador η(G) PS26002_RevA';
 }
 profNote();$('prof').onchange=profNote;
-[['poaMin','poaMinV',' W/m²'],['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
+[['tilt','tiltV','°'],['poaMin','poaMinV',' W/m²'],['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
  ['socCrit','socCritV','%'],['fc','fcV',''],['doy','doyV',''],['sdays','sdaysV','']].forEach(function(a){
   $(a[0]).oninput=function(){$(a[1]).textContent=this.value+a[2]};
 });
@@ -903,9 +942,11 @@ $('run').onclick=function(){
   var mm=$('motor').value; mm=(mm==='factiun'||mm==='curva')?mm:+mm;
   var opts={motorModel:mm, winter:$('winter').checked, strategy:true,
             socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
-            fcDays:+$('fc').value, tMin:+$('tmin').value, poaMin:+$('poaMin').value};
+            fcDays:+$('fc').value, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
+            mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
   var refOpts={motorModel:mm, winter:false, strategy:false,
-            socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value, poaMin:+$('poaMin').value};
+            socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
+            mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
   var soc0=+$('soc0').value/100;
   var job;
   if($('src').value==='archive' && $('year').value==='worst'){
@@ -1144,7 +1185,9 @@ function buildReport(){
      ['Modelo de consumo de motor',{v:motorTxt}],
      ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55°'}],
      ['Tª mínima de carga',{v:opts.tMin+' °C'}],
-     ['Irradiancia mínima de carga',{v:opts.poaMin+' W/m²'}],
+     ['Umbral duro de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
+     ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA'}],
+     ['Montaje de la fuente de carga',{v:opts.mountTilt!=null?('panel fijo a '+opts.mountTilt+'° orientado al ecuador'):'solidario al seguidor (plano del generador)'}],
      ['Curva de carga',{v:'CC/CV — derate ×0,8 sobre 85 % SOC, ×0,5 sobre 90 %, ×0,2 sobre 95 %'}]
     ],['Parámetro','Valor']);
 
