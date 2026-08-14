@@ -51,6 +51,13 @@
   .sw span{font-size:13px;color:var(--tx)}
   .sw small{display:block;font-size:11px;color:var(--tx3)}
   .btn{width:100%;padding:10px;background:var(--accent);color:#06281c;border:0;border-radius:10px;font:600 14px var(--sans);cursor:pointer}
+  .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line2);font-size:13px;padding:8px}
+  .pgrp{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:10px 0 5px;padding-top:7px;border-top:1px solid var(--line)}
+  .pgrp:first-child{margin-top:2px;padding-top:0;border-top:0}
+  .pfld .pu{color:var(--muted);font-family:var(--mono);font-size:10.5px}
+  .pfld .pcanon{color:var(--muted);font-size:10.5px;white-space:nowrap}
+  .pfld.tocado input{border-color:#e0a52b;color:#e0a52b}
+  .pfld.tocado .pcanon{color:#e0a52b}
   .btn:hover{filter:brightness(1.08)}
   .btn[disabled]{opacity:.5;cursor:wait}
   .note{font-size:11px;color:var(--tx3);line-height:1.45;margin-top:10px}
@@ -165,6 +172,12 @@
       <input type="number" id="tmin" value="0" step="1"></div>
     <label class="sw"><input type="checkbox" id="winter">
       <span>Winter mode<small>Correcciones gruesas 3°/h · política canónica: objetivo 90 % y carga completa cada 3 días · calefactor auto en LT</small></span></label>
+  </div>
+  <div class="grp"><h3>Parámetros físicos · el canon es el defecto</h3>
+    <div class="note" style="margin-top:0">Los valores medidos y canónicos con los que calcula el simulador. Se pueden apartar para probar, y lo apartado sale en ámbar con su valor original. <b>El canon manda cuando no lo tocas, no siempre.</b></div>
+    <div id="paramsBox"></div>
+    <button class="btn sec" id="btnCanon" style="margin-top:8px">↩︎ Volver al canon</button>
+    <div class="note" id="paramsNota"></div>
   </div>
   <button class="btn" id="run">▶ Simular</button>
   <div class="note">
@@ -754,6 +767,86 @@ function applyStep(meteo){
   if(dtMin<=stepMin)return meteo;                 /* los datos ya son más finos */
   return resample(meteo,stepMin);
 }
+
+/* ═══════════ Parámetros físicos: el canon es el defecto, no el dogma ═══════════
+   Las constantes de arriba son valores POR DEFECTO. Se pueden apartar desde el panel
+   para ver qué pasa, y se vuelve con un botón. Lo apartado se marca y se avisa: en
+   cuanto se toca algo, el resultado deja de ser comparable con SolarGPT.
+
+   Se leen y escriben por `window`, que es donde viven al declararse con `var` en el
+   ámbito del script — así el catálogo es UNA tabla y no hay que escribir un getter y
+   un setter por constante. Las declaraciones literales de arriba no se tocan nunca:
+   son las que lee tools/extrae_fisica.mjs para cotejarlas contra el canon de SolarGPT. */
+var PARAMS_FIS=[
+ {k:'AXIS_MAX',        n:'Tope mecánico del eje',        u:'°',     d:1, g:'Geometría y movimiento'},
+ {k:'NIGHT_POS',       n:'Posición nocturna',            u:'°',     d:1, g:'Geometría y movimiento'},
+ {k:'DEFENSE_POS',     n:'Defensa por batería',          u:'°',     d:1, g:'Geometría y movimiento'},
+ {k:'SLEW_DPS',        n:'Velocidad del actuador',       u:'°/s',   d:3, g:'Geometría y movimiento'},
+ {k:'HYST_DEG',        n:'Histéresis del lazo',          u:'°',     d:2, g:'Geometría y movimiento'},
+ {k:'DEG_H_NORMAL',    n:'Ritmo de seguimiento',         u:'°/h',   d:1, g:'Geometría y movimiento'},
+ {k:'DEG_H_WINTER',    n:'Ritmo en modo invierno',       u:'°/h',   d:1, g:'Geometría y movimiento'},
+ {k:'WIND_T1',         n:'Umbral parcial',               u:'m/s',   d:3, g:'Abanderamiento'},
+ {k:'WIND_T2',         n:'Umbral total',                 u:'m/s',   d:3, g:'Abanderamiento'},
+ {k:'PARTIAL_STOW_DEG',n:'Mínimo del sector parcial',    u:'°',     d:1, g:'Abanderamiento'},
+ {k:'DESTOW_HOLD_H',   n:'Histéresis de desabanderar',   u:'h',     d:2, g:'Abanderamiento'},
+ {k:'IDLE_W',          n:'Electrónica (día)',            u:'W',     d:2, g:'Energía'},
+ {k:'SLEEP_W',         n:'Reposo (noche)',               u:'W',     d:2, g:'Energía'},
+ {k:'K0',              n:'Motor · K0',                   u:'Wh/°',  d:4, g:'Energía'},
+ {k:'K1',              n:'Motor · K1',                   u:'Wh/°²', d:6, g:'Energía'},
+ {k:'MOTOR_PEAK_W',    n:'Pico de motor',                u:'W',     d:1, g:'Energía'},
+ {k:'ETA_CHG',         n:'Rendimiento de carga',         u:'',      d:3, g:'Energía'},
+ {k:'V_NOM',           n:'Tensión nominal del bus',      u:'V',     d:2, g:'Energía'},
+ {k:'ALBEDO',          n:'Albedo del suelo',             u:'',      d:2, g:'Energía'},
+ {k:'JEITA_T3',        n:'JEITA T3 (reduce carga)',      u:'°C',    d:1, g:'Batería'},
+ {k:'JEITA_T4',        n:'JEITA T4 (bloquea carga)',     u:'°C',    d:1, g:'Batería'}
+];
+var CANON_FIS={};
+PARAMS_FIS.forEach(function(p){
+  if(typeof window[p.k]!=='number') throw new Error('el parámetro '+p.k+' no existe o no es un número');
+  CANON_FIS[p.k]=window[p.k];
+});
+function tocadosFis(){var t={};PARAMS_FIS.forEach(function(p){
+  if(window[p.k]!==CANON_FIS[p.k])t[p.k]={canon:CANON_FIS[p.k],ahora:window[p.k]};});return t;}
+function fmtFis(v,d){return (d?v.toFixed(d):String(Math.round(v))).replace('.',',');}
+function pintaParams(){
+  var caja=$('paramsBox');
+  if(!caja.dataset.hecho){
+    var html='',grupo=null;
+    PARAMS_FIS.forEach(function(p){
+      if(p.g!==grupo){grupo=p.g;html+='<div class="pgrp">'+grupo+'</div>';}
+      /* type=text, no number: el campo se escribe con COMA como el resto de la casa y
+         un input numérico la rechaza dejando el valor vacío */
+      html+='<div class="fld pfld"><label><span>'+p.n+(p.u?' <span class="pu">'+p.u+'</span>':'')+
+            '</span><span class="rv pcanon" id="pc_'+p.k+'"></span></label>'+
+            '<input type="text" inputmode="decimal" id="p_'+p.k+'"></div>';
+    });
+    caja.innerHTML=html;
+    PARAMS_FIS.forEach(function(p){
+      $('p_'+p.k).onchange=function(){
+        var v=parseFloat(String(this.value).replace(',','.'));
+        if(isFinite(v))window[p.k]=v;
+        pintaParams();
+      };
+    });
+    caja.dataset.hecho='1';
+  }
+  var t=tocadosFis(),n=0;
+  PARAMS_FIS.forEach(function(p){
+    var inp=$('p_'+p.k),et=$('pc_'+p.k),fld=inp.parentNode;
+    if(document.activeElement!==inp)inp.value=fmtFis(window[p.k],p.d);
+    if(t[p.k]){n++;fld.classList.add('tocado');et.textContent='canon '+fmtFis(t[p.k].canon,p.d);}
+    else{fld.classList.remove('tocado');et.textContent='canon';}
+  });
+  $('paramsNota').innerHTML=n
+    ? '<b>'+n+'</b> '+(n===1?'parámetro apartado':'parámetros apartados')+' del canon. Vuelve a <b>▶ Simular</b> para verlo, y ten presente que estos números ya <b>no</b> son comparables con SolarGPT.'
+    : 'Todo en su valor canónico, generado de SolarGPT (<code>tcu.py</code>, <code>tracker.py</code>) y cotejado por <code>tools/extrae_fisica.mjs</code>.';
+}
+$('btnCanon').onclick=function(){
+  PARAMS_FIS.forEach(function(p){window[p.k]=CANON_FIS[p.k];});
+  pintaParams();
+};
+pintaParams();
+
 $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
   var loc=getLoc(), prof=PROFILES[$('prof').value];

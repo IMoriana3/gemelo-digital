@@ -140,6 +140,8 @@ El panel de la interfaz **no lleva escrito ni un control**: se pinta de `SIM.PAR
 
 Lo que se aparta del canon se marca en ámbar con su valor original al lado, se guarda en el navegador y se avisa: **los números que salgan de ahí ya no son comparables con SolarGPT**. Los controles que dependen de un parámetro lo siguen (el tope de eje manda en la consigna manual; los umbrales, en la nota del abanderamiento).
 
+`bateria.html` lleva el mismo panel con sus 21 constantes. Ahí las declaraciones literales **no** se tocan nunca —son las que lee el generador para cotejarlas— así que el panel escribe sobre las variables ya cargadas, y el canon del fichero sigue siendo el del fichero.
+
 Del lado de Python la regla es la misma y ya estaba: `run_tcu_sim` toma **todo** de `df_meta`/`config` y solo cae al canónico cuando no se lo configuras. Guard: `tests/test_tcu_compare_defaults_canonical.py` — comprueba las dos mitades, que el default apunte al canon **y** que el override siga existiendo.
 
 ```bash
