@@ -90,7 +90,7 @@ El mismo seguidor se comporta de forma muy distinta según su alimentación, y e
 | Tipo | Qué es | Lo que cambia |
 |---|---|---|
 | **SELF / SP** | panel auxiliar propio de 45 o 60 W, montado en el seguidor | lo que entra depende del **ángulo real**: abanderar o quedarse parado también cuesta carga. Es el caso duro |
-| **STRING** | del propio string de la planta, a **1500 V** de continua, por un convertidor de 60 W | con sol hay potencia de sobra: el convertidor satura en su tope y quien limita la carga pasa a ser la temperatura y el C-rate, no la fuente |
+| **STRING** | del propio string de la planta, por un convertidor **1500 / 48 V** limitado a ~57,6 W (48 V × 1,2 A) | en cuanto amanece la fuente satura en su tope, y **ese tope es el que manda** en operación normal |
 | **AC** | de alterna (`AC_grid`) | en el canon va **sin batería**: mientras haya red va servido, y un corte tumba el TCU entero |
 
 Y no cambia solo de dónde viene la corriente: cambia **qué tiene sentido mirar**. `tcu.py` trae una regla marcada como *auditada* que el simulador lee y respeta (`ui_visibility_for_source`):
@@ -102,6 +102,20 @@ Y no cambia solo de dónde viene la corriente: cambia **qué tiene sentido mirar
 | AC | **no** | **no** | **no** | **no** |
 
 Por eso, con un perfil de alterna, la interfaz deja de enseñar SoC y batería: no es que valgan cero, es que no hay batería que gestionar.
+
+**Quién limita la carga, y cuándo.** Lo que entra de verdad en la batería es el **mínimo de tres**: el tope de la fuente, lo que admite la batería por C-rate a su temperatura, y lo que deja JEITA por el lado caliente. En operación normal manda el **tope de la fuente** (54 W efectivos tras η, contra los 154 W que admitiría una batería de 6 Ah a 25 °C); el C-rate solo se pone por delante **en frío**:
+
+| Perfil | Tope de fuente tras η | Admisión a 25 °C | El C-rate manda por debajo de |
+|---|---|---|---|
+| SP 45 W · 6 Ah | 40,5 W | 154 W | 2,2 °C |
+| SP 60 W · 6 Ah | 54,0 W | 154 W | 5,1 °C |
+| STRING 60 W · 6 Ah | 54,0 W | 154 W | 5,1 °C |
+| SP 45 W · 3 Ah | 40,5 W | 77 W | 10,9 °C |
+| STRING 60 W · 3 Ah | 54,0 W | 77 W | 16,1 °C |
+
+Las de 3 Ah pasan la mitad del invierno limitadas por la batería, no por el sol — que es de lo que va el estudio de disponibilidad.
+
+> **Pendiente de confirmar en campo.** El convertidor de string está en el canon como **60 W** y el valor de planta que manejamos es **57,6 W**: un 4 % de diferencia que conviene cerrar en `tcu.py`, que es de donde lo lee todo lo demás. Y si su salida son 48 V hay una etapa más antes del bus interno, porque las alarmas del propio mapa vigilan la ventana de **22 a 33 V** en bus y motor (30005 bits 0–3).
 
 ### Estrategia oficial SUNNER
 
