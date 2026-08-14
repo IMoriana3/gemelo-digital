@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0F14">
+<link rel="icon" href="favicon.svg">
+<title>Simulador de planta TCU — Gemelo total</title>
+<!--
+  GEMELO TOTAL — la planta entera simulada equipo a equipo, con su mapa Modbus en vivo.
+
+  · La física y la jerarquía de control viven en sim/planta.js (sin DOM: se prueba
+    con `node sim/prueba.mjs`).
+  · El mapa de registros es el canónico, generado de la ficha de cobertura-zigbee
+    (NCU R7 · TCU v6 · HSU R23) por tools/extrae_mapa.mjs.
+  Esta página solo pinta y manda: no duplica ni una fórmula ni una dirección.
+-->
+<style>
+  :root{
+    /* Estándar de la casa Factiun (mismos tokens que index.html y bateria.html) */
+    --void:#0B0F14; --panel-2:#0F151D; --text:#E7EEF4; --muted:#8093A4; --radius:14px;
+    --bg:var(--void); --panel:#121922; --card:var(--panel-2); --card2:#15212d;
+    --line:#23303D; --line2:#32485d;
+    --tx:var(--text); --tx2:var(--muted); --tx3:#5e7388;
+    --accent:#36D399; --ok:#37b87c; --warn:#e0a52b; --danger:#e2574c; --sun:#f0a93b;
+    --blue:#3aa0ff; --violet:#9b8cff;
+    --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--sans);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:14px}
+  .app{display:flex;flex-direction:column;height:100vh}
+  nav{display:flex;align-items:center;gap:14px;padding:0 16px;height:48px;background:#0a121a;border-bottom:1px solid var(--line);flex:none}
+  .brand{font-weight:600;display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .brand b{color:var(--accent)}
+  .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  nav a{color:var(--tx3);font-size:12.5px;text-decoration:none}
+  nav a:hover{color:var(--tx2)}
+  nav .right{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--tx3);display:flex;gap:12px;align-items:center}
+  .badge{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line2);color:var(--tx2)}
+  .badge.run{color:var(--ok);border-color:var(--ok)}
+  .badge.stop{color:var(--warn);border-color:var(--warn)}
+  .badge.alarm{color:var(--danger);border-color:var(--danger)}
+
+  .main{flex:1;display:grid;grid-template-columns:300px 1fr;min-height:0}
+  .side{background:var(--panel);border-right:1px solid var(--line);padding:12px;overflow-y:auto}
+  .content{overflow-y:auto;padding:12px 16px;min-width:0}
+
+  .grp{margin-bottom:14px}
+  .grp h3{margin:0 0 7px;font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--tx3)}
+  .fld{margin-bottom:8px}
+  .fld label{display:flex;justify-content:space-between;font-size:12px;color:var(--tx2);margin-bottom:3px}
+  .fld .rv{font-family:var(--mono);font-size:11.5px;color:var(--accent)}
+  .fld select,.fld input[type=number],.fld input[type=text]{width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px}
+  .fld input[type=range]{width:100%;accent-color:var(--accent);margin:2px 0}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+  .btn{width:100%;padding:9px;background:var(--accent);color:#06281c;border:0;border-radius:9px;font:600 13px var(--sans);cursor:pointer}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line2)}
+  .btn.dang{background:var(--danger);color:#2a0b08}
+  .btn.on{background:var(--warn);color:#2a1e04}
+  .btns{display:flex;gap:6px}
+  .sw{display:flex;align-items:center;gap:8px;margin-bottom:7px;cursor:pointer;user-select:none;font-size:13px}
+  .sw input{accent-color:var(--accent);width:15px;height:15px}
+  .chipsg{display:flex;flex-wrap:wrap;gap:4px}
+  .cg{font:600 11px var(--mono);padding:4px 7px;border-radius:6px;border:1px solid var(--line2);background:var(--card2);color:var(--tx3);cursor:pointer;user-select:none}
+  .cg.on{border-color:var(--warn);color:var(--warn);background:#241d09}
+  .note{font-size:11px;color:var(--tx3);line-height:1.45;margin-top:8px}
+  .note b{color:var(--tx2);font-weight:600}
+
+  /* pestañas */
+  .tabs{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap}
+  .tab{cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--tx2);border-radius:9px;padding:7px 15px;font:inherit;font-size:13px}
+  .tab.on{border-color:var(--accent);color:var(--tx);background:#10241d}
+
+  .chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin-bottom:12px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 10px}
+  .chip .lab{font-size:10.5px;color:var(--tx3);line-height:1.2}
+  .chip .v{font-family:var(--mono);font-size:16px;font-weight:600}
+  .chip .v.ok{color:var(--ok)} .chip .v.warn{color:var(--warn)} .chip .v.bad{color:var(--danger)} .chip .v.blue{color:var(--blue)}
+  .chip .sub{font-size:10px;color:var(--tx3);font-family:var(--mono)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:11px 13px;margin-bottom:12px}
+  .card h2{margin:0 0 3px;font:600 14px var(--display)}
+  .card .sub{font-size:11.5px;color:var(--tx3);margin-bottom:8px}
+
+  /* rejilla de seguidores */
+  .flota{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:6px}
+  .mesa{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 7px;cursor:pointer;position:relative;overflow:hidden}
+  .mesa:hover{border-color:var(--line2)}
+  .mesa.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .mesa .id{font:600 12px var(--mono);display:flex;justify-content:space-between;align-items:center}
+  .mesa .g{font-size:9.5px;color:var(--tx3);font-family:var(--mono)}
+  .mesa .st{font-size:9.5px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mesa .pip{width:7px;height:7px;border-radius:50%}
+  .mesa .ang{height:16px;margin-top:3px;position:relative}
+  .mesa .ang i{position:absolute;left:50%;top:50%;width:26px;height:2.5px;background:var(--tx2);border-radius:2px;transform-origin:center;display:block;margin-left:-13px;margin-top:-1px}
+  .mesa .ang em{position:absolute;left:0;right:0;top:50%;height:1px;background:var(--line2)}
+  .ok .pip{background:var(--ok)} .aviso .pip{background:var(--warn)}
+  .alarma .pip{background:var(--danger)} .offline .pip{background:#4a5b6d}
+  .mesa.alarma{border-color:#5a2420} .mesa.aviso{border-color:#4a3a10} .mesa.offline{opacity:.55}
+
+  table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.t th,table.t td{padding:4px 7px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  table.t th{color:var(--tx3);font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:var(--card);z-index:1}
+  table.t td{font-family:var(--mono)}
+  table.t td.l,table.t th.l{text-align:left}
+  table.t tr:hover td{background:#141d28}
+  td.ok{color:var(--ok)} td.warn{color:var(--warn)} td.bad{color:var(--danger)} td.mut{color:var(--tx3)}
+
+  /* mapa Modbus */
+  .mbbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .mbbar input[type=text],.mbbar select{background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:12.5px}
+  .mbbar input[type=text]{width:190px}
+  .mbbar .sw{margin:0}
+  .secmb{margin-bottom:14px}
+  .secmb h3{margin:0 0 2px;font:600 12.5px var(--display);color:var(--tx)}
+  .secmb .sn{font-size:11px;color:var(--tx3);margin-bottom:6px;font-family:var(--mono)}
+  .secmb .rw{font:600 9.5px var(--mono);padding:1px 6px;border-radius:5px;border:1px solid var(--line2);color:var(--tx3);margin-left:6px;vertical-align:2px}
+  .secmb .rw.w{color:var(--warn);border-color:#4a3a10}
+  table.mb{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+  table.mb th,table.mb td{padding:3px 7px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.mb th{color:var(--tx3);font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.05em;text-align:left}
+  table.mb td{font-family:var(--mono);word-break:break-word}
+  table.mb td.dir{color:var(--blue);width:72px}
+  table.mb td.nom{font-family:var(--sans);color:var(--tx2);width:24%}
+  table.mb td.tip{color:var(--tx3);width:58px}
+  table.mb td.cru{color:var(--tx2);width:120px}
+  table.mb td.val{color:var(--tx);font-weight:600;width:130px}
+  /* los bits ACTIVOS primero y en ámbar; los apagados, atenuados y recortados a una
+     línea — si no, un registro con 13 bits (DIGITAL_INPUT) se come media pantalla */
+  table.mb td.bit{font-size:11px;color:var(--tx3);max-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  table.mb td.bit b{color:var(--warn);font-weight:600}
+  table.mb td.bit i{font-style:normal;opacity:.55}
+  table.mb tr.nosim td{opacity:.42}
+  table.mb tr.cambia td.cru,table.mb tr.cambia td.val{background:#123027;transition:background .1s}
+  table.mb tr:hover td{background:#141d28}
+  .leyenda{font-size:11px;color:var(--tx3);margin:8px 0 0;line-height:1.5}
+  .leyenda b{color:var(--tx2)}
+  .aprox{color:var(--violet)}
+
+  .jer{display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:12px}
+  .jer div{padding:4px 8px;border-radius:6px;border:1px solid var(--line);color:var(--tx3);display:flex;justify-content:space-between;gap:10px}
+  .jer div.gana{border-color:var(--accent);color:var(--tx);background:#10241d}
+  .jer div.activa{border-color:var(--warn);color:var(--warn)}
+  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:5px 14px;font-size:12.5px}
+  .kv div{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:3px 0}
+  .kv span:first-child{color:var(--tx3)}
+  .kv span:last-child{font-family:var(--mono)}
+  canvas.ch{width:100%;display:block;border-radius:8px}
+  @media (max-width:900px){ .main{grid-template-columns:1fr;overflow-y:auto} .side{border-right:0;border-bottom:1px solid var(--line)} }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav>
+    <span class="brand"><span class="dot"></span>Gemelo <b>TOTAL</b></span>
+    <a href="index.html">Campo 3D</a>
+    <a href="bateria.html">Batería</a>
+    <span class="right">
+      <span id="badgeSim" class="badge stop">■ parado</span>
+      <span id="relojSim">—</span>
+      <span id="badgeAl" class="badge">flota —</span>
+    </span>
+  </nav>
+
+  <div class="main">
+    <aside class="side">
+      <div class="grp">
+        <h3>Planta</h3>
+        <div class="fld">
+          <label>Emplazamiento</label>
+          <select id="loc"></select>
+        </div>
+        <div class="row3">
+          <div class="fld"><label>TCU</label><input type="number" id="nTcu" value="24" min="1" max="200"></div>
+          <div class="fld"><label>HSU</label><input type="number" id="nHsu" value="2" min="1" max="10"></div>
+          <div class="fld"><label>Repet.</label><input type="number" id="nRep" value="1" min="0" max="10"></div>
+        </div>
+        <div class="fld"><label>Grupos de limpieza <span class="rv" id="nGrupV">4</span></label>
+          <input type="range" id="nGrup" min="1" max="10" step="1" value="4"></div>
+        <div class="fld">
+          <label>Alimentación y batería</label>
+          <select id="perfil"></select>
+          <div class="note" id="perfilNota" style="margin-top:4px"></div>
+        </div>
+        <button class="btn sec" id="btnRehacer">↻ Rehacer planta</button>
+      </div>
+
+      <div class="grp">
+        <h3>Tiempo</h3>
+        <div class="fld"><label>Día del año <span class="rv" id="diaV">21 jun</span></label>
+          <input type="range" id="dia" min="1" max="365" value="172"></div>
+        <div class="fld"><label>Hora local <span class="rv" id="horaV">09:00</span></label>
+          <input type="range" id="hora" min="0" max="24" step="0.01" value="9"></div>
+        <div class="fld"><label>Velocidad <span class="rv" id="velV">×60</span></label>
+          <input type="range" id="vel" min="1" max="1800" step="1" value="60"></div>
+        <div class="btns">
+          <button class="btn" id="btnPlay">▶ Simular</button>
+          <button class="btn sec" id="btnPaso" style="width:auto;padding:9px 12px">+1 min</button>
+        </div>
+      </div>
+
+      <div class="grp">
+        <h3>Meteorología</h3>
+        <div class="fld"><label>Viento medio <span class="rv" id="vientoV">3 m/s · 11 km/h</span></label>
+          <input type="range" id="viento" min="0" max="30" step="0.1" value="3"></div>
+        <div class="fld"><label>Rachas <span class="rv" id="rachaV">20 %</span></label>
+          <input type="range" id="racha" min="0" max="100" value="20"></div>
+        <div class="fld"><label>Dirección <span class="rv" id="dirV">200° SO</span></label>
+          <input type="range" id="dirViento" min="0" max="359" value="200"></div>
+        <div class="fld"><label>Nubes <span class="rv" id="nubesV">15 %</span></label>
+          <input type="range" id="nubes" min="0" max="100" value="15"></div>
+        <div class="fld"><label>Nieve acumulada <span class="rv" id="nieveV">0 cm</span></label>
+          <input type="range" id="nieve" min="0" max="40" value="0"></div>
+        <div class="fld"><label>Temperatura media <span class="rv" id="tempV">14 °C</span></label>
+          <input type="range" id="temp" min="-20" max="40" value="14"></div>
+      </div>
+
+      <div class="grp">
+        <h3>Mandos de la NCU</h3>
+        <button class="btn dang" id="btnSeta">⏹ SETA de emergencia</button>
+        <div class="note" style="margin-bottom:8px">Inhibe el motor de toda la planta. Entrada digital 30100.13.</div>
+        <div class="fld"><label>Limpieza por grupo (30100 bits 12:3)</label>
+          <div class="chipsg" id="limpieza"></div></div>
+        <div class="fld"><label>Forzar posición segura (40001…40007)</label>
+          <div class="row2">
+            <select id="fzSp">
+              <option value="1">SP1 · viento</option>
+              <option value="2">SP2</option>
+              <option value="3">SP3 · nieve</option>
+              <option value="4">SP4 · limpieza</option>
+              <option value="5">SP5</option><option value="6">SP6</option><option value="7">SP7</option>
+            </select>
+            <select id="fzGrupo"></select>
+          </div>
+          <div class="btns" style="margin-top:6px">
+            <button class="btn sec" id="btnFzOn">Forzar</button>
+            <button class="btn sec" id="btnFzOff">Quitar</button>
+          </div>
+          <div class="note" id="fzEstado">Sin forzados activos.</div>
+        </div>
+        <div class="fld"><label>Modo de la flota (40070 / 40071)</label>
+          <div class="btns">
+            <button class="btn sec" id="btnAuto">AUTO</button>
+            <button class="btn sec" id="btnManual">MANUAL</button>
+            <button class="btn sec" id="btnOff">OFF</button>
+          </div>
+        </div>
+        <label class="sw"><input type="checkbox" id="upsFallo"><span>Fallo de red en el SAI</span></label>
+        <label class="sw"><input type="checkbox" id="acFallo"><span>Corte de alterna en planta</span></label>
+        <div class="note" style="margin-top:0">Solo lo notan los TCU de tipo <b>AC</b>: los de panel propio y los de string siguen a lo suyo.</div>
+      </div>
+
+      <div class="grp">
+        <h3>Averías del TCU seleccionado</h3>
+        <div class="note" style="margin-top:0">Actúan sobre <b id="selNota">TCU 1</b>.</div>
+        <label class="sw"><input type="checkbox" id="avEje"><span>Eje bloqueado</span></label>
+        <label class="sw"><input type="checkbox" id="avOff"><span>Sin comunicación (Zigbee)</span></label>
+        <label class="sw"><input type="checkbox" id="avSeta"><span>Seta local pulsada</span></label>
+        <div class="fld"><label>SoC forzado <span class="rv" id="socV">—</span></label>
+          <input type="range" id="socSet" min="0" max="100" value="80"></div>
+        <div class="fld"><label>Consigna manual <span class="rv" id="manV">0°</span></label>
+          <input type="range" id="manSet" min="-55" max="55" value="0"></div>
+      </div>
+    </aside>
+
+    <section class="content">
+      <div class="tabs">
+        <button class="tab on" data-v="planta">Planta</button>
+        <button class="tab" data-v="modbus">Mapa Modbus en vivo</button>
+        <button class="tab" data-v="tcu">Detalle del equipo</button>
+      </div>
+
+      <!-- ═══ vista PLANTA ═══ -->
+      <div id="vplanta">
+        <div class="chips" id="chipsPlanta"></div>
+        <div class="card">
+          <h2>Flota</h2>
+          <div class="sub" id="subFlota">Un recuadro por equipo. La barra es su inclinación real; el color, su salud (el mismo criterio del SCADA).</div>
+          <div class="flota" id="flota"></div>
+        </div>
+        <div class="card">
+          <h2>NCU</h2>
+          <div class="sub">Controlador de red: reloj, entradas digitales, agregación meteo y forzados.</div>
+          <div class="kv" id="kvNcu"></div>
+        </div>
+        <div class="card">
+          <h2>HSU</h2>
+          <div class="sub">Estaciones meteo. La NCU se queda con el nivel de viento MÁS ALTO de todas.</div>
+          <table class="t"><thead><tr>
+            <th class="l">HSU</th><th>Viento</th><th>Racha</th><th>Dir.</th><th>Nivel</th>
+            <th>Nieve</th><th>GHI</th><th>Alarmas</th><th>Últ. contacto</th>
+          </tr></thead><tbody id="tbHsu"></tbody></table>
+        </div>
+      </div>
+
+      <!-- ═══ vista MAPA MODBUS ═══ -->
+      <div id="vmodbus" style="display:none">
+        <div class="mbbar">
+          <select id="mbDev">
+            <option value="ncu">NCU · controlador de red</option>
+            <option value="tcu">TCU · seguidor</option>
+            <option value="hsu">HSU · estación meteo</option>
+          </select>
+          <select id="mbUnidad"></select>
+          <input type="text" id="mbFiltro" placeholder="filtrar: soc, tilt, viento, 30111…">
+          <label class="sw"><input type="checkbox" id="mbSoloSim" checked><span>solo simulados</span></label>
+          <label class="sw"><input type="checkbox" id="mbSoloAct"><span>solo activos</span></label>
+          <button class="btn sec" id="mbCsv" style="width:auto;padding:6px 12px">CSV</button>
+          <span class="badge" id="mbCuenta">—</span>
+        </div>
+        <div id="mbCuerpo"></div>
+        <div class="leyenda">
+          <b>Qué se está viendo.</b> El valor que serviría el equipo <i>en este instante</i> de la simulación, codificado como manda el mapa
+          (F32 en radianes, K×10, mV, mA, SoC en el byte bajo…) y decodificado de vuelta para leerlo. Las filas atenuadas son direcciones del
+          documento que el simulador no modela todavía: se listan para que el mapa esté entero, no para dar un valor falso.
+          Los <span class="aprox">valores en violeta</span> usan una codificación que el documento nombra pero no transcribe (30113 criterio del ángulo y
+          30114 fuente de la posición segura): son del simulador, no de Sunner. Lo mismo pasa con el campo <i>TCU type</i> de 30000, donde aquí
+          1 = BAT (panel propio o string) y 2 = AC.
+          <br><b>Fuente del mapa:</b> NCU_Modbus_Map_R7 · SUNNER_TCU_ModbusMap_v6 (FW v1.4.3) · HSU_Modbus_Map_R23, vía
+          <a href="../cobertura-zigbee/modbus.html" style="color:var(--blue)">la ficha de cobertura-zigbee</a>.
+        </div>
+      </div>
+
+      <!-- ═══ vista DETALLE ═══ -->
+      <div id="vtcu" style="display:none">
+        <div class="chips" id="chipsTcu"></div>
+        <div class="card">
+          <h2>Jerarquía de control</h2>
+          <div class="sub">De arriba abajo, en orden de prioridad. En verde, la regla que decide el objetivo ahora mismo; en ámbar, las que están activas pero las gana otra de más arriba.</div>
+          <div class="jer" id="jer"></div>
+        </div>
+        <div class="card">
+          <h2>Día simulado</h2>
+          <div class="sub" id="subCh">Inclinación real contra la de seguimiento puro, y SoC. Se traza según avanza la simulación.</div>
+          <canvas class="ch" id="ch" height="200"></canvas>
+        </div>
+        <div class="card">
+          <h2>Telemetría</h2>
+          <div class="kv" id="kvTcu"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script src="sim/modbus-map.js"></script>
+<script src="sim/planta.js"></script>
+<script>
+/* ═══════════════════ arranque ═══════════════════ */
+var $ = function (id) { return document.getElementById(id); };
+var PLANTAS = [
+  {n:"Gorraiz · Navarra (ES)",lat:42.81,lon:-1.58,tz:1,dst:true},
+  {n:"23003 · El Burgo I (Zaragoza, ES)",lat:41.5763,lon:-0.7981,tz:1,dst:true},
+  {n:"24007 · Fayón (Zaragoza, ES)",lat:41.2269,lon:0.3242,tz:1,dst:true},
+  {n:"24019 · San José (Arequipa, PE)",lat:-16.5958,lon:-71.8064,tz:-5,dst:false},
+  {n:"24021 · Túnez (Gabès, TN)",lat:33.8792,lon:9.8736,tz:1,dst:false},
+  {n:"24025 · Ayora (Valencia, ES)",lat:39.1182,lon:-1.1599,tz:1,dst:true},
+  {n:"24030 · Bagnarelli (Apulia, IT)",lat:41.5156,lon:15.2676,tz:1,dst:true},
+  {n:"25019 · Páramo (León, ES)",lat:42.3206,lon:-5.5998,tz:1,dst:true},
+  {n:"Jodhpur · Rajastán (IN)",lat:26.264,lon:73.008,tz:5,dst:false}
+];
+PLANTAS.forEach(function (p, i) { $('loc').add(new Option(p.n, String(i))); });
+SIM.PERFILES.forEach(function (p) { $('perfil').add(new Option(p.n, p.id)); });
+$('perfil').value = 'SP_60W_6Ah';
+var TIPO_TXT = { sp: 'panel propio', string: 'del string', ac: 'alterna' };
+var NOTA_TIPO = {
+  sp: 'Panel auxiliar propio sobre el seguidor: lo que entra depende del <b>ángulo real</b>, así que abanderar o quedarse parado también cuesta carga.',
+  string: 'Del propio string por regulador: con sol satura en su tope y la batería carga a lo que dejan la temperatura y el C-rate.',
+  ac: 'De alterna. La batería queda de respaldo y flota al 100 %: solo trabaja si se corta la red (abajo, en los mandos de la NCU).'
+};
+
+var P = null, sel = 1, corriendo = false, vista = 'planta';
+var traza = [];              /* histórico del día del equipo seleccionado */
+var previos = {};            /* último valor de cada registro, para el destello */
+var destellos = {};
+
+function construye() {
+  var L = PLANTAS[+$('loc').value];
+  P = new SIM.Planta({
+    nTcu: Math.max(1, +$('nTcu').value || 24),
+    nHsu: Math.max(1, +$('nHsu').value || 2),
+    nRep: Math.max(0, +$('nRep').value || 0),
+    grupos: +$('nGrup').value || 4,
+    perfil: $('perfil').value,
+    dia: +$('dia').value, hora: +$('hora').value,
+    loc: { n: L.n, lat: L.lat, lon: L.lon, tz: L.tz, dst: L.dst }
+  });
+  aplicaMeteo();
+  P.ncu.acFallo = $('acFallo').checked;
+  P.ncu.upsFallo = $('upsFallo').checked;
+  var pf = SIM.perfilDe($('perfil').value);
+  $('perfilNota').innerHTML = NOTA_TIPO[pf.tipo] + (pf.heated ? ' Versión <b>LT calefactada</b>: bajo 0 °C gasta 1 + 0,15·|T| W y desbloquea la carga.' : '');
+  sel = 1; traza = []; previos = {}; destellos = {};
+  pintaGrupos(); pintaUnidades(); pintaTodo();
+}
+function aplicaMeteo() {
+  P.meteo.viento = +$('viento').value;
+  P.meteo.rachas = +$('racha').value / 100;
+  P.meteo.dirViento = +$('dirViento').value;
+  P.meteo.nubes = +$('nubes').value;
+  P.meteo.nieve = +$('nieve').value / 100;      /* cm → m */
+  P.meteo.tMedia = +$('temp').value;
+}
+function tcuSel() { return P.tcu(sel) || P.tcus[0]; }
+/* Tocar un mando con la simulación en pausa tiene que verse igualmente: se da un
+   paso mínimo para que el estado derivado (posición segura, alarmas, alimentación)
+   se recalcule antes de repintar. Sin esto, pulsar la seta en pausa no hace nada
+   visible hasta darle a Simular. */
+function toca() { if (P) P.paso(0.001); pintaTodo(); }
+
+/* ═══════════════════ bucle ═══════════════════
+   dt de reloj × velocidad = dt simulado. Se trocea a 60 s como mucho por paso para
+   que la física no se salte un abanderamiento por ir a ×1800. */
+var tPrev = 0, acumPinta = 0;
+function bucle(ahora) {
+  requestAnimationFrame(bucle);
+  var dtReal = tPrev ? Math.min(0.25, (ahora - tPrev) / 1000) : 0;
+  tPrev = ahora;
+  if (corriendo && P) {
+    var dtSim = dtReal * (+$('vel').value || 1), resto = dtSim;
+    while (resto > 0) { var p = Math.min(60, resto); P.paso(p); resto -= p; }
+    $('dia').value = P.t.dia; $('hora').value = P.t.hora;
+    etiquetaTiempo();
+    apunta();
+  }
+  acumPinta += dtReal;
+  if (acumPinta > 0.22) { acumPinta = 0; pintaTodo(); }
+}
+function apunta() {
+  var t = tcuSel();
+  if (traza.length && P.t.hora < traza[traza.length - 1].h) traza = [];   /* cambio de día */
+  var ult = traza[traza.length - 1];
+  if (!ult || P.t.hora - ult.h > 0.05) {
+    traza.push({ h: P.t.hora, a: t.angulo, s: t.soc, tt: t.solar.dia ? t.solar.real : 0 });
+    if (traza.length > 900) traza.shift();
+  }
+}
+
+/* ═══════════════════ pintado ═══════════════════ */
+function pintaTodo() {
+  if (!P) return;
+  cabecera();
+  if (vista === 'planta') { pintaChips(); pintaFlota(); pintaNcu(); pintaHsu(); }
+  else if (vista === 'modbus') pintaModbus();
+  else pintaDetalle();
+}
+function cabecera() {
+  var f = P.fechaSim(), r = P.resumen();
+  $('relojSim').textContent = dosD(f.dia) + '/' + dosD(f.mes) + '  ' + dosD(f.hora) + ':' + dosD(f.min) + ':' + dosD(f.seg);
+  var b = $('badgeSim');
+  b.textContent = corriendo ? '▶ simulando ×' + $('vel').value : '■ parado';
+  b.className = 'badge ' + (corriendo ? 'run' : 'stop');
+  var ba = $('badgeAl');
+  ba.textContent = 'flota ' + r.ok + ' ok · ' + r.aviso + ' aviso · ' + r.alarma + ' alarma · ' + r.offline + ' offline';
+  ba.className = 'badge ' + (r.alarma ? 'alarm' : (r.aviso || r.offline ? 'stop' : 'run'));
+}
+function dosD(n) { return (n < 10 ? '0' : '') + Math.floor(n); }
+function num(v, d) { return (v == null || !isFinite(v)) ? '—' : v.toFixed(d == null ? 1 : d).replace('.', ','); }
+
+function chip(lab, v, cls, sub) {
+  return '<div class="chip"><div class="lab">' + lab + '</div><div class="v ' + (cls || '') + '">' + v +
+         '</div>' + (sub ? '<div class="sub">' + sub + '</div>' : '') + '</div>';
+}
+function pintaChips() {
+  var r = P.resumen(), n = P.ncu, h0 = P.hsus[0];
+  var nivelTxt = ['calma', 'aviso ≥40 km/h', 'ALARMA ≥60 km/h'][n.nivelVientoGlobal] || '—';
+  $('chipsPlanta').innerHTML =
+    chip('Equipos', r.total, '', P.seguidores().length + ' seguidores + ' + (r.total - P.seguidores().length) + ' repetidores') +
+    chip('Salud', r.ok + '/' + r.total, r.alarma ? 'bad' : (r.aviso ? 'warn' : 'ok'), r.alarma + ' alarma · ' + r.offline + ' offline') +
+    chip('Moviendo', r.moviendo, r.moviendo ? 'blue' : '', 'motores en marcha') +
+    chip('SoC medio', num(r.socMedio, 0) + ' %', r.socMin < 30 ? 'bad' : (r.socMin < 50 ? 'warn' : 'ok'), 'mínimo ' + num(r.socMin, 0) + ' %') +
+    chip('Viento', num(h0.viento * 3.6, 0) + ' km/h', n.nivelVientoGlobal >= 2 ? 'bad' : (n.nivelVientoGlobal ? 'warn' : 'ok'), nivelTxt) +
+    chip('Nieve', num(P.meteo.nieve * 100, 1) + ' cm', n.alarmaNieve ? 'bad' : '', n.alarmaNieve ? 'alarma de nieve' : 'sin alarma') +
+    chip('Alimentación', TIPO_TXT[P.tcus[0].perfil.tipo], n.acFallo && P.tcus[0].perfil.tipo === 'ac' ? 'bad' : '',
+      P.tcus[0].perfil.n.replace(/^(SP|STRING|AC) · /, '')) +
+    chip('Seta', n.seta ? 'PULSADA' : 'libre', n.seta ? 'bad' : 'ok', '30100.13') +
+    chip('Sol', P.tcus[0].solar.dia ? num(90 - P.tcus[0].solar.zen, 0) + '° elev.' : 'noche', P.tcus[0].solar.dia ? 'warn' : '', 'azimut ' + num(P.tcus[0].solar.az, 0) + '°');
+}
+function pintaFlota() {
+  var h = '', T = P.tcus;
+  for (var i = 0; i < T.length; i++) {
+    var t = T[i], s = t.salud();
+    h += '<div class="mesa ' + s + (t.id === sel ? ' sel' : '') + '" data-id="' + t.id + '">' +
+      '<div class="id">' + (t.repetidor ? 'R' : '#') + t.id + '<span class="pip"></span></div>' +
+      '<div class="g">G' + t.grupo + ' · ' + t.modoTxt() + ' · ' + num(t.soc, 0) + '%</div>' +
+      '<div class="ang"><em></em><i style="transform:rotate(' + (-t.angulo).toFixed(1) + 'deg)"></i></div>' +
+      '<div class="st">' + t.estadoTxt() + '</div></div>';
+  }
+  $('flota').innerHTML = h;
+}
+$('flota').addEventListener('click', function (e) {
+  var m = e.target.closest ? e.target.closest('.mesa') : null;
+  if (!m) return;
+  sel = +m.getAttribute('data-id'); traza = [];
+  sincronizaAverias(); pintaUnidades(); pintaTodo();
+});
+function pintaNcu() {
+  var n = P.ncu, f = P.fechaSim(), lim = [];
+  for (var i = 0; i < n.limpieza.length; i++) if (n.limpieza[i]) lim.push('G' + (i + 1));
+  var fz = [];
+  for (var s = 1; s <= 7; s++) if (n.forzados[s]) fz.push('SP' + s + '→0x' + n.forzados[s].toString(16));
+  $('kvNcu').innerHTML =
+    kv('Reloj (30104)', dosD(f.dia) + '/' + dosD(f.mes) + ' ' + dosD(f.hora) + ':' + dosD(f.min)) +
+    kv('Nivel de viento global', n.nivelVientoGlobal + ' (' + (['calma', 'aviso', 'alarma'][n.nivelVientoGlobal] || '—') + ')') +
+    kv('Alarma de viento', n.alarmaViento ? 'sí' : 'no') +
+    kv('Alarma de nieve', n.alarmaNieve ? 'sí' : 'no') +
+    kv('Viento del este (invertido)', n.vientoInvertido ? 'sí' : 'no') +
+    kv('Seta (30100.13)', n.seta ? 'PULSADA' : 'libre') +
+    kv('SAI', n.upsFallo ? 'fallo de red' : 'normal') +
+    kv('Limpieza activa', lim.length ? lim.join(' ') : '—') +
+    kv('Forzados', fz.length ? fz.join(' ') : '—') +
+    kv('HSU en línea', P.hsus.filter(function (x) { return x.online; }).length + '/' + P.hsus.length);
+}
+function kv(a, b) { return '<div><span>' + a + '</span><span>' + b + '</span></div>'; }
+function pintaHsu() {
+  var h = '';
+  for (var i = 0; i < P.hsus.length; i++) {
+    var s = P.hsus[i], al = [];
+    if (s.alarmaViento()) al.push('viento');
+    if (s.alarmaRacha()) al.push('racha');
+    if (s.alarmaNieve()) al.push('nieve');
+    if (!s.online) al.push('sin com.');
+    var cl = s.salud() === 'alarma' ? 'bad' : (s.salud() === 'aviso' ? 'warn' : 'ok');
+    h += '<tr><td class="l">HSU ' + s.id + '</td><td>' + num(s.viento * 3.6, 1) + ' km/h</td><td>' + num(s.racha * 3.6, 1) + '</td>' +
+      '<td>' + num(s.dir, 0) + '°</td><td class="' + cl + '">' + s.nivel + '</td><td>' + num(s.nieve * 100, 1) + ' cm</td>' +
+      '<td>' + num(s.ghi, 0) + ' W/m²</td><td class="' + (al.length ? 'bad' : 'mut') + '">' + (al.join(', ') || '—') + '</td>' +
+      '<td class="mut">' + (P.t.epoch - s.ultimoContacto) + ' s</td></tr>';
+  }
+  $('tbHsu').innerHTML = h;
+}
+
+/* ═══════════════════ mapa Modbus en vivo ═══════════════════ */
+function pintaUnidades() {
+  var dev = $('mbDev').value, u = $('mbUnidad'), i;
+  u.innerHTML = '';
+  if (dev === 'hsu') { for (i = 0; i < P.hsus.length; i++) u.add(new Option('HSU ' + P.hsus[i].id, String(P.hsus[i].id))); }
+  else { for (i = 0; i < P.tcus.length; i++) u.add(new Option((P.tcus[i].repetidor ? 'Repetidor ' : 'TCU ') + P.tcus[i].id, String(P.tcus[i].id))); }
+  u.value = String(dev === 'hsu' ? Math.min(sel, P.hsus.length) : sel);
+  u.disabled = false;
+}
+/* Imagen de registros que toca según el dispositivo elegido. Para la NCU es la suya
+   (incluye lo que republica de TCUs y HSUs); para TCU y HSU, su mapa propio, más la
+   de la NCU para las secciones «vía NCU». */
+function imagenes(dev) {
+  var uni = +$('mbUnidad').value || 1;
+  var img = { propia: {}, ncu: P.regsNCU(), unidad: uni };
+  if (dev === 'tcu') { var t = P.tcu(uni); img.propia = t ? P.regsTCU(t) : {}; }
+  else if (dev === 'hsu') { var h = P.hsus[uni - 1]; img.propia = h ? P.regsHSU(h) : {}; }
+  else img.propia = img.ncu;
+  return img;
+}
+/* Decodifica un registro del mapa a partir de la imagen. Devuelve null si no está
+   simulado, para que el visor lo pinte atenuado en vez de inventarse un cero. */
+function decodifica(r, dir, img, viaNcu) {
+  var fuente = viaNcu ? img.ncu : img.propia, tipo = r[2], esc = r[5] == null ? 1 : r[5], uni = r[3] || '';
+  var v0 = fuente[dir];
+  if (v0 == null) return null;
+  var crudo = [v0], val;
+  if (tipo === 'f32' || tipo === 'u32' || tipo === 's32') {
+    var v1 = fuente[dir + 1]; if (v1 == null) v1 = 0;
+    crudo.push(v1);
+    if (tipo === 'f32') { var b = new ArrayBuffer(4), d = new DataView(b); d.setUint16(0, v0); d.setUint16(2, v1); val = d.getFloat32(0); }
+    else { val = v0 * 65536 + v1; if (tipo === 's32' && val >= 2147483648) val -= 4294967296; }
+  } else if (tipo === 's16') { val = v0 >= 32768 ? v0 - 65536 : v0; }
+  else if (tipo === 'text') { val = v0; }
+  else val = v0;
+  val *= esc;
+  return { crudo: crudo, val: val, tipo: tipo, uni: uni };
+}
+/* Presentación legible: aplica las conversiones que el propio mapa anuncia. */
+function legible(d, r) {
+  if (!d) return '—';
+  var u = d.uni, v = d.val, n = (r[1] || '').toLowerCase();
+  if (/rad/.test(u)) return num(v * 180 / Math.PI, 2) + ' °';
+  if (/Kx10|K×10/.test(u)) return num(v / 10 - 273.15, 1) + ' °C';
+  if (u === 'K' || /Kelvin/.test(u)) return num(v - 273.15, 1) + ' °C';
+  if (/Deg x10/.test(u)) return num(v / 10, 1) + ' °';
+  if (/Deg x100/.test(u)) return num(v / 100, 2) + ' °';
+  if (/W\/m²×100|Wm2x100|W\/m2\*10/.test(u)) return num(v / 100, 0) + ' W/m²';
+  if (/%×10|%x10/.test(u)) return num(v / 10, 1) + ' %';
+  if (u === 'mV') return num(v / 1000, 2) + ' V';
+  if (u === 'mA') return num(v, 0) + ' mA';
+  /* cualquier U32 sin unidad que valga más de mil millones es una marca de tiempo Unix
+     (reloj de la NCU, último contacto de cada TCU/HSU, últimas lecturas válidas): se
+     lee mucho mejor como fecha y antigüedad que como el entero pelado */
+  if (d.tipo === 'u32' && !u && v > 1e9) {
+    var f = new Date(v * 1000), edad = P.t.epoch - v;
+    return dosD(f.getDate()) + '/' + dosD(f.getMonth() + 1) + ' ' + dosD(f.getHours()) + ':' + dosD(f.getMinutes()) + ':' + dosD(f.getSeconds()) +
+      (edad > 1 ? '  (−' + (edad < 90 ? edad + ' s' : num(edad / 60, 0) + ' min') + ')' : '');
+  }
+  if (u) return num(v, Math.abs(v) < 10 ? 2 : 0) + ' ' + u;
+  return String(Math.round(v * 1000) / 1000).replace('.', ',');
+}
+/* Bits activos, con el nombre que les da el documento. */
+function pintaBits(r, d) {
+  var campos = r[4], desc = r[9] || {};
+  if (!campos || typeof campos !== 'object' || !d) return { html: '', activos: 0, titulo: '' };
+  var on = [], off = [], tit = [];
+  for (var k in campos) {
+    var lsb = campos[k][0], msb = campos[k][1], anc = msb - lsb + 1;
+    var v = (d.crudo[0] >> lsb) & ((1 << anc) - 1);
+    var etq = k + (anc > 1 ? '=' + v : '');
+    if (v) { on.push('<b>' + etq + '</b>'); tit.push('▸ ' + etq + (desc[k] ? ' — ' + desc[k] : '')); }
+    else off.push(k);
+  }
+  return {
+    html: on.concat(off.length ? ['<i>' + off.join(' · ') + '</i>'] : []).join(' · '),
+    activos: on.length,
+    titulo: tit.join('\n')
+  };
+}
+function pintaModbus() {
+  var dev = $('mbDev').value, D = MODBUS_MAP[dev], img = imagenes(dev);
+  var filtro = ($('mbFiltro').value || '').trim().toLowerCase();
+  var soloSim = $('mbSoloSim').checked, soloAct = $('mbSoloAct').checked;
+  var uni = img.unidad, html = '', total = 0, sim = 0;
+  /* la unidad de un bloque republicado es el índice del equipo dentro de la NCU,
+     que para un TCU es su número y para una HSU su hueco en la caché */
+  var idx = dev === 'hsu' ? uni : (function () {
+    for (var i = 0; i < P.tcus.length; i++) if (P.tcus[i].id === uni) return i + 1;
+    return 1;
+  })();
+
+  for (var si = 0; si < D.secs.length; si++) {
+    var s = D.secs[si], filas = '', nsec = 0;
+    var viaNcu = dev !== 'ncu' && !!s.base;      /* secciones «vía NCU» de la HSU */
+    for (var fi = 0; fi < (s.f || []).length; fi++) {
+      var r = s.f[fi];
+      var dir = s.stride ? s.base + (idx - 1) * s.stride + r[0] : r[0];
+      var d = decodifica(r, dir, img, viaNcu || dev === 'ncu' ? true : false);
+      total++; if (d) sim++;
+      if (soloSim && !d) continue;
+      var txt = (dir + ' ' + r[1] + ' ' + (r[7] || '')).toLowerCase();
+      if (filtro && txt.indexOf(filtro) < 0) continue;
+      var bits = pintaBits(r, d);
+      /* «solo activos»: lo que no está a cero, o lo que tiene algún bit puesto */
+      if (soloAct && (!d || (!d.val && !bits.activos))) continue;
+      var cambia = false, clave = dev + ':' + dir;
+      if (d) {
+        if (previos[clave] != null && previos[clave] !== d.crudo.join(',')) destellos[clave] = 3;
+        previos[clave] = d.crudo.join(',');
+        if (destellos[clave] > 0) { cambia = true; destellos[clave]--; }
+      }
+      var aprox = (dev === 'tcu' && (dir === 30113 || dir === 30114));
+      var valor = d ? legible(d, r) : '—';
+      if (aprox && d) {
+        valor = '<span class="aprox">' + (dir === 30113 ? SIM.CRIT_TXT[d.val] : SIM.FUENTE_TXT[d.val]) + '</span>';
+      }
+      filas += '<tr class="' + (d ? '' : 'nosim') + (cambia ? ' cambia' : '') + '">' +
+        '<td class="dir">' + dir + '</td>' +
+        '<td class="nom" title="' + (r[7] || '').replace(/"/g, '') + '">' + r[1] + '</td>' +
+        '<td class="tip">' + r[2] + '</td>' +
+        '<td class="cru">' + (d ? d.crudo.map(function (x) { return '0x' + x.toString(16).toUpperCase().padStart(4, '0'); }).join(' ') : '—') + '</td>' +
+        '<td class="val">' + valor + '</td>' +
+        '<td class="bit" title="' + bits.titulo.replace(/"/g, '') + '">' + bits.html + '</td></tr>';
+      nsec++;
+    }
+    if (!nsec) continue;
+    html += '<div class="secmb"><h3>' + s.t + '<span class="rw' + (s.rw === 'w' ? ' w' : '') + '">' +
+      (s.rw === 'w' ? 'escritura' : 'solo lectura') + '</span></h3>' +
+      '<div class="sn">' + (s.sn || '') + (s.stride ? ' · unidad ' + idx + ' → base ' + s.base + ' + ' + (idx - 1) + '×' + s.stride : '') + '</div>' +
+      '<table class="mb"><thead><tr><th>Dirección</th><th>Registro</th><th>Tipo</th><th>Crudo</th><th>Valor</th><th>Bits</th></tr></thead>' +
+      '<tbody>' + filas + '</tbody></table></div>';
+  }
+  $('mbCuerpo').innerHTML = html || '<div class="card" style="text-align:center;color:var(--tx3)">Nada casa con el filtro.</div>';
+  $('mbCuenta').textContent = sim + ' simulados de ' + total + ' del documento';
+}
+function exportaCsv() {
+  var dev = $('mbDev').value, D = MODBUS_MAP[dev], img = imagenes(dev), uni = img.unidad;
+  var idx = dev === 'hsu' ? uni : (function () { for (var i = 0; i < P.tcus.length; i++) if (P.tcus[i].id === uni) return i + 1; return 1; })();
+  var l = ['seccion;direccion;registro;tipo;unidad;crudo;valor'];
+  for (var si = 0; si < D.secs.length; si++) {
+    var s = D.secs[si];
+    for (var fi = 0; fi < (s.f || []).length; fi++) {
+      var r = s.f[fi], dir = s.stride ? s.base + (idx - 1) * s.stride + r[0] : r[0];
+      var d = decodifica(r, dir, img, true);
+      l.push([s.t, dir, r[1], r[2], r[3] || '', d ? d.crudo.join(' ') : '', d ? legible(d, r).replace(/<[^>]+>/g, '') : ''].join(';'));
+    }
+  }
+  var b = new Blob(['﻿' + l.join('\n')], { type: 'text/csv;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(b);
+  a.download = 'modbus_vivo_' + dev + '_' + uni + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* ═══════════════════ detalle del equipo ═══════════════════ */
+function pintaDetalle() {
+  var t = tcuSel(), a = t.alarmas(), e = t.entradas();
+  $('chipsTcu').innerHTML =
+    chip((t.repetidor ? 'Repetidor ' : 'TCU ') + t.id, t.salud().toUpperCase(),
+      t.salud() === 'ok' ? 'ok' : (t.salud() === 'alarma' ? 'bad' : 'warn'), 'grupo ' + t.grupo) +
+    chip('Modo', t.modoTxt(), '', 'criterio: ' + SIM.CRIT_TXT[t.criterio]) +
+    chip('Inclinación', num(t.angulo, 1) + '°', 'blue', 'objetivo ' + num(t.objetivo, 1) + '°') +
+    chip('Desviación', num(t.desviacion(), 2) + '°', t.desviacion() > 5 ? 'warn' : 'ok', t.moviendo ? 'moviendo' : 'parado') +
+    chip('SoC', num(t.soc, 1) + ' %', t.soc < 25 ? 'bad' : (t.soc < 50 ? 'warn' : 'ok'), 'SoH ' + num(t.soh, 0) + ' %') +
+    chip('Batería', num(t.vBat, 2) + ' V', '', num(t.iBat, 0) + ' mA · ' + num(t.tBat, 1) + ' °C') +
+    chip(t.perfil.tipo === 'ac' ? 'Alterna' : (t.perfil.tipo === 'string' ? 'Regulador' : 'Panel'),
+      num(t.vPanel / 1000, 1) + ' V', t.sinAlimentacion ? 'bad' : '', num(t.iPanel, 0) + ' mA') +
+    chip('Motor', num(t.iMotor, 0) + ' mA', t.moviendo ? 'blue' : '', 'pico ' + num(t.iMotorPico, 0) + ' mA');
+
+  var reglas = [
+    ['0 · Seta de emergencia', e.seta, t.criterio === SIM.CRIT.INHIBIDO && e.seta, 'motor inhibido'],
+    ['1 · SP1 viento', t.stow > 0 || e.forzado === 1, t.sp === 1, t.stow === 2 ? 'total ±55°' : (t.stow === 1 ? 'parcial ≥30°' : (e.forzado === 1 ? 'forzado' : '—'))],
+    ['2 · SP3 nieve', e.nieve || e.forzado === 3, t.sp === 3, e.nieve ? 'alarma de nieve' : (e.forzado === 3 ? 'forzado' : '—')],
+    ['3 · SP4 limpieza', e.limpieza || e.forzado === 4, t.sp === 4, e.limpieza ? 'interruptor del grupo ' + t.grupo : (e.forzado === 4 ? 'forzado' : '—')],
+    ['4 · SP2/5/6/7 forzadas', !!e.forzado && [2, 5, 6, 7].indexOf(e.forzado) >= 0, [2, 5, 6, 7].indexOf(t.sp) >= 0, e.forzado ? 'SP' + e.forzado : '—'],
+    ['5 · Restricción de batería', t.bajaCapacidad > 0, t.criterio === SIM.CRIT.BATERIA, ['normal', 'baja (L1)', 'muy baja (L2)', 'crítica (L3)'][t.bajaCapacidad]],
+    ['6 · Manual', t.modo === SIM.MODO.MANUAL, t.criterio === SIM.CRIT.MANUAL, 'consigna ' + num(t.manual, 1) + '°'],
+    ['7 · Auto (solar)', t.modo === SIM.MODO.AUTO, t.criterio === SIM.CRIT.SEGUIMIENTO || t.criterio === SIM.CRIT.BACKTRACKING || t.criterio === SIM.CRIT.NOCHE,
+      t.solar.dia ? (t.bt ? 'backtracking ' + num(t.solar.bt, 1) + '°' : 'seguimiento ' + num(t.solar.real, 1) + '°') : 'noche → ' + SIM.K.NIGHT_POS + '°']
+  ];
+  $('jer').innerHTML = reglas.map(function (r) {
+    return '<div class="' + (r[2] ? 'gana' : (r[1] ? 'activa' : '')) + '"><span>' + r[0] + '</span><span>' + r[3] + '</span></div>';
+  }).join('');
+
+  var al = [];
+  for (var k in a) if (a[k]) al.push(k);
+  $('kvTcu').innerHTML =
+    kv('Estado', t.estadoTxt()) +
+    kv('Posición de seguridad', SIM.SP_TXT[t.sp] + (t.sp ? ' · ' + SIM.FUENTE_TXT[t.fuenteSp] : '')) +
+    kv('Backtracking', t.bt ? 'activo' : 'no') +
+    kv('Sol', t.solar.dia ? ('elev. ' + num(90 - t.solar.zen, 1) + '° · az. ' + num(t.solar.az, 1) + '°') : 'bajo el horizonte') +
+    kv('True tracking', num(t.solar.real, 2) + '°') +
+    kv('Backtracking calculado', num(t.solar.bt, 2) + '°') +
+    kv('Alimentación', TIPO_TXT[t.perfil.tipo]) +
+    kv('Perfil', t.perfil.n) +
+    kv('Capacidad', t.ah ? num(t.ah, 1) + ' Ah (' + num(t.perfil.wh, 1) + ' Wh)' : 'sin batería') +
+    kv('Cargador (30153)', SIM.CHARGER_TXT[t.cargador] || '—') +
+    kv('Calefactor de batería', t.calefactor ? 'ON' : 'off') +
+    kv('T. PCB', num(t.tPcb, 1) + ' °C') +
+    kv('Energía del motor hoy', num(t.energiaMotorHoy / 3600, 2) + ' Wh') +
+    kv('Ciclos de carga', t.ciclos) +
+    kv('Último contacto', (P.t.epoch - t.ultimoContacto) + ' s') +
+    kv('Zigbee', t.online ? ('canal ' + t.zbCanal + ' · 0x' + t.zbAddr.toString(16)) : 'sin enlace') +
+    kv('Nº de serie', t.serie) +
+    kv('Firmware', 'v' + t.fwMayor + '.' + t.fwMenor + '.' + t.fwParche) +
+    kv('Alarmas', al.length ? al.join(', ') : 'ninguna');
+  grafica();
+}
+function grafica() {
+  var c = $('ch'), g = c.getContext('2d'), W = c.clientWidth, H = 200;
+  if (c.width !== W) { c.width = W; c.height = H; }
+  g.clearRect(0, 0, W, H);
+  var pad = 26, w = W - pad * 2, h = H - 22;
+  g.strokeStyle = '#23303D'; g.lineWidth = 1;
+  for (var i = 0; i <= 4; i++) {
+    var y = 10 + h * i / 4;
+    g.beginPath(); g.moveTo(pad, y); g.lineTo(pad + w, y); g.stroke();
+  }
+  g.fillStyle = '#5e7388'; g.font = '10px ui-monospace,monospace';
+  g.fillText('+55°', 2, 14); g.fillText('0°', 2, 10 + h / 2 + 3); g.fillText('−55°', 2, 10 + h - 1);
+  if (traza.length < 2) { g.fillText('sin datos todavía — dale a Simular', pad + 10, 10 + h / 2 - 8); return; }
+  var x = function (i) { return pad + w * i / (traza.length - 1); };
+  var yAng = function (a) { return 10 + h / 2 - (a / 55) * (h / 2); };
+  var yS = function (s) { return 10 + h - (s / 100) * h; };
+  /* seguimiento puro, de referencia */
+  g.strokeStyle = '#32485d'; g.setLineDash([3, 3]); g.beginPath();
+  traza.forEach(function (p, i) { i ? g.lineTo(x(i), yAng(p.tt)) : g.moveTo(x(i), yAng(p.tt)); });
+  g.stroke(); g.setLineDash([]);
+  /* SoC */
+  g.strokeStyle = '#e0a52b'; g.beginPath();
+  traza.forEach(function (p, i) { i ? g.lineTo(x(i), yS(p.s)) : g.moveTo(x(i), yS(p.s)); });
+  g.stroke();
+  /* ángulo real */
+  g.strokeStyle = '#36D399'; g.lineWidth = 1.8; g.beginPath();
+  traza.forEach(function (p, i) { i ? g.lineTo(x(i), yAng(p.a)) : g.moveTo(x(i), yAng(p.a)); });
+  g.stroke();
+  $('subCh').innerHTML = 'Verde: inclinación real. Punteado: seguimiento puro (sin abanderar ni restringir). Ámbar: SoC (0–100 % en toda la altura). ' +
+    traza.length + ' muestras desde las ' + dosD(traza[0].h) + ':00.';
+}
+
+/* ═══════════════════ controles ═══════════════════ */
+function etiquetaTiempo() {
+  var md = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31],
+      mn = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  var n = +$('dia').value, mi = 0;
+  while (mi < 11 && n > md[mi]) { n -= md[mi]; mi++; }
+  $('diaV').textContent = n + ' ' + mn[mi];
+  var hh = +$('hora').value;
+  $('horaV').textContent = dosD(hh) + ':' + dosD((hh % 1) * 60);
+  $('velV').textContent = '×' + $('vel').value;
+}
+function pintaGrupos() {
+  var n = P.cfg.grupos, h = '', i;
+  for (i = 1; i <= 10; i++) {
+    h += '<span class="cg' + (P.ncu.limpieza[i - 1] ? ' on' : '') + (i > n ? '" style="opacity:.35' : '') + '" data-g="' + i + '">G' + i + '</span>';
+  }
+  $('limpieza').innerHTML = h;
+  var sg = $('fzGrupo'); sg.innerHTML = '';
+  for (i = 1; i <= n; i++) sg.add(new Option('Grupo ' + i, String(i)));
+  sg.add(new Option('Todos', '0'));
+}
+$('limpieza').addEventListener('click', function (e) {
+  var g = e.target.getAttribute && e.target.getAttribute('data-g');
+  if (!g) return;
+  P.ncu.limpieza[+g - 1] = !P.ncu.limpieza[+g - 1];
+  pintaGrupos(); toca();
+});
+function estadoForzados() {
+  var l = [];
+  for (var s = 1; s <= 7; s++) if (P.ncu.forzados[s]) {
+    var gs = [];
+    for (var g = 1; g <= 10; g++) if (P.ncu.forzados[s] & (1 << (g - 1))) gs.push('G' + g);
+    l.push('SP' + s + ' → ' + gs.join(' '));
+  }
+  $('fzEstado').innerHTML = l.length ? l.join('<br>') : 'Sin forzados activos.';
+}
+function fuerza(on) {
+  var sp = +$('fzSp').value, g = +$('fzGrupo').value;
+  if (g === 0) { for (var i = 1; i <= P.cfg.grupos; i++) P.ncu.fuerza(sp, i, on); }
+  else P.ncu.fuerza(sp, g, on);
+  estadoForzados(); toca();
+}
+$('btnFzOn').onclick = function () { fuerza(true); };
+$('btnFzOff').onclick = function () { fuerza(false); };
+function modoFlota(m) {
+  P.tcus.forEach(function (t) { t.modo = m; if (m === SIM.MODO.MANUAL) t.manual = +$('manSet').value; });
+  toca();
+};
+$('btnAuto').onclick = function () { modoFlota(SIM.MODO.AUTO); };
+$('btnManual').onclick = function () { modoFlota(SIM.MODO.MANUAL); };
+$('btnOff').onclick = function () { modoFlota(SIM.MODO.OFF); };
+$('btnSeta').onclick = function () {
+  P.ncu.seta = !P.ncu.seta;
+  this.textContent = P.ncu.seta ? '⏹ SETA PULSADA — soltar' : '⏹ SETA de emergencia';
+  this.className = 'btn ' + (P.ncu.seta ? 'on' : 'dang');
+  toca();
+};
+$('upsFallo').onchange = function () { P.ncu.upsFallo = this.checked; toca(); };
+$('btnPlay').onclick = function () {
+  corriendo = !corriendo;
+  this.textContent = corriendo ? '⏸ Pausa' : '▶ Simular';
+  this.className = 'btn' + (corriendo ? ' sec' : '');
+};
+$('btnPaso').onclick = function () { for (var i = 0; i < 60; i++) P.paso(1); apunta(); $('hora').value = P.t.hora; etiquetaTiempo(); pintaTodo(); };
+$('btnRehacer').onclick = function () { construye(); };
+
+['dia', 'hora'].forEach(function (id) {
+  $(id).oninput = function () {
+    P.t.dia = +$('dia').value; P.t.hora = +$('hora').value; traza = [];
+    etiquetaTiempo(); P.paso(0.001); pintaTodo();
+  };
+});
+$('vel').oninput = etiquetaTiempo;
+$('nGrup').oninput = function () { $('nGrupV').textContent = this.value; };
+['viento', 'racha', 'dirViento', 'nubes', 'nieve', 'temp'].forEach(function (id) {
+  $(id).oninput = function () {
+    aplicaMeteo();
+    $('vientoV').textContent = num(+$('viento').value, 1) + ' m/s · ' + num(+$('viento').value * 3.6, 0) + ' km/h';
+    $('rachaV').textContent = $('racha').value + ' %';
+    var d = +$('dirViento').value;
+    $('dirV').textContent = d + '° ' + ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][Math.round(d / 45) % 8];
+    $('nubesV').textContent = $('nubes').value + ' %';
+    $('nieveV').textContent = $('nieve').value + ' cm';
+    $('tempV').textContent = $('temp').value + ' °C';
+    toca();
+  };
+});
+/* averías: actúan sobre el equipo seleccionado */
+function sincronizaAverias() {
+  var t = tcuSel();
+  $('selNota').textContent = (t.repetidor ? 'Repetidor ' : 'TCU ') + t.id;
+  $('avEje').checked = t.ejeBloqueado; $('avOff').checked = !t.online; $('avSeta').checked = t.setaLocal;
+  $('socSet').value = Math.round(t.soc); $('socV').textContent = num(t.soc, 0) + ' %';
+  $('manSet').value = Math.round(t.manual); $('manV').textContent = num(t.manual, 0) + '°';
+}
+$('avEje').onchange = function () { tcuSel().ejeBloqueado = this.checked; toca(); };
+$('avOff').onchange = function () { tcuSel().online = !this.checked; toca(); };
+$('avSeta').onchange = function () { tcuSel().setaLocal = this.checked; toca(); };
+$('socSet').oninput = function () { tcuSel().soc = +this.value; $('socV').textContent = this.value + ' %'; toca(); };
+$('manSet').oninput = function () {
+  var t = tcuSel(); t.manual = +this.value; t.modo = SIM.MODO.MANUAL;
+  $('manV').textContent = this.value + '°'; toca();
+};
+/* pestañas y visor Modbus */
+Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
+  b.onclick = function () {
+    Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (x) { x.classList.remove('on'); });
+    b.classList.add('on');
+    vista = b.getAttribute('data-v');
+    $('vplanta').style.display = vista === 'planta' ? '' : 'none';
+    $('vmodbus').style.display = vista === 'modbus' ? '' : 'none';
+    $('vtcu').style.display = vista === 'tcu' ? '' : 'none';
+    pintaTodo();
+  };
+});
+$('mbDev').onchange = function () { pintaUnidades(); previos = {}; pintaTodo(); };
+$('mbUnidad').onchange = function () {
+  var v = +this.value;
+  if ($('mbDev').value !== 'hsu') { sel = v; sincronizaAverias(); }
+  previos = {}; pintaTodo();
+};
+$('mbFiltro').oninput = pintaModbus;
+$('mbSoloSim').onchange = pintaModbus;
+$('mbSoloAct').onchange = pintaModbus;
+$('mbCsv').onclick = exportaCsv;
+$('loc').onchange = construye;
+['nTcu', 'nHsu', 'nRep'].forEach(function (id) { $(id).onchange = construye; });
+$('nGrup').onchange = construye;
+$('perfil').onchange = construye;
+$('acFallo').onchange = function () { P.ncu.acFallo = this.checked; toca(); };
+
+/* en marcha */
+construye();
+sincronizaAverias();
+etiquetaTiempo();
+requestAnimationFrame(bucle);
+</script>
+</body>
+</html>
