@@ -14,6 +14,7 @@ Si hay un endpoint SCADA disponible pinta el ángulo, consigna, SoC y estado **m
 - **Vista TCU:** CAD glTF/GLB real con conectores etiquetados (PV+/PV-, motor A/B, RS485, antena, portafusibles, seta, válvula); fallback automático del GLB vía jsDelivr y, en último caso, modelo aproximado.
 - **Estado en vivo:** consume `GET {SCADA_URL}/live` (CORS abierto) y filtra por `ncu/tcu`; si no hay conexión usa el simulador local.
 - **Modelo solar local:** posición solar (Gorraiz, lat 42,81°N, lon −1,58°), hora civil→solar (DST + ecuación del tiempo), true-tracking + backtracking, tope ±55°, slew 0,17°/s, batería/carga y lógica de viento.
+- **Simulador de gestión de batería (`bateria.html`):** balance energético del TCU hora a hora sobre meteo real (previsión Open-Meteo 3–16 días) o sintética. Modelo canónico de SolarGPT (celdas 00.2t + 11.5b): consumos medidos (idle/sleep 0,64 W; motor Wh/° = 0,0503 + 0,000845·|θ|, pico 50 W), carga solar ∝ GHI limitada por C-rate seguro LiFePO₄ según temperatura, perfiles reales de TCU (SP/STRING, 3/6 Ah, 45/60 W). Gestión de energía: winter mode (correcciones gruesas 3°/h) y control con restricción energética del TFM (SOC crítico → aparcar y sobrevivir, rearme con histéresis), con comparativa «sin gestión vs con gestión», análisis de ciclos LFP (EFC, DoD, vida a 80 % SOH) y gráficas SOC/balance/meteo/posición.
 
 ## Uso
 
