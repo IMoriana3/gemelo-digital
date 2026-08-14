@@ -44,10 +44,19 @@ function interp(x, xs, ys) {
 }
 function motorW(ang) { return interp(Math.abs(ang), M_ANG, M_MA) / 1000 * 24.0; }
 
-/* constantes del motor canónico que difieren de las del estudio */
+/* constantes del motor canónico que difieren de las del estudio.
+   DOS de las que había aquí ya no divergen, y por eso están puestas al valor común:
+     · el sleep, que tcu_compare.py tenía en 0,45 W frente a los 0,64 de tcu.py;
+     · la velocidad del actuador, 0,16 °/s frente a los 0,17 medidos en campo
+       (tracker.CANONICAL_SLEW_RATE_DEG_PER_S), que es la que usa todo lo demás.
+   Se dejan los casos históricos abajo para poder ver qué compró cada arreglo, pero el
+   contraste que importa —la curva de motor— se hace ya con la MISMA velocidad en los
+   dos lados, que es la única forma de medir la curva y no la mezcla de las dos cosas. */
 const C = {
-  vMax: 0.16,            /* °/s con carga (el estudio y el gemelo usan 0,17) */
-  pSleep: 0.45,          /* W de noche (el estudio usa 0,64 también de noche) */
+  vMax: F.e.SLEW_DPS,   /* 0,17 °/s · el canónico, común a los dos lados */
+  vMaxViejo: 0.16,           /* el que traía el port del cuaderno, para el caso histórico */
+  pSleep: 0.64,              /* W de noche · idle = sleep, común a los dos lados */
+  pSleepViejo: 0.45,         /* el que traía tcu_compare.py antes de alinearlo */
   pIdle: 0.64,
   vEmpty: 20.0, vFull: 29.2,
   iChMax: 1.2,           /* A — el límite de corriente de carga */
@@ -104,9 +113,9 @@ function balance(nombre, opts) {
       pEnt = pf.chgW * Math.min(s.poa / 1000, 1) * F.e.ETA_CHG;
     }
     /* --- consumo --- */
-    const pBase = s.dia ? C.pIdle : (opts.sleep45 ? C.pSleep : F.e.SLEEP_W);
+    const pBase = s.dia ? C.pIdle : (opts.sleep45 ? C.pSleepViejo : F.e.SLEEP_W);
     let whMot;
-    if (opts.motorCurva) whMot = motorW(s.ang) * (s.mov / C.vMax) / 3600;
+    if (opts.motorCurva) whMot = motorW(s.ang) * (s.mov / (opts.slew16 ? C.vMaxViejo : C.vMax)) / 3600;
     else whMot = s.mov * (F.motor.K0 + F.motor.K1 * s.ang);
     if (E.winter) whMot *= F.e.DEG_H_WINTER / F.e.DEG_H_NORMAL;
     const whCal = s.calef ? F.heaterW(s.tAmb) * dtH : 0;
@@ -148,12 +157,13 @@ function balance(nombre, opts) {
 const casos = [
   balance('REFERENCIA · como está hoy (bateria.html)', {}),
   balance('A · η del cargador: curva η(G) de PS26002', { etaCurva: true }),
-  balance('B · motor: curva medida I(θ) a 0,16 °/s', { motorCurva: true }),
+  balance('B · motor: curva medida I(θ), misma velocidad', { motorCurva: true }),
   balance('C · límite por corriente de carga (1,2 A)', { limiteCorriente: true }),
   balance('D · coef. térmico del panel (γ=−0,0035)', { etaCurva: true, gamma: true }),
-  balance('E · sleep 0,45 W en vez de 0,64', { sleep45: true }),
-  balance('TODO · el cálculo del motor SolarGPT junto', {
-    etaCurva: true, gamma: true, motorCurva: true, limiteCorriente: true, sleep45: true })
+  balance('TODO · lo que sigue abierto, junto', {
+    etaCurva: true, gamma: true, motorCurva: true, limiteCorriente: true }),
+  balance('· (ya resuelto) sleep 0,45 W como estaba', { sleep45: true }),
+  balance('· (ya resuelto) 0,16 °/s + la curva de motor', { motorCurva: true, slew16: true })
 ];
 
 const ref = casos[0];
