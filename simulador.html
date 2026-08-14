@@ -199,7 +199,8 @@
           <input type="range" id="socCrit" min="5" max="70" value="30"></div>
         <div class="fld"><label>Carga completa cada <span class="rv" id="fcDaysV">5 días</span></label>
           <input type="range" id="fcDays" min="1" max="15" value="5"></div>
-        <label class="sw"><input type="checkbox" id="winter"><span>Winter mode (3 °/h)</span></label>
+        <label class="sw"><input type="checkbox" id="winter"><span>Winter mode</span></label>
+        <div class="note" id="winterNota" style="margin-top:-4px"></div>
         <div class="fld"><label>T mínima de carga <span class="rv" id="tMinV">0 °C</span></label>
           <input type="range" id="tMin" min="-20" max="15" value="0"></div>
         <div class="fld"><label>Cut-in del regulador <span class="rv" id="poaMinV">50 W/m²</span></label>
@@ -211,7 +212,7 @@
             <option value="3250">SUNNER · 3250 mA medio @25,6 V</option>
             <option value="4000">SUNNER · 4000 mA medio @25,6 V</option>
           </select></div>
-        <div class="note">Mismo modelo que <a href="bateria.html" style="color:var(--blue)">bateria.html</a>: techo de carga, carga completa periódica, defensa por SOC crítico con rearme +2 %, C-rate seguro LiFePO₄ y JEITA.</div>
+        <div class="note" id="fisicaNota"></div>
       </div>
 
       <div class="grp">
@@ -372,6 +373,7 @@
   </div>
 </div>
 
+<script src="sim/fisica.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/planta.js"></script>
 <script>
@@ -390,12 +392,12 @@ var PLANTAS = [
 ];
 PLANTAS.forEach(function (p, i) { $('loc').add(new Option(p.n, String(i))); });
 SIM.PERFILES.forEach(function (p) { $('perfil').add(new Option(p.n, p.id)); });
-$('perfil').value = 'SP_60W_6Ah';
+$('perfil').value = SIM.FISICA.perfilPorDefecto;   /* el DEFAULT_PROFILE de tcu.py */
 var TIPO_TXT = { sp: 'panel propio', string: 'del string', ac: 'alterna' };
 var NOTA_TIPO = {
   sp: 'Panel auxiliar propio sobre el seguidor: lo que entra depende del <b>ángulo real</b>, así que abanderar o quedarse parado también cuesta carga.',
   string: 'Del propio string por regulador: con sol satura en su tope y la batería carga a lo que dejan la temperatura y el C-rate.',
-  ac: 'De alterna. La batería queda de respaldo y flota al 100 %: solo trabaja si se corta la red (abajo, en los mandos de la NCU).'
+  ac: 'De alterna, y en el canon <b>sin batería</b>: mientras haya red va servido, y si se corta (abajo, en los mandos de la NCU) el TCU se cae entero.'
 };
 
 var P = null, sel = 1, corriendo = false, vista = 'planta';
@@ -413,9 +415,13 @@ function construye() {
     perfil: $('perfil').value,
     motorModel: $('motorModel').value === 'factiun' ? 'factiun' : +$('motorModel').value,
     estrategia: {
-      activa: $('estrOn').checked, socTgt: +$('socTgt').value, socCrit: +$('socCrit').value,
-      fcDays: +$('fcDays').value, winter: $('winter').checked,
-      tMin: +$('tMin').value, poaMin: +$('poaMin').value
+      activa: $('estrOn').checked, socCrit: +$('socCrit').value, winter: $('winter').checked,
+      tMin: +$('tMin').value, poaMin: +$('poaMin').value,
+      /* techo y calibración solo se pasan si ya estaban puestos a mano; si no, los
+         pone la política canónica del modo */
+      politicaAuto: P ? P.cfg.estrategia.politicaAuto : true,
+      socTgt: P && !P.cfg.estrategia.politicaAuto ? +$('socTgt').value : undefined,
+      fcDays: P && !P.cfg.estrategia.politicaAuto ? +$('fcDays').value : undefined
     },
     dia: +$('dia').value, hora: +$('hora').value,
     loc: { n: L.n, lat: L.lat, lon: L.lon, tz: L.tz, dst: L.dst }
@@ -431,23 +437,41 @@ function construye() {
 /* La estrategia se aplica EN CALIENTE: cambiar el techo o el SOC crítico a mitad de
    una simulación es justo lo que se quiere poder hacer para ver el efecto, sin tener
    que rehacer la planta y perder el estado. */
-function aplicaEstrategia() {
+function aplicaEstrategia(manual) {
   if (!P) return;
-  var E = P.cfg.estrategia;
+  var E = P.cfg.estrategia, pol = SIM.FISICA.politica;
   E.activa = $('estrOn').checked;
-  E.socTgt = +$('socTgt').value;
   E.socCrit = +$('socCrit').value;
-  E.fcDays = +$('fcDays').value;
   E.winter = $('winter').checked;
   E.tMin = +$('tMin').value;
   E.poaMin = +$('poaMin').value;
+  /* El techo y la calibración los pone la POLÍTICA CANÓNICA del modo (verano 80 %/5 d ·
+     invierno 90 %/3 d, de solargpt_core/tcu.py). En cuanto alguien mueve uno de los dos
+     a mano, se pasa a manual y el simulador deja de imponerlos: un «¿y si…?» es
+     legítimo, pero tiene que verse que ya no es el valor de la casa. */
+  if (manual === 'techo' || manual === 'calib') E.politicaAuto = false;
+  if (E.politicaAuto) {
+    P.aplicaPolitica();
+    $('socTgt').value = E.socTgt; $('fcDays').value = E.fcDays;
+  } else {
+    E.socTgt = +$('socTgt').value;
+    E.fcDays = +$('fcDays').value;
+  }
   var mm = $('motorModel').value;
   P.cfg.motorModel = mm === 'factiun' ? 'factiun' : +mm;
-  $('socTgtV').textContent = E.socTgt + ' %';
+  var canon = E.politicaAuto ? '' : ' <b style="color:var(--warn)">· a mano</b>';
+  $('socTgtV').innerHTML = E.socTgt + ' %' + canon;
   $('socCritV').textContent = E.socCrit + ' %';
-  $('fcDaysV').textContent = E.fcDays + (E.fcDays === 1 ? ' día' : ' días');
+  $('fcDaysV').innerHTML = E.fcDays + (E.fcDays === 1 ? ' día' : ' días') + canon;
   $('tMinV').textContent = E.tMin + ' °C';
   $('poaMinV').textContent = E.poaMin + ' W/m²';
+  $('winterNota').innerHTML = 'Canónico: techo ' + pol.invierno.socMax + ' %, calibración cada ' +
+    pol.invierno.calibDias + ' días y consumo de motor a ' + SIM.K.DEG_H_WINTER + ' °/h en vez de ' +
+    SIM.K.DEG_H_NORMAL + '. Verano: ' + pol.verano.socMax + ' % / ' + pol.verano.calibDias + ' d.';
+  $('fisicaNota').innerHTML = 'Esta física no se escribe aquí: <code>sim/fisica.js</code> la genera de ' +
+    '<b>solargpt_core/tcu.py</b> (perfiles, motor medido y políticas), <b>tfm_constants.py</b> y el bloque ' +
+    'canónico de <a href="bateria.html" style="color:var(--blue)">bateria.html</a> (C-rate, JEITA, calefactor, ' +
+    'transposición). El generador se niega a escribir si las tres fuentes no dicen lo mismo.';
 }
 function aplicaMeteo() {
   P.meteo.viento = +$('viento').value;
@@ -1010,8 +1034,9 @@ $('loc').onchange = construye;
 $('nGrup').onchange = construye;
 $('perfil').onchange = construye;
 ['estrOn', 'socTgt', 'socCrit', 'fcDays', 'winter', 'tMin', 'poaMin', 'motorModel'].forEach(function (id) {
-  $(id).oninput = function () { aplicaEstrategia(); toca(); };
-  $(id).onchange = function () { aplicaEstrategia(); toca(); };
+  var manual = id === 'socTgt' ? 'techo' : (id === 'fcDays' ? 'calib' : null);
+  $(id).oninput = function () { aplicaEstrategia(manual); toca(); };
+  $(id).onchange = function () { aplicaEstrategia(manual); toca(); };
 });
 $('acFallo').onchange = function () { P.ncu.acFallo = this.checked; toca(); };
 

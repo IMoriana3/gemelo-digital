@@ -2,7 +2,7 @@
 
 > Una planta entera de seguidores Factiun simulada equipo a equipo —NCU, TCUs, HSUs y repetidores—, con la jerarquía de control real y **el mapa Modbus de los tres dispositivos actualizándose en vivo**.
 
-Se abre en `../simulador.html`. No necesita servidor ni red: es HTML y dos ficheros JS.
+Se abre en `../simulador.html`. No necesita servidor ni red: es HTML y tres ficheros JS.
 
 ## Por qué
 
@@ -21,15 +21,29 @@ De más a menos prioritaria. La regla que gana es la que fija el ángulo objetiv
 | 2 | **SP3 nieve** | alarma de nieve o `force_sp_3` | 30001 bits 15:13 = 3 |
 | 3 | **SP4 limpieza** | interruptor de limpieza del grupo (NCU 30100 bits 12:3) o `force_sp_4` | 30001 bits 15:13 = 4 |
 | 4 | **SP2/5/6/7** | forzados genéricos de la NCU (40002, 40005–40007) | 30001 bits 15:13 |
-| 5 | **Restricción de batería** | SoC bajo L3 → defensa; bajo L2 → congela; bajo L1 → lazo grueso (*winter mode*) | 30001 bits 2:1 · 30002 bits 13/12/11 |
+| 5 | **Restricción de batería** | SoC bajo el crítico de la estrategia → defensa 55° y *no disponible*; bajo L2 del firmware → congela el seguimiento | 30001 bits 2:1 · 30002 bits 13/12/11 |
 | 6 | **Manual** | modo 1, consigna del operador | 30001 bits 9:8 = 1 |
 | 7 | **Auto** | seguimiento solar con backtracking; de noche, posición nocturna | 30001 bits 9:8 = 2, bit 0 = backtracking |
 
-El viento manda sobre manual, que es como se comporta el equipo real. El abanderamiento sigue la estrategia canónica **B2**: parcial a partir de 40 km/h (±30° mínimo, cara al sol), total a partir de 60 km/h (±55°), y **30 minutos de histéresis** antes de desabanderar.
+El viento manda sobre manual, que es como se comporta el equipo real. El abanderamiento sigue la estrategia canónica **B2**: parcial a partir de 40 km/h (±30° mínimo, cara al sol), total a partir de 60 km/h (±55°), y **una hora de histéresis** antes de desabanderar — el `DESTOW_HOLD_H` canónico, que tampoco se escribe aquí.
 
 ## Alimentación y gestión de batería
 
-Es **el mismo modelo que `bateria.html`**, no una versión reducida: mismas constantes, mismas curvas y misma estrategia, aplicados a cada TCU de la planta a la vez y en tiempo continuo en vez de a un equipo hora a hora.
+No es una copia del modelo canónico: **se lee de él**. `sim/fisica.js` lo genera `tools/extrae_fisica.mjs` a partir de sus fuentes, igual que el mapa Modbus:
+
+| Fuente | Qué aporta |
+|---|---|
+| `SolarGPTfull/solargpt/solargpt_core/tcu.py` | los 8 perfiles de hardware, el motor medido (campaña *Consumos motor_02 @24V*) y las políticas de verano/invierno. El fichero se declara a sí mismo *single source of truth* |
+| `SolarGPTfull/solargpt/scripts/tfm_constants.py` | las constantes del TFM |
+| `bateria.html` | las curvas y umbrales de la estrategia, que solo existen en JS: C-rate, JEITA, calefactor, transposición isotrópica, abanderamiento |
+
+Lo que hace que valga la pena no es copiar sin manos: es que **contrasta lo que aparece en más de una fuente y se niega a generar si divergen** (K0, K1, pico de motor, idle, tensión nominal, capacidad). Que es exactamente el bug que cuenta la cabecera de `tfm_constants.py`: `cap_Wh` copiado en cuatro scripts y arreglado solo en uno.
+
+```bash
+node tools/extrae_fisica.mjs   # tras tocar la gestión de batería en SolarGPT
+```
+
+Conectarlo ya encontró dos divergencias con lo que había aquí escrito a mano: el **winter mode** no era solo mover menos (sube el techo a 90 % y calibra cada 3 días), y el perfil de **alterna canónico va sin batería** (`AC_grid`, 0 Ah).
 
 ### De qué come el TCU
 
@@ -39,16 +53,16 @@ El mismo seguidor se comporta de forma muy distinta según su alimentación, y e
 |---|---|---|
 | **SP** (*self-powered*) | panel auxiliar propio de 45 o 60 W sobre el seguidor | lo que entra depende del **ángulo real**: abanderar o quedarse parado también cuesta carga. Es el caso duro |
 | **STRING** | del propio string FV por regulador de 60 W | con sol satura en su tope; la carga la limitan la temperatura y el C-rate, no el panel |
-| **AC** | de alterna | la batería flota en el techo y solo trabaja si se corta la red. Sin batería, un corte tumba el TCU |
+| **AC** | de alterna (`AC_grid`) | en el canon va **sin batería**: mientras haya red va servido, y un corte tumba el TCU entero |
 
 ### Estrategia oficial SUNNER
 
 | Parámetro | Por defecto | Qué hace |
 |---|---|---|
-| **SOC objetivo** (techo) | 80 % | con la estrategia activa la batería **no sube de ahí**: por encima del techo no entra carga, aunque sobre sol. Es lo que evita tenerla siempre al 100 % envejeciendo |
-| **Carga completa** | cada 5 días | uno de cada N días el techo sube al 100 %, para reequilibrar |
+| **SOC objetivo** (techo) | 80 % verano · **90 % invierno** | con la estrategia activa la batería **no sube de ahí**: por encima del techo no entra carga, aunque sobre sol. Es lo que evita tenerla siempre al 100 % envejeciendo |
+| **Carga completa** | cada 5 días verano · **3 invierno** | uno de cada N días el techo sube al 100 %, para reequilibrar |
 | **SOC crítico** | 30 % | por debajo, el seguidor va a **defensa 55°** y cuenta como **no disponible**. Rearma al superar el crítico **+2 %**, que es lo que evita el baile de entrar y salir al rozar el umbral |
-| **Winter mode** | off | el seguidor va al mismo sitio pero con paso tan grueso que consume como si corrigiera **3 °/h en vez de 10** — un 70 % menos de motor |
+| **Winter mode** | off | tres cosas a la vez, las tres canónicas: techo **90 %**, calibración cada **3 días**, y paso tan grueso que consume como si corrigiera **3 °/h en vez de 10** — un 70 % menos de motor |
 | **T mínima de carga** | 0 °C | por debajo no se admite carga… salvo versión LT |
 | **Cut-in del regulador** | 50 W/m² | por debajo de ese POA el regulador no arranca |
 
@@ -70,13 +84,16 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 |---|---|
 | `planta.js` | el motor: física, jerarquía y generación de la imagen de registros. Sin DOM — se ejecuta igual en Node |
 | `modbus-map.js` | **generado**, no se toca a mano: 515 direcciones del mapa canónico |
-| `prueba.mjs` | prueba de humo: 72 comprobaciones sobre un día de planta |
+| `fisica.js` | **generado**, no se toca a mano: perfiles, constantes medidas, políticas y curvas de carga |
+| `prueba.mjs` | prueba de humo: 76 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
+| `../tools/extrae_fisica.mjs` | regenera `fisica.js` desde SolarGPT y `bateria.html`, contrastando las fuentes |
 
 ```bash
-node sim/prueba.mjs          # física + codificación de registros
-node tools/extrae_mapa.mjs   # si cambia la ficha del mapa
+node sim/prueba.mjs           # física + codificación de registros
+node tools/extrae_mapa.mjs    # si cambia la ficha del mapa
+node tools/extrae_fisica.mjs  # si cambia la gestión de batería en SolarGPT
 ```
 
 La prueba decodifica **al revés** que el motor —como lo haría el colector del SCADA, no como lo escribió quien lo codificó—, así que un cambio de orden de palabra o de escala se cae en el sitio.
@@ -85,7 +102,7 @@ La prueba decodifica **al revés** que el motor —como lo haría el colector de
 
 - **Mapa y bits:** ficha `cobertura-zigbee/modbus.html`, que transcribe `NCU_Modbus_Map_R7`, `SUNNER_TCU_ModbusMap_v6` (FW v1.4.3) y `HSU_Modbus_Map_R23`.
 - **Escalas de los registros propios de la TCU:** las que usa la [TCU Toolbox](https://github.com/IMoriana3/scada/tree/main/tools/tcu-toolbox) contra equipo real — tilt ×10, ángulos solares ×100, temperaturas ×10, tensiones mV, corrientes mA, reloj en BCD.
-- **Física, gestión de batería y umbrales:** los mismos que `bateria.html` (estudio de disponibilidad de batería de SUNNER + física canónica de SolarGPT 00.2t + 11.5b): consumo de electrónica 0,64 W, motor Wh/° = 0,0503 + 0,000845·|θ|, η de carga 0,90, C-rate seguro, JEITA, calefactor LT, giro a 0,17 °/s, deadband de 2,5°, GCR 0,397, tope ±55°. Las funciones `cRateSafeLFP`, `hotDerate`, `heaterW` y `poaAt` son las de allí, sin cambiar una coma.
+- **Física, gestión de batería y umbrales:** no se escriben en este repo — llegan por `sim/fisica.js` desde SolarGPT (`solargpt_core/tcu.py`, `tfm_constants.py`) y el bloque canónico de `bateria.html`. Ver la sección de gestión de batería.
 - **Criterio de salud** (`ok` / `aviso` / `alarma` / `offline`): el del colector del SCADA y la toolbox.
 
 ## Lo que hay que saber antes de fiarse

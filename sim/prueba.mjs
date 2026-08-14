@@ -70,11 +70,16 @@ t.modo = SIM.MODO.MANUAL; t.manual = 0;
 for (let i = 0; i < 20 * 60; i += 5) P.paso(5);
 ok(t.sp === SIM.SP.VIENTO && Math.abs(t.angulo) > 50, 'en manual sigue abanderado', t.angulo.toFixed(1) + '°');
 
-console.log('\n── calma: histéresis de 30 min antes de desabanderar ──');
+console.log('\n── calma: histéresis canónica antes de desabanderar ──');
+/* DESTOW_HOLD_H sale de bateria.html vía fisica.js: 1 h, no los 30 min que yo había
+   supuesto. Si allí cambia, esta prueba se ajusta sola. */
+const holdMin = SIM.K.DESTOW_MIN;
 P.meteo.viento = 2;
 P.paso(60); ok(t.sp === SIM.SP.VIENTO, 'al minuto todavía abanderado');
-for (let i = 0; i < 35 * 60; i += 30) P.paso(30);
-ok(t.sp === SIM.SP.NINGUNA, 'pasados 30 min, desabanderado', t.estadoTxt());
+for (let i = 0; i < (holdMin - 5) * 60; i += 30) P.paso(30);
+ok(t.sp === SIM.SP.VIENTO, 'a falta de 5 min, todavía abanderado', 'hold de ' + holdMin + ' min');
+for (let i = 0; i < 10 * 60; i += 30) P.paso(30);
+ok(t.sp === SIM.SP.NINGUNA, 'pasado el hold, desabanderado', t.estadoTxt());
 t.modo = SIM.MODO.AUTO;
 
 console.log('\n── seta de emergencia ──');
@@ -147,7 +152,7 @@ function noche(perfil, opts = {}) {
   for (let i = 0; i < 24 * 60; i++) p.paso(60);      /* 24 h */
   return p.tcu(1);
 }
-const sp = noche('SP_45W_3Ah'), st = noche('STRING_60W_3Ah'), ac = noche('AC_6Ah');
+const sp = noche('SP_45W_3Ah'), st = noche('STRING_60W_3Ah'), ac = noche('AC_grid');
 console.log('   SoC tras 24 h de invierno nublado — SP:', sp.soc.toFixed(1) + '%',
             '· STRING:', st.soc.toFixed(1) + '%', '· AC:', ac.soc.toFixed(1) + '%');
 /* con la estrategia puesta los tres topan en el mismo techo del 80 %, así que para
@@ -162,7 +167,7 @@ function apretado(perfil) {
 const spA = apretado('SP_45W_3Ah'), stA = apretado('STRING_60W_3Ah');
 console.log('   tres días al 92 % de nubes — SP:', spA.toFixed(1) + '% · STRING:', stA.toFixed(1) + '%');
 ok(stA > spA + 5, 'con poca luz, el STRING aguanta bastante mejor que el panel propio');
-ok(ac.soc > 79 && ac.soc <= 80.01, 'el TCU de alterna se queda clavado en el techo de la estrategia', ac.soc.toFixed(1) + '%');
+ok(ac.soc === 100 && ac.ah === 0, 'el perfil de alterna del canon va sin batería y no tiene SoC que gestionar');
 
 console.log('\n── estrategia oficial SUNNER (la de bateria.html) ──');
 function conEstrategia(e, dias = 2, perfil = 'SP_60W_6Ah') {
@@ -192,6 +197,21 @@ pCrit.tcu(1).soc = 31; pCrit.paso(60);
 ok(pCrit.tcu(1).parked, 'a 31 % sigue en defensa (rearme +2 %)');
 pCrit.tcu(1).soc = 33; pCrit.paso(60);
 ok(!pCrit.tcu(1).parked, 'a 33 % rearma y vuelve a seguir');
+
+/* La política del modo sale del canon (tcu.py), no de un número escrito aquí:
+   verano 80 %/5 d · invierno 90 %/3 d. El winter mode NO es solo mover menos. */
+const pol = SIM.FISICA.politica;
+const pVer = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0 });
+ok(pVer.cfg.estrategia.socTgt === pol.verano.socMax && pVer.cfg.estrategia.fcDays === pol.verano.calibDias,
+   'en verano, techo y calibración canónicos', pol.verano.socMax + ' % / ' + pol.verano.calibDias + ' d');
+const pInv = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, estrategia: { winter: true } });
+ok(pInv.cfg.estrategia.socTgt === pol.invierno.socMax && pInv.cfg.estrategia.fcDays === pol.invierno.calibDias,
+   'el winter mode sube el techo y calibra más a menudo', pol.invierno.socMax + ' % / ' + pol.invierno.calibDias + ' d');
+ok(pol.invierno.socMax > pol.verano.socMax && pol.invierno.calibDias < pol.verano.calibDias,
+   'y el canon dice que invierno es más alto y más frecuente que verano');
+const pMano = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, estrategia: { socTgt: 65 } });
+pMano.paso(60);
+ok(pMano.cfg.estrategia.socTgt === 65, 'un techo puesto a mano no lo pisa la política automática');
 
 /* winter mode: mismo día, mismo sol, un tercio de correcciones */
 function motorDia(winter) {
@@ -226,23 +246,19 @@ ok(sinLt.soc < 50, 'sin calefactar, a −5 °C no carga y el SoC baja');
 ok(conLt.soc > sinLt.soc, 'la versión LT calefactada sí consigue cargar', 'calefactor ' + (conLt.calefactor ? 'ON' : 'off'));
 
 console.log('\n── un día entero sin explotar ──');
-ok(Math.abs(sp.ah - 3) < 0.01 && Math.abs(ac.ah - 6) < 0.01, 'la capacidad sale del perfil (3 Ah / 6 Ah)');
+ok(sp.ah === 3 && st.ah === 3 && ac.ah === 0, 'la capacidad sale del perfil canónico (3 Ah · 3 Ah · sin batería)');
+ok(SIM.PERFILES.length === 8 && SIM.PERFILES.every(p => p.id && p.wh >= 0 && ['sp', 'string', 'ac'].includes(p.tipo)),
+   'los 8 perfiles vienen de PROFILES de solargpt_core/tcu.py', SIM.PERFILES.map(p => p.id).join(', '));
 const pSp = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, perfil: 'SP_60W_6Ah' });
 ok(bitde(pSp.regsTCU(pSp.tcu(1))[30000], 0, 3) === SIM.TIPO_REG.sp, 'un TCU autoalimentado se declara tipo BAT en 30000');
 
-const pAc = new SIM.Planta({ nTcu: 2, nHsu: 1, nRep: 0, perfil: 'AC_6Ah', dia: 200, hora: 22 });
+const pAc = new SIM.Planta({ nTcu: 2, nHsu: 1, nRep: 0, perfil: 'AC_grid', dia: 200, hora: 22 });
 ok(bitde(pAc.regsTCU(pAc.tcu(1))[30000], 0, 3) === SIM.TIPO_REG.ac, 'un TCU de alterna se declara tipo AC en 30000');
-pAc.ncu.acFallo = true;
-for (let i = 0; i < 120; i++) pAc.paso(60);          /* 2 h de corte, de noche */
-ok(pAc.tcu(1).iBat < 0, 'con la alterna cortada tira de la batería de respaldo', pAc.tcu(1).iBat.toFixed(0) + ' mA');
-ok(pAc.tcu(1).soc < 100, 'y el SoC empieza a bajar', pAc.tcu(1).soc.toFixed(2) + '%');
-
-const pSin = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, perfil: 'AC_SIN_BAT', dia: 200, hora: 22 });
-ok(bitde(pSin.regsTCU(pSin.tcu(1))[30002], 10, 10) === 1, 'sin batería levanta el bit «battery not connected»');
-pSin.ncu.acFallo = true; pSin.paso(60);
-ok(pSin.tcu(1).salud() === 'offline', 'sin batería y sin alterna, el TCU se cae', pSin.tcu(1).estadoTxt());
-pSin.ncu.acFallo = false; pSin.paso(60);
-ok(pSin.tcu(1).salud() !== 'offline', 'y vuelve al volver la red');
+ok(bitde(pAc.regsTCU(pAc.tcu(1))[30002], 10, 10) === 1, 'sin batería levanta el bit «battery not connected»');
+pAc.ncu.acFallo = true; pAc.paso(60);
+ok(pAc.tcu(1).salud() === 'offline', 'sin batería y sin alterna, el TCU se cae', pAc.tcu(1).estadoTxt());
+pAc.ncu.acFallo = false; pAc.paso(60);
+ok(pAc.tcu(1).salud() !== 'offline', 'y vuelve al volver la red');
 
 console.log('\n── un día entero sin explotar ──');
 const P2 = new SIM.Planta({ nTcu: 6, nHsu: 1, nRep: 0, dia: 15, hora: 0 });

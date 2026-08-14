@@ -51,35 +51,48 @@
 
 var D2R = Math.PI / 180, R2D = 180 / Math.PI;
 
-/* ═══════════════════ constantes canónicas ═══════════════════ */
+/* ═══════════════════ física canónica ═══════════════════
+   NO se copia aquí: se lee de sim/fisica.js, que un generador saca de sus fuentes
+   (solargpt_core/tcu.py, tfm_constants.py y el bloque canónico de bateria.html) y
+   se niega a escribir si las tres no dicen lo mismo. Si mañana se toca la gestión
+   de batería en SolarGPT, aquí llega con `node tools/extrae_fisica.mjs`, sin que
+   nadie tenga que acordarse de actualizar una constante a mano. */
+var F = (typeof window !== 'undefined' && window.FISICA) ||
+        (typeof require === 'function' ? require('./fisica.js') : null);
+if (!F) throw new Error('falta sim/fisica.js — genéralo con: node tools/extrae_fisica.mjs');
+
 var K = {
-  AXIS_MAX: 55,                 /* tope mecánico ±55° */
-  GCR: 2.382 / 6.0,             /* cuerda/pitch de la 1V bífila (0,397) */
-  NIGHT_POS: -5,                /* posición nocturna */
-  SLEW_DPS: 0.17,               /* velocidad real de giro (°/s) */
-  HYST_DEG: 2.5,                /* deadband del lazo (estudio SUNNER) */
-  WIND_T1: 11.111,              /* 40 km/h → abanderamiento parcial */
-  WIND_T2: 16.667,              /* 60 km/h → abanderamiento total */
-  PARTIAL_STOW: 30,             /* ° mínimos del abanderamiento parcial */
-  DESTOW_MIN: 30,               /* min de histéresis para desabanderar */
+  /* ---- del canon (fisica.js) ---- */
+  AXIS_MAX: F.e.AXIS_MAX,       /* tope mecánico ±55° */
+  GCR: F.e.GCR,                 /* cuerda/pitch de la 1V bífila */
+  NIGHT_POS: F.e.NIGHT_POS,     /* posición nocturna */
+  DEFENSE_POS: F.e.DEFENSE_POS, /* defensa por batería */
+  SLEW_DPS: F.e.SLEW_DPS,       /* velocidad real de giro (°/s) */
+  HYST_DEG: F.e.HYST_DEG,       /* deadband del lazo */
+  WIND_T1: F.e.WIND_T1,         /* 40 km/h → abanderamiento parcial */
+  WIND_T2: F.e.WIND_T2,         /* 60 km/h → abanderamiento total */
+  PARTIAL_STOW: F.e.PARTIAL_STOW_DEG,
+  DESTOW_MIN: F.e.DESTOW_HOLD_H * 60,     /* histéresis de desabanderamiento (min) */
+  IDLE_W: F.idleW, SLEEP_W: F.sleepW,     /* electrónica, de día y de noche (W) */
+  MOT_K0: F.motor.K0, MOT_K1: F.motor.K1, /* motor: Wh/° = K0 + K1·|θ| */
+  MOTOR_PEAK_W: F.motor.picoW,            /* tope instantáneo del motor (W) */
+  ETA_CHG: F.e.ETA_CHG,                   /* rendimiento de la carga */
+  DEG_H_NORMAL: F.e.DEG_H_NORMAL, DEG_H_WINTER: F.e.DEG_H_WINTER,
+  ALBEDO: F.e.ALBEDO,
+  JEITA_T3: F.e.JEITA_T3, JEITA_T4: F.e.JEITA_T4,
+  V_NOM: F.vNom,                          /* tensión nominal del bus */
+
+  /* ---- propio del simulador: no está en el canon porque el estudio de batería no
+     lo necesita, pero un gemelo que sirve registros Modbus sí ---- */
   SNOW_ALARM_M: 0.03,           /* 3 cm de nieve → alarma de nieve */
-  BAT_AH: 6, BAT_MAH: 6000,     /* batería 6 Ah */
-  PV_PEAK: 60,                  /* panel auxiliar 60 Wp */
-  V_MIN: 24.0, V_MAX: 27.2,     /* 8S LiFePO4 (V) */
+  V_MIN: 24.0, V_MAX: 27.2,     /* curva de tensión 8S LiFePO4, para el registro 30094 */
   V_ABS: 27.0,                  /* tensión de absorción */
-  /* ---- física medida, idéntica a bateria.html (00.2t: campaña «Consumos motor_02 @24V») ---- */
-  IDLE_W: 0.64, SLEEP_W: 0.64,  /* electrónica, de día y de noche (W) */
-  MOT_K0: 0.0503, MOT_K1: 0.000845, /* motor: Wh/° = K0 + K1·|θ| */
-  MOTOR_PEAK_W: 50,             /* tope instantáneo del motor (W) */
-  ETA_CHG: 0.90,                /* rendimiento de la carga */
-  DEG_H_NORMAL: 10.0, DEG_H_WINTER: 3.0,  /* °/h solar por modo (11.5b) */
-  ALBEDO: 0.2,
-  JEITA_T3: 35, JEITA_T4: 45,   /* lado caliente: reduce a 35 °C, bloquea a 45 */
   T_CHG_MIN: 0,                 /* bajo 0 °C no se carga (salvo versión calefactada) */
-  SOC_L1: 50, SOC_L2: 35, SOC_L3: 25,  /* umbrales de batería (configurables, 41081) */
-  SOC_REARME: 5,                /* histéresis de salida de los modos de batería (%) */
-  V_NOM: 25.6                   /* tensión nominal del bus (8S LiFePO4) */
+  SOC_L1: 50, SOC_L2: 35, SOC_L3: 25,  /* umbrales de ALARMA del firmware (41081) */
+  SOC_REARME: 5                 /* histéresis de salida de los modos de batería (%) */
 };
+/* las cuatro curvas, tal cual salen de bateria.html */
+var cRateSafeLFP = F.cRateSafeLFP, hotDerate = F.hotDerate, heaterW = F.heaterW, poaAt = F.poaAt;
 
 /* ── Alimentación y gestión de batería ──────────────────────────────────────
    Un TCU no siempre come de lo mismo, y eso cambia por completo su gestión de
@@ -94,27 +107,23 @@ var K = {
        satura en su tope y la batería carga a lo que le dejan la temperatura y el
        C-rate. Sigue dependiendo del sol —de noche descarga igual— pero no del
        ángulo, salvo por lo que baja el propio string al abanderar.
-     · AC — alimentado de alterna (TCU tipo AC del registro 30000). La batería
-       queda como respaldo: flota al 100 % y solo trabaja si se corta la alterna,
-       que es justo el ensayo que interesa poder provocar.
+     · AC — alimentado de alterna (TCU tipo AC del registro 30000). En el canon el
+       perfil de alterna va SIN batería: si se corta la red, el TCU se cae. Es el
+       ensayo que interesa poder provocar.
 
    El tipo va en el mapa: 30000 bits 3:0 «TCU type (BAT/AC/Unknown)» y, en el
    bloque completo de la NCU, «Power supply voltage (in the self-powered TCU, it
-   is the dedicated solar panel voltage)» — el mismo registro sirve a los tres. */
-var PERFILES = [
-  { id: 'SP_45W_3Ah',        n: 'SP · panel 45 W · 3 Ah (76,8 Wh)',      tipo: 'sp',     wh: 76.8,  chgW: 45 },
-  { id: 'SP_45W_6Ah',        n: 'SP · panel 45 W · 6 Ah (153,6 Wh)',     tipo: 'sp',     wh: 153.6, chgW: 45 },
-  { id: 'SP_60W_6Ah',        n: 'SP · panel 60 W · 6 Ah (153,6 Wh)',     tipo: 'sp',     wh: 153.6, chgW: 60 },
-  { id: 'SP_45W_6Ah_LT',     n: 'SP · 45 W · 6 Ah · LT calefactada',     tipo: 'sp',     wh: 153.6, chgW: 45, heated: true },
-  { id: 'STRING_60W_3Ah',    n: 'STRING · regulador 60 W · 3 Ah',        tipo: 'string', wh: 76.8,  chgW: 60 },
-  { id: 'STRING_60W_6Ah',    n: 'STRING · regulador 60 W · 6 Ah',        tipo: 'string', wh: 153.6, chgW: 60 },
-  { id: 'STRING_60W_6Ah_LT', n: 'STRING · 60 W · 6 Ah · LT calefactada', tipo: 'string', wh: 153.6, chgW: 60, heated: true },
-  { id: 'AC_6Ah',            n: 'AC · alterna + batería de respaldo',    tipo: 'ac',     wh: 153.6, chgW: 60 },
-  { id: 'AC_SIN_BAT',        n: 'AC · sin batería',                      tipo: 'ac',     wh: 0,     chgW: 60 }
-];
+   is the dedicated solar panel voltage)» — el mismo registro sirve a los tres.
+
+   Los perfiles NO se escriben aquí: son los ocho de PROFILES de solargpt_core/tcu.py
+   («single source of truth», dice el propio fichero), con su capacidad, su potencia
+   de carga y su variante calefactada. */
+var PERFILES = F.perfiles;
 function perfilDe(id) {
-  for (var i = 0; i < PERFILES.length; i++) if (PERFILES[i].id === id) return PERFILES[i];
-  return PERFILES[2];                           /* SP 60 W · 6 Ah, el del gemelo */
+  var i;
+  for (i = 0; i < PERFILES.length; i++) if (PERFILES[i].id === id) return PERFILES[i];
+  for (i = 0; i < PERFILES.length; i++) if (PERFILES[i].id === F.perfilPorDefecto) return PERFILES[i];
+  return PERFILES[0];
 }
 /* Código de tipo del registro 30000 (bits 3:0). ⚠ El documento nombra el campo
    «TCU type (BAT/AC/Unknown)» pero no transcribe sus valores: esta asignación es
@@ -195,39 +204,10 @@ function cosAOI(P, tiltDeg) {
   return Math.max(0, sx * Math.sin(r) + sz * Math.cos(r));
 }
 
-/* ═══════════════════ carga de la batería ═══════════════════
-   Las tres funciones de bateria.html, sin cambiar una coma: son las que fijan
-   cuánta carga admite la batería y son la diferencia entre un modelo que dice
-   «hay sol, luego carga» y uno que sabe que a −5 °C no carga casi nada.        */
-
-/* C-rate seguro de una LiFePO4 según temperatura (física canónica 11.5b). */
-function cRateSafeLFP(t) {
-  if (t > 25) return 1.0;
-  if (t > 10) return 0.5 + (t - 10) * (0.5 / 15);
-  if (t > 0)  return 0.2 + (t / 10) * 0.3;
-  if (t > -10) return 0.05 + (t + 10) * (0.15 / 10);
-  return 0.05;
-}
-/* JEITA por el lado caliente (§04.1a): T3 = 35 °C reduce, T4 = 45 °C bloquea. */
-function hotDerate(t) {
-  if (t >= K.JEITA_T4) return 0;
-  if (t > K.JEITA_T3) return 1 - 0.7 * (t - K.JEITA_T3) / (K.JEITA_T4 - K.JEITA_T3);
-  return 1;
-}
-/* Calefactor de las versiones -LT (PS26002_RevA): P = 1 + 0,15·|T| W bajo 0 °C. */
-function heaterW(t) { return t < 0 ? 1.0 + 0.15 * Math.abs(t) : 0; }
-
-/* Transposición isotrópica: irradiancia en el plano girado R grados. Es la que
-   convierte «hay 700 W/m² de global» en «a este panel, girado así, le llegan
-   tantos» — y por eso abanderar o quedarse en defensa se paga en carga. */
-function poaAt(Rdeg, el, az, bh, dh, gh) {
-  if (el <= 0) return 0;
-  var R = Rdeg * D2R, sx = Math.cos(el) * Math.sin(az), sz = Math.sin(el);
-  var cAOI = Math.max(0, sx * Math.sin(R) + sz * Math.cos(R));
-  var rb = cAOI / Math.max(Math.sin(el), 0.087);
-  var cb = Math.cos(Math.abs(R));
-  return Math.max(0, bh) * rb + Math.max(0, dh) * (1 + cb) / 2 + K.ALBEDO * Math.max(0, gh) * (1 - cb) / 2;
-}
+/* Las cuatro curvas que fijan cuánta carga admite la batería —cRateSafeLFP,
+   hotDerate, heaterW y poaAt— no viven aquí: llegan de fisica.js, que las trae
+   íntegras de bateria.html. Son la diferencia entre un modelo que dice «hay sol,
+   luego carga» y uno que sabe que a −5 °C no carga casi nada. */
 
 /* ═══════════════════ codificación Modbus ═══════════════════ */
 function u16(v) { return Math.round(v) & 0xFFFF; }
@@ -303,7 +283,7 @@ function TCU(id, planta, opts) {
   this.rnd = new Rnd(1000 + id * 13);
   /* de qué come este TCU: perfil de planta salvo que se le fije uno propio */
   this.perfil = perfilDe(opts.perfil || (planta.cfg && planta.cfg.perfil));
-  this.ah = this.perfil.wh / K.V_NOM;      /* 3 Ah o 6 Ah según el perfil; 0 si no lleva batería */
+  this.ah = this.perfil.ah;                /* 3 Ah o 6 Ah según el perfil; 0 si no lleva batería */
   this.acOk = true;
 
   /* un repetidor nace plano y ahí se queda: no tiene seguidor ni motor que mover */
@@ -539,7 +519,9 @@ TCU.prototype.energia = function (dt, ang, whMotor) {
        el TCU pasa a vivir de la batería de respaldo — y el que no la lleva, se apaga. */
     this.acOk = !this.p.ncu.acFallo;
     poaChg = this.acOk ? 1000 : 0;
-    pEntrada = this.acOk ? pf.chgW * K.ETA_CHG : 0;
+    /* el perfil de alterna del canon declara chgW = 0 («Grid (unlimited)»): no es que
+       no dé potencia, es que no tiene un cargador con tope — da lo que se le pida */
+    pEntrada = this.acOk ? (pf.chgW > 0 ? pf.chgW * K.ETA_CHG : (dtH > 0 ? whCons / dtH : 0)) : 0;
     this.vPanel = this.acOk ? 30000 : 0;
   } else {
     /* SP y STRING ven el mismo sol y el mismo ángulo; lo que cambia es el tamaño
@@ -731,7 +713,7 @@ function Planta(cfg) {
     grupos: cfg.grupos || 4,
     deadband: cfg.deadband != null ? cfg.deadband : K.HYST_DEG,
     iMotorMax: cfg.iMotorMax || 4000,        /* mA de disparo de sobrecorriente */
-    perfil: cfg.perfil || 'SP_60W_6Ah',      /* alimentación y batería (SP · STRING · AC) */
+    perfil: cfg.perfil || F.perfilPorDefecto, /* alimentación y batería (SP · STRING · AC) */
     /* modelo de consumo del motor: 'factiun' (Wh/° medidos) o los mA medios de
        SUNNER a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
     motorModel: cfg.motorModel || 'factiun',
@@ -739,12 +721,19 @@ function Planta(cfg) {
        por defecto que el simulador de batería (estrategia oficial SUNNER) */
     estrategia: {
       activa:  cfg.estrategia && cfg.estrategia.activa  != null ? cfg.estrategia.activa  : true,
-      socTgt:  cfg.estrategia && cfg.estrategia.socTgt  != null ? cfg.estrategia.socTgt  : 80,  /* techo normal (%) */
       socCrit: cfg.estrategia && cfg.estrategia.socCrit != null ? cfg.estrategia.socCrit : 30,  /* defensa (%) */
-      fcDays:  cfg.estrategia && cfg.estrategia.fcDays  != null ? cfg.estrategia.fcDays  : 5,   /* carga completa cada N días */
       winter:  cfg.estrategia && cfg.estrategia.winter  != null ? cfg.estrategia.winter  : false,
       tMin:    cfg.estrategia && cfg.estrategia.tMin    != null ? cfg.estrategia.tMin    : 0,   /* T mínima de carga (°C) */
-      poaMin:  cfg.estrategia && cfg.estrategia.poaMin  != null ? cfg.estrategia.poaMin  : 50   /* cut-in del regulador (W/m²) */
+      poaMin:  cfg.estrategia && cfg.estrategia.poaMin  != null ? cfg.estrategia.poaMin  : 50,  /* cut-in del regulador (W/m²) */
+      /* El techo de SOC y cada cuánto se calibra NO son valores sueltos: son la
+         política canónica del modo (verano 80 %/5 d · invierno 90 %/3 d, de tcu.py).
+         Con politicaAuto los toma del canon según el modo; se pone en false en cuanto
+         alguien mueve el valor a mano para hacer un «¿y si…?». */
+      politicaAuto: (cfg.estrategia && cfg.estrategia.politicaAuto != null)
+        ? cfg.estrategia.politicaAuto
+        : !(cfg.estrategia && (cfg.estrategia.socTgt != null || cfg.estrategia.fcDays != null)),
+      socTgt:  cfg.estrategia && cfg.estrategia.socTgt  != null ? cfg.estrategia.socTgt  : F.politica.verano.socMax,
+      fcDays:  cfg.estrategia && cfg.estrategia.fcDays  != null ? cfg.estrategia.fcDays  : F.politica.verano.calibDias
     },
     defensaTilt: cfg.defensaTilt != null ? cfg.defensaTilt : 55,
     /* tilt de cada posición de seguridad (registros 41044…41056 de la TCU) */
@@ -783,7 +772,18 @@ function Planta(cfg) {
 
 /* Un paso de simulación. dt en segundos SIMULADOS (no de reloj de pared): así el
    acelerador de la interfaz no cambia la física, solo cuánto tiempo pasa por tick. */
+/* Política de carga del modo activo. El winter mode canónico (tcu.py) no es solo
+   mover menos: sube el techo de SOC al 90 % y calibra cada 3 días en vez de cada 5,
+   porque en invierno hay menos sol y conviene aprovechar el que hay. */
+Planta.prototype.aplicaPolitica = function () {
+  var E = this.cfg.estrategia;
+  if (!E.politicaAuto) return;
+  var p = F.politica[E.winter ? 'invierno' : 'verano'];
+  E.socTgt = p.socMax; E.fcDays = p.calibDias;
+};
+
 Planta.prototype.paso = function (dt) {
+  this.aplicaPolitica();
   this.t.hora += dt / 3600;
   while (this.t.hora >= 24) { this.t.hora -= 24; this.t.dia = (this.t.dia % 365) + 1; }
   /* el epoch avanza en segundos ENTEROS y guarda aparte lo que sobra: las marcas de
@@ -1083,7 +1083,7 @@ Planta.prototype.fechaSim = function () {
 /* ═══════════════════ exportación ═══════════════════ */
 var API = {
   Planta: Planta, TCU: TCU, HSU: HSU, NCU: NCU, Meteo: Meteo,
-  PERFILES: PERFILES, perfilDe: perfilDe, TIPO_REG: TIPO_REG,
+  PERFILES: PERFILES, perfilDe: perfilDe, TIPO_REG: TIPO_REG, FISICA: F,
   K: K, MODO: MODO, MODO_TXT: MODO_TXT, SP: SP, SP_TXT: SP_TXT,
   CRIT: CRIT, CRIT_TXT: CRIT_TXT, FUENTE_SP: FUENTE_SP, FUENTE_TXT: FUENTE_TXT,
   CHARGER_TXT: CHARGER_TXT,
