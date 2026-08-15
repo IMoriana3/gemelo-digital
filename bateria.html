@@ -228,11 +228,14 @@ var LOCS=[
 var K0=0.0503, K1=0.000845, IDLE_W=0.64, SLEEP_W=0.64, ETA_CHG=0.90, V_NOM=25.6;
 /* Curva de corriente del motor MEDIDA — «Consumos motor_02.xlsx», TCU 33, media de los
    barridos E→O y O→E a 24 V. Es el dato primario del que salió el ajuste Wh/° = K0+K1·|θ|,
-   que corre un 9-16 % por debajo. El pico real es 2800 mA × 24 V = 67,2 W (no los 50 W
-   nominales que se usaban como tope y que truncaban el consumo a ángulos altos). */
+   que corre un 9-16 % por debajo.
+   NO se aplica ningún tope de potencia. El «motor peak limit: 50 W» de las constantes canónicas
+   (solargpt_core/tcu.py y celda 00.2t) es un envolvente de diseño, no una lectura del ensayo:
+   la propia curva llega a 2800 mA × 24 V = 67,2 W a 55°, así que ese tope truncaba consumo real.
+   El límite físico del consumo por paso lo pone la velocidad de giro, no un recorte de potencia. */
 var MOTOR_ANG=[0,2.5,7.5,12.5,17.5,22.5,27.5,32.5,37.5,42.5,47.5,52.5,55];
 var MOTOR_MA =[1500,1588,1600,1714,1860,1975,2135,2277,2409,2497,2651,2740,2800];
-var MOTOR_V_MEAS=24.0, MOTOR_PEAK_W=2800/1000*24.0;      /* 67,2 W medidos */
+var MOTOR_V_MEAS=24.0;
 /* Un TCU STRING no se alimenta de un panel dedicado sino de un string completo de varios kW:
    sus 60 W son una fracción mínima de lo que el string produce, así que dispone de la potencia
    nominal en cuanto hay generación apreciable, en vez de escalar con la irradiancia como el
@@ -529,9 +532,9 @@ function simulate(meteo,prof,loc,soc0,opts){
     if(deltaEff>0.01){
       var slewH=deltaEff/SLEW_DPS/3600;                    /* tiempo real de giro (h) */
       if(opts.motorModel==='curva')
-        motorWh=motorW(avgPos)*Math.min(slewH,dtH);        /* P medida × tiempo de giro */
+        motorWh=motorW(avgPos)*Math.min(slewH,dtH);        /* P medida × tiempo de giro, sin tope */
       else if(opts.motorModel==='factiun')
-        motorWh=Math.min(deltaEff*(K0+K1*Math.abs(avgPos)),MOTOR_PEAK_W*dtH);
+        motorWh=deltaEff*(K0+K1*Math.abs(avgPos));         /* el ajuste, sin recortar */
       else
         motorWh=(opts.motorModel/1000)*V_NOM*Math.min(slewH,dtH);
     }
@@ -887,7 +890,7 @@ $('year').onchange();      /* estado inicial coherente con la opción selecciona
 function profNote(){
   var P=PROFILES[$('prof').value];
   $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · calefactor '+(P.heated?'<b>sí (LT)</b> — carga bajo 0 °C':'no')+
-    ' · motor 36 W a 0° … 67,2 W a 55° · regulador η(G) PS26002_RevA';
+    ' · motor 36 W a 0° … 67,2 W a 55° (curva medida, sin tope) · regulador η(G) PS26002_RevA';
 }
 profNote();$('prof').onchange=profNote;
 [['tilt','tiltV','°'],['poaMin','poaMinV',' W/m²'],['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
@@ -1196,7 +1199,7 @@ function buildReport(){
      ['Versión calefactada (-LT)',{v:prof.heated?'sí — P = 1,0 + 0,15·|T| W bajo 0 °C':'no'}],
      ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes (medido Factiun)'}],
      ['Modelo de consumo de motor',{v:motorTxt}],
-     ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55°'}],
+     ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
      ['Efecto del viento sobre el consumo',{v:'NO considerado — ver limitaciones',cls:'wn'}],
      ['Tª mínima de carga',{v:opts.tMin+' °C'}],
      ['Umbral duro de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
@@ -1292,7 +1295,7 @@ function buildReport(){
      '<li>La transposición al plano del generador es isotrópica; en cielos muy anisótropos subestima ligeramente la captación directa.</li>'+
      '<li>La temperatura de la batería se toma igual a la ambiente, salvo en las versiones -LT con el calefactor activo.</li>'+
      '<li><b>No se valora el efecto del viento sobre el consumo del motor.</b> El viento interviene únicamente para disparar el abanderamiento; el par adicional que opone sobre la estructura, y por tanto la corriente extra que exige al motor, no se modelan. El consumo simulado es en consecuencia un <b>límite inferior</b> en emplazamientos ventosos: la metodología de referencia declara 2 m/s como velocidad de viento de referencia para ese efecto, que aquí no se aplica. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
-     '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades.</li>'+
+     '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
      '<li>La suciedad y la nieve acumulada no penalizan la captación del panel de la TCU.</li>'+
      '<li>Los resultados dependen de la serie meteorológica empleada; para decisiones de compra conviene el barrido multianual del apartado 8.</li>'+
      '</ul>';
