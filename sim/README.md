@@ -60,6 +60,39 @@ Y una regla que **no está en el canon pero sí en el equipo**, aprendida de `te
 
 Ojo con el azimut: el canon usa convención pvlib (90° = este al amanecer) y la casa usa 0 en el mediodía solar con negativo al este. La conversión es `az_pvlib = 180 + az`, y equivocarla abandera al lado contrario sin que salte nada.
 
+## El algoritmo se LEE del motor, no se reescribe aquí
+
+El gemelo simula el **equipo**: el lazo con su banda muerta en pulsos, el inclinómetro que miente, la seta enclavada, la batería, el mapa Modbus. Eso es suyo.
+
+El **algoritmo** de seguimiento —backtracking, política de cielo cubierto, night latch— es de SolarGPT. Portarlo a JavaScript es exactamente lo que crea dos versiones que divergen sin que nadie se entere: ya pasó con el sleep (0,45 contra 0,64 W) y con la velocidad del actuador (0,16 contra 0,17 °/s), números que coincidían **el día que se copiaron**.
+
+Así que no se calcula: se **pide**. Al arrancar una simulación, `sim/canon.js` le pregunta al motor local por la trayectoria del ángulo del día y el gemelo la ejecuta.
+
+```bash
+cd SolarGPTfull/server && ./run.sh        # http://127.0.0.1:8765
+```
+
+```
+POST /tracker  →  solargpt_core.poa.compute_tracker_poa_v2
+{ lat, lon, dia, paso_min, nubes_pct, diffuse_policy, system:{gcr, max_angle_deg, …} }
+→ { hora[], theta_target_deg[], theta_deg[], diffuse_active[], POA_Global[], … }
+```
+
+Es el patrón que la plataforma ya tenía y que el propio servicio declara: *«la ficha detecta el servicio (GET /health); si está, usa el motor; si no, cae al modelo de navegador (primer orden)»*. El endpoint `/tracker` es nuevo; el servicio no lo es.
+
+**Lo que no se hace es caer al modelo del navegador en silencio.** La interfaz enseña cuál manda —`SolarGPT ✓` o `navegador`— y con cuál se ha obtenido cada número. Un resultado de primer orden que parece uno canónico es peor que no tener resultado.
+
+Dos cosas que siguen siendo del gemelo aunque el motor esté conectado:
+
+- **Las maniobras de protección.** Con viento fuerte manda el abanderamiento, no la trayectoria: el motor calcula el día entero por adelantado y no sabe lo que va a medir una HSU dentro de diez minutos. Guard en `prueba.mjs`.
+- **La ejecución.** El motor dice adónde ir; cuánto tarda en llegar, cuánto cuesta y qué publica en 30110 lo pone el gemelo.
+
+⚠ **Convención de signo**: el motor devuelve θ en convención pvlib (positivo = cara al este) y la casa usa la contraria. La conversión se hace **una vez**, al recibir la serie, en `canon.js`.
+
+### Y entonces, ¿para qué sigue estando `difusa.js`?
+
+Para cuando no hay motor. Es el «modelo de navegador (primer orden)» que la plataforma contempla, y está marcado como tal en pantalla. Si el servicio está levantado, `difusa.js` **no se ejecuta**: la política la aplicó el canon dentro de la trayectoria.
+
 ### Cielo cubierto — `difusa.js`, del canon `DiffuseConfig`
 
 Con el cielo cerrado casi toda la irradiancia es **difusa**, y la difusa no viene de donde está el sol: viene de todo el cielo. Apuntar al sol deja de ser lo mejor, porque un plano de canto ve menos cielo que uno tumbado. Las cuatro políticas de `solargpt_core/tracker.py`, elegibles en la interfaz:

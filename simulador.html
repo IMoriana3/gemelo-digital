@@ -254,6 +254,12 @@
           <select id="polDifusa"></select>
           <div class="note" id="difNota" style="margin-top:4px"></div>
         </div>
+        <div class="fld">
+          <label>Motor del algoritmo <span class="rv" id="canonEstado">—</span></label>
+          <input type="text" id="canonUrl" value="http://127.0.0.1:8765">
+          <button class="btn sec" id="btnCanon2" style="margin-top:5px">🔌 Buscar el motor de SolarGPT</button>
+          <div class="note" id="canonNota" style="margin-top:4px"></div>
+        </div>
         <div class="fld"><label>Nubes <span class="rv" id="nubesV">15 %</span></label>
           <input type="range" id="nubes" min="0" max="100" value="15"></div>
         <div class="fld"><label>Nieve acumulada <span class="rv" id="nieveV">0 cm</span></label>
@@ -419,6 +425,7 @@
 <script src="sim/viento.js"></script>
 <script src="sim/cielo.js"></script>
 <script src="sim/difusa.js"></script>
+<script src="sim/canon.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/planta.js"></script>
 <script>
@@ -532,6 +539,74 @@ function aplicaEstrategia(manual) {
 /* Cambia la política de cielo cubierto en caliente. Cada TCU lleva su propia máquina
    (la de poa_switch tiene memoria: confirmación y permanencia), así que se le pone una
    nueva a cada uno en vez de rehacer la planta. */
+
+/* ═══════════════════ el algoritmo se LEE del motor ═══════════════════
+   El gemelo simula el equipo; el algoritmo de seguimiento es de SolarGPT. En vez de
+   llevar aquí una segunda versión, se le pide al motor local la trayectoria del día
+   y se ejecuta. Si el motor no está, se usa el modelo del navegador —que es de
+   primer orden— y se DICE, que es la diferencia entre una degradación y un engaño. */
+var CANON = new Canon({ url: 'http://127.0.0.1:8765' });
+
+function pintaCanon(msg) {
+  var e = $('canonEstado'), n = $('canonNota');
+  var st = CANON.estado;
+  e.textContent = st === 'listo' ? (CANON.hayTrayectoria() ? 'SolarGPT ✓' : 'conectado') :
+                  st === 'ausente' ? 'navegador' : st === 'error' ? 'error' : '—';
+  e.style.color = st === 'listo' ? 'var(--ok)' : st === 'error' ? 'var(--danger)' : 'var(--warn)';
+  if (msg) { n.innerHTML = msg; return; }
+  if (st === 'listo' && CANON.hayTrayectoria()) {
+    var s = CANON.serie;
+    n.innerHTML = 'El ángulo lo calcula <b>' + s.motor + '</b> y el gemelo lo ejecuta. ' +
+      'Trayectoria de ' + s.hora.length + ' puntos a ' + s.paso + ' min' +
+      (s.resumen ? ' · difusa activa el ' + (s.resumen.difusa_pct || 0).toFixed(0) + ' % del día' : '') + '.';
+  } else if (st === 'listo') {
+    n.innerHTML = 'Motor encontrado' + (CANON.detalle ? ' (' + CANON.detalle + ')' : '') + ', pidiendo la trayectoria…';
+  } else if (st === 'ausente') {
+    n.innerHTML = '<b>Sin motor.</b> El seguimiento lo calcula el navegador, que es un modelo de ' +
+      '<b>primer orden</b>: backtracking plano y la política de difusa portada, no la del canon. ' +
+      'Para usar el de verdad: <code>cd SolarGPTfull/server &amp;&amp; ./run.sh</code>';
+  } else if (st === 'error') {
+    n.innerHTML = '<b>El motor respondió mal:</b> ' + CANON.detalle + '. Se sigue con el modelo del navegador.';
+  }
+}
+
+function conectaCanon() {
+  CANON.url = ($('canonUrl').value || '').replace(/\/+$/, '') || Canon.POR_DEFECTO;
+  pintaCanon('Buscando el motor en <code>' + CANON.url + '</code>…');
+  CANON.busca().then(function (hay) {
+    if (!hay) { if (P) P.cfg.canon = null; pintaCanon(); return; }
+    pideTrayectoria();
+  });
+}
+
+/* Una petición por día/sitio/política: la trayectoria es de todo el día. */
+var _ultimaPet = '';
+function pideTrayectoria(forzar) {
+  if (CANON.estado !== 'listo' || !P) return;
+  var loc = PLANTAS[+$('loc').value];
+  var pet = {
+    lat: loc.lat, lon: loc.lon, tz_horas: loc.tz,
+    dia: P.t.dia, paso_min: 5,
+    nubes_pct: +$('nubes').value || 0,
+    temp_c: +$('temp').value || 15,
+    viento_ms: 0,
+    diffuse_policy: $('polDifusa').value,
+    enable_stow: false,            /* el abanderamiento lo lleva el gemelo con las HSU */
+    system: { gcr: SIM.K.GCR, max_angle_deg: SIM.K.AXIS_MAX,
+              deadband_deg: 0, slew_rate_deg_per_s: SIM.K.SLEW_DPS,
+              night_position_deg: SIM.K.NIGHT_POS }
+  };
+  var clave = JSON.stringify(pet);
+  if (!forzar && clave === _ultimaPet) return;
+  _ultimaPet = clave;
+  pintaCanon('Pidiendo la trayectoria del día al motor…');
+  CANON.trayectoria(pet).then(function (s) {
+    P.cfg.canon = s ? CANON : null;
+    pintaCanon();
+    toca();
+  });
+}
+
 function aplicaPoliticaDifusa() {
   if (!P) return;
   var id = $('polDifusa').value, e = null, L = SIM.Difusa.POLITICAS;
@@ -1277,7 +1352,8 @@ $('loc').onchange = construye;
 $('nGrup').onchange = construye;
 $('perfil').onchange = construye;
 $('estrViento').onchange = function () { aplicaEstrategiaViento(); toca(); };
-$('polDifusa').onchange = function () { aplicaPoliticaDifusa(); toca(); };
+$('polDifusa').onchange = function () { aplicaPoliticaDifusa(); pideTrayectoria(); toca(); };
+$('btnCanon2').onclick = function () { conectaCanon(); };
 ['estrOn', 'socTgt', 'socCrit', 'fcDays', 'winter', 'tMin', 'poaMin', 'motorModel'].forEach(function (id) {
   var manual = id === 'socTgt' ? 'techo' : (id === 'fcDays' ? 'calib' : null);
   $(id).oninput = function () { aplicaEstrategia(manual); toca(); };
@@ -1297,6 +1373,7 @@ pintaParams();
 construye();
 aplicaEstrategia();
 aplicaPoliticaDifusa();
+conectaCanon();          /* si el motor está, manda él; si no, se dice */
 sincronizaAverias();
 etiquetaTiempo();
 requestAnimationFrame(bucle);

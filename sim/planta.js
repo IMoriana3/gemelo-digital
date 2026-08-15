@@ -672,8 +672,22 @@ TCU.prototype.decide = function (dt, ang) {
     obj = this.angulo; crit = CRIT.INHIBIDO; inhibido = true;
   } else if (!ang.dia) {
     obj = K.NIGHT_POS; crit = CRIT.NOCHE;
+  } else if (this.p.canonEn(this.p.t.hora)) {
+    /* EL ALGORITMO ES DEL MOTOR. Aquí no se decide el ángulo de seguimiento: se
+       ejecuta el que ha calculado SolarGPT, con su backtracking y su política de
+       cielo cubierto ya dentro. El gemelo pone lo que es suyo —la banda muerta en
+       pulsos, el inclinómetro que miente, el motor que consume— pero no una segunda
+       versión del algoritmo. */
+    var C = this.p.canonEn(this.p.t.hora);
+    obj = C.objetivo;
+    crit = C.difusa ? CRIT.DIFUSA : (Math.abs(C.objetivo) < Math.abs(ang.real) - 1e-3
+                                     ? CRIT.BACKTRACKING : CRIT.SEGUIMIENTO);
+    this.difusaActiva = C.difusa; this.difusaAlpha = C.alpha;
+    this.difusaTxt = C.difusa ? 'del motor canónico' : '';
+    this.motorCanon = true;
   } else {
     obj = ang.sel; crit = ang.btActivo ? CRIT.BACKTRACKING : CRIT.SEGUIMIENTO;
+    this.motorCanon = false;
   }
 
   /* ── CIELO CUBIERTO ────────────────────────────────────────────────────────
@@ -687,7 +701,8 @@ TCU.prototype.decide = function (dt, ang) {
      recogía un 2 % más. El tracker tumbado en pleno vendaval con el registro
      diciendo que estaba aparcado. Por eso aquí la difusa se pregunta primero si
      puede hablar, y casi siempre la respuesta es que no. */
-  var protegido = (crit !== CRIT.SEGUIMIENTO && crit !== CRIT.BACKTRACKING) || this.repetidor;
+  var protegido = (crit !== CRIT.SEGUIMIENTO && crit !== CRIT.BACKTRACKING) ||
+                  this.repetidor || this.motorCanon;
   var rD = this.dif.paso(dt / 60, ang.ghi, obj, this.poaDe(ang), protegido);
   this.difusaActiva = rD.activa; this.difusaAlpha = rD.alpha; this.difusaTxt = rD.modo;
   if (rD.activa) { obj = rD.theta; crit = CRIT.DIFUSA; }
@@ -1077,6 +1092,14 @@ Meteo.prototype.tAmb = function () {
 };
 
 /* ═══════════════════ la planta ═══════════════════ */
+/* La trayectoria canónica, si la hay, consultada por hora civil. Devuelve null
+   cuando no hay motor: es lo que hace que el gemelo caiga a su modelo de navegador
+   —y lo que la interfaz enseña, para que nadie confunda uno con otro. */
+Planta.prototype.canonEn = function (hora) {
+  var c = this.cfg.canon;
+  return (c && c.hayTrayectoria && c.hayTrayectoria()) ? c.en(hora) : null;
+};
+
 function Planta(cfg) {
   cfg = cfg || {};
   this.cfg = {
@@ -1094,6 +1117,11 @@ function Planta(cfg) {
     motorModel: cfg.motorModel || 'factiun',
     estrategiaViento: cfg.estrategiaViento || 'B2',   /* A1 · A2 · B1 · B2 */
     politicaDifusa: cfg.politicaDifusa || 'none',     /* none · flat · continuous · limited · poa_switch */
+    /* Trayectoria del ángulo calculada por el MOTOR canónico (SolarGPT, POST /tracker).
+       Si está, el gemelo la EJECUTA y no calcula ni el backtracking ni la política de
+       cielo cubierto: el algoritmo es de allí. Si no está, se usa el modelo del
+       navegador —que es de primer orden— y se dice en pantalla. */
+    canon: cfg.canon || null,
     /* ESTRATEGIA de gestión de batería — los mismos parámetros y los mismos valores
        por defecto que el simulador de batería (estrategia oficial SUNNER) */
     estrategia: {

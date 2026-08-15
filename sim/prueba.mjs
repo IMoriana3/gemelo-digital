@@ -622,5 +622,47 @@ ok(Math.abs(rC.theta) <= 20 + 1e-6,
    'la difusa nunca abre más ángulo del que dejó el backtracking',
    rC.theta.toFixed(1) + '° con seguimiento en 20°');
 
+/* ───────── el algoritmo se LEE del motor ─────────
+   Sin servicio no se puede probar la llamada, pero sí lo que importa: que cuando hay
+   trayectoria el gemelo la EJECUTA y calla su propio algoritmo, y que sin ella la
+   planta sigue andando con el modelo del navegador. */
+const Canon = (await import('./canon.js')).default;
+const falso = new Canon();
+falso.serie = {                                   /* trayectoria de mentira, a mano */
+  hora: [0, 6, 9, 12, 15, 18, 23],
+  theta: [-5, -5, -40, 0, 40, 5, -5],
+  objetivo: [-5, -5, -40, 0, 40, 5, -5],
+  difusa: [0, 0, 0, 1, 0, 0, 0], alpha: [0, 0, 0, 1, 0, 0, 0],
+  motor: 'de prueba', paso: 180
+};
+ok(falso.hayTrayectoria(), 'el cliente reconoce que tiene trayectoria');
+ok(Math.abs(falso.en(9).objetivo - (-40)) < 1e-9,
+   'y la consulta por hora da el punto exacto cuando cae justo', falso.en(9).objetivo + '°');
+ok(falso.en(10.5).objetivo > -40 && falso.en(10.5).objetivo < 0,
+   'e interpola entre puntos', falso.en(10.5).objetivo.toFixed(1) + '° a las 10:30');
+ok(falso.en(12).difusa === true, 'y trae si el motor dijo que la difusa estaba activa');
+
+const Pk = new SIM.Planta({ nTCU: 2, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 9, dia: 172,
+                            lat: 42.82, lon: -1.60, tz: 1, canon: falso });
+for (let i = 0; i < 5; i++) Pk.paso(60);
+ok(Pk.tcu(1).motorCanon === true, 'la planta ejecuta el ángulo del motor, no el suyo');
+ok(Math.abs(Pk.tcu(1).objetivo - falso.en(Pk.t.hora).objetivo) < 1e-6,
+   'y el objetivo es exactamente el que dijo el motor',
+   Pk.tcu(1).objetivo.toFixed(2) + '°');
+
+/* sin motor, el gemelo sigue andando con lo suyo — y lo sabe */
+const Ps = new SIM.Planta({ nTCU: 2, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 9, dia: 172,
+                            lat: 42.82, lon: -1.60, tz: 1 });
+for (let i = 0; i < 5; i++) Ps.paso(60);
+ok(Ps.canonEn(9) === null && Ps.tcu(1).motorCanon === false,
+   'sin motor cae al modelo del navegador, y queda marcado como tal');
+
+/* una maniobra de protección sigue mandando sobre el motor */
+Pk.meteo.viento = 20; Pk.meteo.rachas = 0;
+for (let i = 0; i < 90; i++) Pk.paso(60);
+ok(Pk.tcu(1).stow > 0 && Math.abs(Pk.tcu(1).objetivo) >= 30,
+   'y con viento fuerte manda el abanderamiento, no la trayectoria del motor',
+   Pk.tcu(1).objetivo.toFixed(1) + '°');
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);
