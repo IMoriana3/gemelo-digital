@@ -114,9 +114,21 @@ const r = await pg.evaluate(async () => {
   o.diag = Math.hypot(e.x, e.z);
   o.niebla = { near: C.scene.fog.near, far: C.scene.fog.far };
   o.suelo = C.suelo.geometry.parameters.width;
-  const sc = C.sol.shadow.camera;
-  o.sombraCubre = Math.min(sc.right, sc.top) * 2;
   o.autoSombras = C.renderer.shadowMap.autoUpdate;
+
+  /* Lo que de verdad decide si la sombra sale en sierra no es el tamaño del recuadro
+     sino el TEXEL PROYECTADO EN EL SUELO, que con sol rasante se estira por 1/sen(elev).
+     Se mide a lo largo del día, acercado, que es cuando se ve. */
+  o.texelSuelo = [7, 10.5, 13.5, 19].map((h) => {
+    P.t.hora = h;
+    for (let i = 0; i < 80; i++) P.paso(20);
+    C.orbita.pon(46); C.actualiza(P);
+    const s = C.sol.shadow.camera, n = C.sol.shadow.mapSize.x;
+    const el = Math.max(0.05, (90 - P.tcus[0].solar.zen) * Math.PI / 180);
+    return { h, elev: +(el * 180 / Math.PI).toFixed(0),
+             cm: +((s.top - s.bottom) / n / Math.sin(el) * 100).toFixed(1) };
+  });
+  C.encuadra();
 
   /* BIFILA: dos vigas por equipo, y la electrónica en UNA sola. Si esto se rompe, el
      campo vuelve a enseñar la mitad de la estructura y el doble de TCU. */
@@ -197,8 +209,6 @@ ok(r.niebla.near > r.diag,
    `la niebla empieza PASADO el campo: ${r.niebla.near.toFixed(0)} m > ${r.diag.toFixed(0)} m de campo`);
 ok(r.suelo > r.niebla.far,
    `el suelo llega más lejos que la niebla, así no se ve dónde acaba (${r.suelo.toFixed(0)} > ${r.niebla.far.toFixed(0)} m)`);
-ok(r.sombraCubre >= r.diag,
-   `las sombras cubren el campo entero, no solo el centro (${r.sombraCubre.toFixed(0)} m ≥ ${r.diag.toFixed(0)} m)`);
 ok(r.autoSombras === false,
    'el mapa de sombras no se rehace en cada frame (solo cuando la escena se mueve)');
 ok(r.geom.despues <= r.geom.antes + 2,
@@ -221,6 +231,10 @@ ok(r.alturas.min >= -0.01 && r.alturas.max > r.alturas.postH,
    `nada enterrado ni flotando: de ${r.alturas.min} a ${r.alturas.max} m, con el eje del tubo a ${r.alturas.postH} m`);
 ok(r.sombraCerca < r.sombraLejos / 2,
    `el mapa de sombras se afina al acercarse: ${r.sombraLejos} → ${r.sombraCerca} cm por texel`);
+const peor = r.texelSuelo.reduce((a, b) => (b.cm > a.cm ? b : a));
+ok(peor.cm < 12,
+   'el texel proyectado en el suelo se queda fino A CUALQUIER HORA — lo que quita la sierra: ' +
+   r.texelSuelo.map((t) => `${t.elev}° ${t.cm}cm`).join(' · '));
 
 console.log('');
 ok(r.mandos.forzar.join() === 'ncu:40001',

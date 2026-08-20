@@ -65,14 +65,13 @@ function Campo3D(cont, cfg) {
      intensidad es la de la página hermana (index.html), no una subida a ojo: a 2,1 el
      suelo Lambert se saturaba y salía un verde plano contra el que los módulos no
      contrastaban -- parecía una maqueta, no un campo. */
+  /* Ajustes de sombra: los de `cobertura-zigbee/backtracking.html`, que ya se peleó con
+     esto y dejó escrito el porqué. No se re-deducen aquí. */
   this.sol = new T.DirectionalLight(0xfff0dd, 1.45);
   this.sol.castShadow = true;
-  this.sol.shadow.mapSize.set(2048, 2048);
-  /* `bias` a secas desplaza en profundidad y en un tubo casi de canto no llega: hay que
-     separar en la NORMAL de la superficie, que es lo que quita el aserrado de los bordes
-     sin despegar la sombra del objeto. */
-  this.sol.shadow.bias = -0.00015;
-  this.sol.shadow.normalBias = 0.06;
+  this.sol.shadow.mapSize.set(4096, 4096);
+  this.sol.shadow.bias = -2e-4;
+  this.sol.shadow.normalBias = 0.3;
   this.scene.add(this.sol);
   this.scene.add(this.sol.target);
   this.hemi = new T.HemisphereLight(0x9fc3e8, 0x2b2a24, 0.50);
@@ -117,30 +116,36 @@ function Campo3D(cont, cfg) {
   })();
 }
 
-/* ── el mapa de sombras, a la medida de LO QUE SE VE ────────────────────────
-   Cubría el campo entero pasara lo que pasara: 287 m con un mapa de 2048 son 14 cm por
-   texel, y con un tubo de 12 cm y correas de 3 la sombra sale en sierra. Pero el campo
-   entero solo hace falta cuando se mira el campo entero: al acercarse, la mitad de esos
-   texels están gastados en suelo que no se ve.
+/* ── el mapa de sombras ─────────────────────────────────────────────────────
+   Esto ya estaba resuelto en `cobertura-zigbee/backtracking.html`, que dejó escritas las
+   dos causas de la sierra. Se copia el criterio, no se vuelve a deducir:
 
-   Así que el recuadro sigue a la cámara —su punto de mira y su distancia—, sin pasarse
-   del campo. Acercándose a una fila se baja a 3 cm por texel sin tocar la resolución del
-   mapa, que es donde el aserrado desaparece. Se recentra en el objetivo, no en el origen,
-   porque si no al desplazarse la sombra se queda atrás. */
+   1. El recuadro se CIÑE A LA VISTA y sigue a la cámara. Cubrir el campo entero pasara
+      lo que pasara era gastar la mitad de los texels en suelo que no se ve; allí eran
+      «4096 px sobre 4 km: texels de 2 m».
+   2. Y es ANISÓTROPO. Con el sol rasante cada texel se proyecta 1/sen(elev) por el
+      suelo, así que un recuadro cuadrado da texels de metros al alba y al ocaso —y la
+      sombra avanza a saltos, clavada hasta cruzar un texel—. El alto se ciñe a lo que la
+      escena ocupa VISTA DESDE EL SOL: R·sen(el) + alturas·cos(el).
+
+   Esa segunda parte es la que me faltaba, y es justo la que se nota a las horas en que
+   se miran las sombras. */
 Campo3D.prototype.ajustaSombra = function () {
   if (!this._radioCampo) return;
   var r = Math.max(22, Math.min(this._radioCampo, this.orbita.radio() * 0.75));
-  var b = this.blancoOrbita;
-  /* solo se rehace si ha cambiado de verdad: cada ajuste obliga a repintar el mapa */
+  var b = this.blancoOrbita, el = this._el == null ? 0.6 : this._el;
   if (this._rSombra && Math.abs(r - this._rSombra) < r * 0.12 &&
-      Math.abs(b.x - this._sx) < r * 0.25 && Math.abs(b.z - this._sz) < r * 0.25) return;
-  this._rSombra = r; this._sx = b.x; this._sz = b.z;
+      Math.abs(b.x - this._sx) < r * 0.25 && Math.abs(b.z - this._sz) < r * 0.25 &&
+      Math.abs(el - this._elSombra) < 0.05) return;
+  this._rSombra = r; this._sx = b.x; this._sz = b.z; this._elSombra = el;
   this.sol.target.position.set(b.x, 0, b.z);
   this.sol.target.updateMatrixWorld();
   this._zen = null;                     /* el sol se recoloca sobre el nuevo objetivo */
   var sc = this.sol.shadow.camera;
-  sc.near = 1; sc.far = this._radioCampo * 5 + 400;
-  sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r;
+  var vy = Math.max(20, r * Math.sin(el) + 15 * Math.cos(el));   /* 15 m: lo que levanta la planta */
+  sc.left = -r; sc.right = r; sc.top = vy; sc.bottom = -vy;
+  var dLT = this.sol.position.distanceTo(this.sol.target.position) || 400;
+  sc.near = Math.max(1, dLT - 450); sc.far = dLT + 450;
   sc.updateProjectionMatrix();
   this.renderer.shadowMap.needsUpdate = true;
   this._sucio = true;
@@ -270,12 +275,24 @@ Campo3D.prototype.construye = function (P) {
        —eso describe UNA viga— sino algo que va entre las dos, así que lo coloca la app
        con la cota del modelo. No bascula: sale de la reductora, que es fija. */
     if (S.ejeTransGeom) {
-      var ejeIM = new T.InstancedMesh(S.ejeTransGeom(T, pitch), SG.steel, this.n);
-      ejeIM.castShadow = true; ejeIM.receiveShadow = true; ejeIM.frustumCulled = false;
-      this.grupoPlanta.add(ejeIM);
-      var me = new T.Matrix4(), id = new T.Matrix4();
-      for (var e = 0; e < this.n; e++) { me.copy(this.bases[e]).multiply(id); ejeIM.setMatrixAt(e, me); }
-      ejeIM.instanceMatrix.needsUpdate = true;
+      var yo2 = this;
+      var ponFijo = function (geom, dz) {
+        var im = new T.InstancedMesh(geom, SG.steel, yo2.n);
+        im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false;
+        yo2.grupoPlanta.add(im);
+        var me = new T.Matrix4(), tz = new T.Matrix4().makeTranslation(0, 0, dz || 0);
+        for (var e = 0; e < yo2.n; e++) {
+          me.multiplyMatrices(yo2.bases[e], tz);
+          im.setMatrixAt(e, me);
+        }
+        im.instanceMatrix.needsUpdate = true;
+      };
+      ponFijo(S.ejeTransGeom(T, pitch), 0);
+      if (S.cardanGeom) {                       /* los dos acoplamientos de los extremos */
+        var dzc = S.cardanDz(pitch);
+        ponFijo(S.cardanGeom(T), -dzc);
+        ponFijo(S.cardanGeom(T), dzc);
+      }
     }
   }
 
@@ -395,6 +412,10 @@ Campo3D.prototype.actualiza = function (P) {
       var tg = this.sol.target.position;
       this.sol.position.set(tg.x + Math.cos(az) * ce * d, tg.y + Math.sin(el) * d,
                             tg.z + Math.sin(az) * ce * d);
+      /* la elevación decide el alto del recuadro de sombras: con sol rasante hay que
+         estirarlo o el texel se proyecta metros por el suelo */
+      this._el = el;
+      this.ajustaSombra();
       this.sol.intensity = s.dia ? 1.45 : 0.05;
       this.hemi.intensity = s.dia ? 0.50 : 0.16;
       var cielo = s.dia ? 0x87a8c4 : 0x0b1119;

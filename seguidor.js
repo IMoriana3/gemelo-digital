@@ -94,24 +94,36 @@
   };
 
   /* ---------- EJE DE TRANSMISIÓN (bífila) ----------
-     En una bífila el motor está en UNA viga y la gemela se mueve por un eje que sale de
-     la reductora y cruza hasta la otra. `parts()` describe UNA viga, así que este eje no
-     cabe ahí: va ENTRE las dos, y lo coloca la app, igual que el cable motor↔TCU y los
-     amortiguadores. El modelo pone la cota y la geometría para que no se la invente cada
-     página.
+     En una bífila el motor está en UNA viga y la gemela se mueve por un eje que cruza
+     hasta la otra. `parts()` describe UNA viga, así que este eje no cabe ahí: va ENTRE
+     las dos, y lo coloca la app, igual que el cable motor↔TCU y los amortiguadores.
 
-     OJO con el diámetro: 50 mm es una ESTIMACIÓN, no una cota del proyecto como el resto
-     de este fichero. El eje sale a la altura de la reductora, que es donde está su piñón
-     de entrada (y = −0,04 local, justo bajo el tubo). Si aparece la cota buena, se
-     cambia aquí y cambia en todas las páginas. */
-  D.ejeTransD = 0.05;        // ESTIMADO — pendiente de cota de proyecto
-  D.ejeTransY = -0.04;       // a la altura del cuerpo de la reductora
+     Las cotas NO se inventan aquí: son las que ya usa `overcast.html`, que lo dibuja
+     desde antes — Ø 60 mm, a 22 cm por debajo del eje del tubo, y de punta a punta
+     dejando 25 cm a cada lado para los cardanes. Subirlas al modelo es lo que evita que
+     cada página tenga su propio eje: en el propio overcast conviven hoy un Ø 60 en la
+     vista instanciada y un Ø 100 en la de detalle. */
+  D.ejeTransD = 0.06;        // Ø 60 mm (overcast.html, vista instanciada)
+  D.ejeTransY = -0.22;       // por debajo del eje del tubo
+  D.cardanD = 0.18;          // acoplamientos de los extremos (Ø 180 mm)
+  D.cardanL = 0.30;
+  D.cardanHueco = 0.25;      // lo que el eje deja libre a cada lado
+  D.cardanOffset = 0.22;     // a qué distancia de cada viga va su cardán
   S.ejeTransGeom = function (THREE, sep) {
-    var g = new THREE.CylinderGeometry(D.ejeTransD / 2, D.ejeTransD / 2, sep, 8);
+    var g = new THREE.CylinderGeometry(D.ejeTransD / 2, D.ejeTransD / 2,
+                                       Math.max(0.1, sep - 2 * D.cardanHueco), 8);
     g.rotateX(Math.PI / 2);            // el cilindro nace en Y; el eje cruza en Z
     g.translate(0, D.ejeTransY, 0);
     return g;
   };
+  /* los dos cardanes, en los extremos del eje. `dz` = ±(sep/2 − hueco + L/2) */
+  S.cardanGeom = function (THREE) {
+    var g = new THREE.CylinderGeometry(D.cardanD / 2, D.cardanD / 2, D.cardanL, 8);
+    g.rotateX(Math.PI / 2);
+    g.translate(0, D.ejeTransY, 0);
+    return g;
+  };
+  S.cardanDz = function (sep) { return sep / 2 - D.cardanOffset; };
 
   S.materials = function (THREE) {
     return {
