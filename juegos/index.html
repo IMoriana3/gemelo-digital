@@ -19,7 +19,9 @@
   *{box-sizing:border-box}
   body{margin:0;background:radial-gradient(120% 90% at 50% -10%,#16263a 0%,#0b0f14 55%);
     color:var(--tx);font-family:var(--sans);min-height:100vh}
-  .wrap{max-width:1040px;margin:0 auto;padding:34px 20px 60px}
+  /* Rejilla de juegos de 250 px minimo: con el tope en 1040 px sobraban 460 px a cada lado en
+     una pantalla de 1920 y se quedaba en cuatro columnas. */
+  .wrap{max-width:min(2560px,94vw);margin:0 auto;padding:34px 20px 60px}
   .logo{font:700 13px var(--display);color:var(--accent);letter-spacing:.18em;text-transform:uppercase}
   h1{font:700 36px/1.05 var(--display);margin:8px 0 6px}
   .sub{color:var(--tx2);font-size:15px;max-width:640px;margin-bottom:30px}
