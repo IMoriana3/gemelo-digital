@@ -1010,7 +1010,7 @@ function indiceDe(id) {
   return null;
 }
 function montaCampo() {
-  if (CAMPO || !P) { if (CAMPO) { CAMPO.redimensiona(); CAMPO.paso(P); CAMPO.selecciona(indiceDe(sel)); } return; }
+  if (CAMPO || !P) { if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); } return; }
   try {
     CAMPO = new Campo3D($('campo3d'), {
       alSeleccionar: function (i) {
@@ -1021,7 +1021,7 @@ function montaCampo() {
       }
     });
     CAMPO.construye(P);
-    CAMPO.paso(P);
+    CAMPO.actualiza(P);
   } catch (e) {
     CAMPO = null;
     $('campo3d').innerHTML = '<div style="padding:24px;color:var(--tx2);font-size:13.5px">' +
@@ -1135,6 +1135,10 @@ function bucle(ahora) {
     etiquetaTiempo();
     apunta();
   }
+  /* El 3D se pone al día en CADA frame, no con el repintado de la interfaz: a 4,5 Hz
+     las mesas se movían a saltos aunque el render fuera fluido. Es barato —solo trabaja
+     si algún ángulo ha cambiado— y quien pinta es el bucle propio de Campo3D. */
+  if (vista === 'campo' && CAMPO && P) CAMPO.actualiza(P);
   acumPinta += dtReal;
   if (acumPinta > 0.22) { acumPinta = 0; pintaTodo(); }
 }
@@ -1153,7 +1157,7 @@ function pintaTodo() {
   if (!P) return;
   cabecera();
   if (vista === 'planta') { pintaChips(); pintaFlota(); pintaNcu(); pintaHsu(); }
-  else if (vista === 'campo') { if (CAMPO) { CAMPO.redimensiona(); CAMPO.paso(P); CAMPO.selecciona(indiceDe(sel)); } }
+  else if (vista === 'campo') { if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); } }
   else if (vista === 'modbus') pintaModbus();
   else if (vista === 'esc') pintaEscenario();
   else { pintaDetalle(); pintaHistoria(); }

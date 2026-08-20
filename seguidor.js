@@ -50,6 +50,49 @@
   S.setModsPerStr = function (n) { D.modsPerStr = n; D.strLen = n * D.modW + (n - 1) * D.gapMod; D.span = 2 * D.strLen + D.gapDrive; D.mesaC = D.gapDrive / 2 + D.strLen / 2; };
 
   /* ---------- MATERIALES (cada app crea los suyos con su THREE) ---------- */
+  /* Células FV para la cara del módulo. Vive AQUÍ, con el modelo, y no en cada página:
+     `glass` a secas es blanco liso, y un campo de seguidores blancos no se parece a
+     una planta -- según le dé el sol sale una fila cegada y la de al lado negra, que
+     es lo que hacía que el campo se viera "raro". Se cachea porque generar el canvas
+     por cada llamada tira una textura nueva a la GPU sin motivo. */
+  var _ptex = null;
+  S.panelTex = function (THREE) {
+    if (_ptex) return _ptex;
+    if (typeof document === 'undefined') return null;
+    var W = 128, H = 256, c = document.createElement('canvas'), x = c.getContext('2d');
+    c.width = W; c.height = H;
+    x.fillStyle = '#0a1019'; x.fillRect(0, 0, W, H);                    // marco/fondo casi negro
+    var nx = 6, ny = 12, cw = W / nx, ch = H / ny, gap = 1.4;           // rejilla de células 6x12
+    for (var iy = 0; iy < ny; iy++) for (var ix = 0; ix < nx; ix++) {
+      var L = 7.5 + Math.random() * 3.5;                                // azul muy oscuro con leve variación
+      var g = x.createLinearGradient(ix * cw, iy * ch, ix * cw + cw, iy * ch + ch);
+      g.addColorStop(0, 'hsl(214,48%,' + (L + 2).toFixed(1) + '%)');
+      g.addColorStop(1, 'hsl(214,48%,' + L.toFixed(1) + '%)');
+      x.fillStyle = g; x.fillRect(ix * cw + gap, iy * ch + gap, cw - 2 * gap, ch - 2 * gap);
+      x.strokeStyle = 'rgba(150,175,200,.30)'; x.lineWidth = 0.8;       // 3 busbars por célula
+      for (var b = 1; b <= 3; b++) {
+        var bx = ix * cw + cw * b / 4;
+        x.beginPath(); x.moveTo(bx, iy * ch + gap); x.lineTo(bx, iy * ch + ch - gap); x.stroke();
+      }
+    }
+    _ptex = new THREE.CanvasTexture(c);
+    _ptex.wrapS = _ptex.wrapT = THREE.RepeatWrapping;
+    _ptex.anisotropy = 4;
+    return _ptex;
+  };
+
+  /* Deja `glass` como un módulo de verdad: células por delante y cara trasera bifacial
+     apagada. Es lo que hacía a mano cada página; ahora lo hace el modelo. */
+  S.vistePaneles = function (THREE, mats) {
+    var t = S.panelTex(THREE);
+    if (!t || !mats || !mats.glass) return mats;
+    mats.glass.map = t; mats.glass.emissiveMap = t;
+    mats.glass.emissive = new THREE.Color(0x2b333d);
+    mats.glass.emissiveIntensity = 0.32;
+    mats.glass.needsUpdate = true;
+    return mats;
+  };
+
   S.materials = function (THREE) {
     return {
       glass:  new THREE.MeshStandardMaterial({ color:0xffffff, roughness:.14, metalness:.10, emissive:0x0a1626, emissiveIntensity:.07 }),

@@ -577,21 +577,10 @@ function grassBladeTex(){
     x.quadraticCurveTo(bx+(Math.random()-0.5)*16,64-hh*0.6,bx+(Math.random()-0.5)*24,64-hh);x.stroke();}
   return new THREE.CanvasTexture(c);
 }
-function panelTex(){
-  var W=128,H=256;var c=document.createElement('canvas');c.width=W;c.height=H;var x=c.getContext('2d');
-  x.fillStyle='#0a1019';x.fillRect(0,0,W,H);                                   // marco/fondo casi negro
-  var nx=6,ny=12,cw=W/nx,ch=H/ny,gap=1.4;                                      // rejilla de células 6x12
-  for(var iy=0;iy<ny;iy++)for(var ix=0;ix<nx;ix++){
-    var L=7.5+Math.random()*3.5;                                              // azul muy oscuro con leve variación
-    var g=x.createLinearGradient(ix*cw,iy*ch,ix*cw+cw,iy*ch+ch);
-    g.addColorStop(0,'hsl(214,48%,'+(L+2).toFixed(1)+'%)');g.addColorStop(1,'hsl(214,48%,'+L.toFixed(1)+'%)');
-    x.fillStyle=g;x.fillRect(ix*cw+gap,iy*ch+gap,cw-2*gap,ch-2*gap);
-    // 3 busbars finas por célula
-    x.strokeStyle='rgba(150,175,200,.30)';x.lineWidth=0.8;
-    for(var b=1;b<=3;b++){var bx=ix*cw+cw*b/4;x.beginPath();x.moveTo(bx,iy*ch+gap);x.lineTo(bx,iy*ch+ch-gap);x.stroke();}
-  }
-  var t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=4;return t;
-}
+/* las células del módulo las genera el MODELO (seguidor.js), que es de donde sale todo
+   lo demás del seguidor: tenerlas aquí dejaba al campo del simulador con paneles
+   blancos lisos, porque esa página no podía llamar a esta función */
+function panelTex(){ return Seguidor.panelTex(THREE); }
 /* cartel FACTIUN para la cara inferior de la TCU (mira al suelo) */
 function factiunTex(){
   var c=document.createElement('canvas');c.width=256;c.height=100;var x=c.getContext('2d');
@@ -821,8 +810,7 @@ function buildTracker(wrap){
   var filas=[], dampers=[], motorCables=[];   /* amortiguadores + cable de motor (tramo flexible se reajusta cada frame) */
   /* SEGUIDOR desde la FUENTE ÚNICA (seguidor.js, compartida con Cobertura 3D): módulos bifaciales,
      correas omega + abarcón, 3 cajas + leapfrog, slew con corona twin en ambas vigas, TCU + chapas. */
-  var SG=Seguidor.materials(THREE);
-  SG.glass.map=ptex; SG.glass.emissiveMap=ptex; SG.glass.emissive=new THREE.Color(0x2b333d); SG.glass.emissiveIntensity=0.32; SG.glass.needsUpdate=true;   // células FV + cara TRASERA bifacial
+  var SG=Seguidor.vistePaneles(THREE,Seguidor.materials(THREE));                                // células FV + cara TRASERA bifacial, desde el modelo
   var WEST={0:1,3:1,4:1};                                                                      // vigas del MOTOR (oeste): central[0] + una de cada par lateral
   var hl=null, box=null;
   for(var ti=0;ti<TR.length;ti++){ var zc=TR[ti].z, xs=TR[ti].xs, west=!!WEST[ti];
