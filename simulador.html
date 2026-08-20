@@ -49,6 +49,10 @@
   .content{overflow-y:auto;padding:12px 16px;min-width:0}
 
   .grp{margin-bottom:14px}
+  .escfila{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 4px}
+  .escfila select{flex:1;min-width:260px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}
+  .escfila input{background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;font-family:var(--mono)}
+  .eco-ok{color:var(--ok)} .eco-no{color:var(--danger)}
   .sent{color:var(--tx3);font-size:10.5px;font-family:var(--sans);margin-left:6px}
   .pgrp{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--tx3);margin:10px 0 5px;padding-top:7px;border-top:1px solid var(--line)}
   .pgrp:first-child{margin-top:2px;padding-top:0;border-top:0}
@@ -396,7 +400,19 @@
           <label class="sw"><input type="checkbox" id="mbSoloSim" checked><span>solo simulados</span></label>
           <label class="sw"><input type="checkbox" id="mbSoloAct"><span>solo activos</span></label>
           <button class="btn sec" id="mbCsv" style="width:auto;padding:6px 12px">CSV</button>
+          <button class="btn sec" id="mbEscribirBtn" style="width:auto;padding:6px 12px">✎ Escribir</button>
           <span class="badge" id="mbCuenta">—</span>
+        </div>
+        <div id="mbEsc" class="card" style="display:none;margin-bottom:10px">
+          <h2>Escribir un registro</h2>
+          <div class="sub">La misma puerta que usa la toolbox: aquí no hay atajos por dentro. Se aplica, se relee y se rechaza lo que el equipo rechazaría.</div>
+          <div class="escfila">
+            <select id="escReg"></select>
+            <input type="text" id="escVal" placeholder="valor" style="width:120px">
+            <button class="btn" id="escGo" style="width:auto;padding:7px 16px">Escribir</button>
+          </div>
+          <div class="note" id="escAyuda"></div>
+          <div class="note" id="escEco"></div>
         </div>
         <div id="mbCuerpo"></div>
         <div class="leyenda">
@@ -691,6 +707,59 @@ function ve(que) {
    se recalcule antes de repintar. Sin esto, pulsar la seta en pausa no hace nada
    visible hasta darle a Simular. */
 function toca() { if (P) P.paso(0.001); pintaTodo(); }
+
+/* ═══════════════════ escribir registros ═══════════════════
+   La interfaz no tiene un camino propio para mandar órdenes: usa `P.escribe()`, la
+   misma puerta que usaría la toolbox por Modbus. Así lo que se prueba aquí es lo que
+   pasaría de verdad, incluidos los rechazos. */
+function pintaEscritura() {
+  var dev = $('mbDev').value, cat = SIM.ESCRITURA[dev] || {}, sel = $('escReg');
+  var previo = sel.value;
+  sel.innerHTML = '';
+  var dirs = Object.keys(cat).map(Number).sort(function (a, b) { return a - b; });
+  dirs.forEach(function (d) {
+    var e = cat[d];
+    sel.add(new Option(d + ' · ' + e.n + (e.f32 ? ' (f32)' : ''), String(d)));
+  });
+  if (previo && cat[previo]) sel.value = previo;
+  ayudaEscritura();
+}
+function ayudaEscritura() {
+  var dev = $('mbDev').value, d = +$('escReg').value, e = (SIM.ESCRITURA[dev] || {})[d];
+  if (!e) { $('escAyuda').textContent = ''; return; }
+  var t = [];
+  if (e.ay) t.push(e.ay);
+  if (e.f32) t.push('se escribe en <b>grados</b> y viaja como f32 en radianes, dos registros');
+  if (e.pulsos) t.push('en <b>pulsos</b> (' + (34.7).toFixed(1) + ' por grado)');
+  if (e.ms) t.push('en <b>milisegundos</b>');
+  if (e.min != null || e.max != null) t.push('rango ' + (e.min != null ? e.min : '−∞') + ' … ' + (e.max != null ? e.max : '∞'));
+  $('escAyuda').innerHTML = t.join(' · ') || 'Se guarda y se relee.';
+}
+function haceEscritura() {
+  if (!P) return;
+  var dev = $('mbDev').value, d = +$('escReg').value;
+  var e = (SIM.ESCRITURA[dev] || {})[d];
+  var crudo = String($('escVal').value || '').trim().replace(',', '.');
+  var v = crudo.indexOf('0x') === 0 ? parseInt(crudo, 16) : parseFloat(crudo);
+  if (!isFinite(v)) { eco(false, 'Eso no es un número.'); return; }
+  var vals;
+  if (e && e.f32) {
+    /* se teclea en GRADOS porque es como habla el operario; el registro va en rad */
+    var dv = new DataView(new ArrayBuffer(4));
+    dv.setFloat32(0, v * Math.PI / 180, false);
+    vals = [dv.getUint16(0, false), dv.getUint16(2, false)];
+  } else vals = [Math.round(v) & 0xFFFF];
+  var id = (dev === 'ncu') ? 0 : (+$('mbUnidad').value || 1);
+  var r = P.escribe(dev, id, d, vals);
+  eco(r.ok, r.ok ? ('Aplicado: ' + r.aplicados.join(' · ')) : ('Rechazado: ' + r.avisos.join(' · ')));
+  previos = {};
+  toca();
+}
+function eco(ok, txt) {
+  $('escEco').innerHTML = '<span class="' + (ok ? 'eco-ok' : 'eco-no') + '">' +
+    (ok ? '✓ ' : '✗ ') + txt + '</span>';
+}
+
 
 /* ═══════════════════ campo 3D ═══════════════════
    La geometría sale de seguidor.js —la fuente única del modelo, compartida con el
@@ -1411,7 +1480,14 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
     pintaTodo();
   };
 });
-$('mbDev').onchange = function () { pintaUnidades(); previos = {}; pintaTodo(); };
+$('mbDev').onchange = function () { pintaUnidades(); pintaEscritura(); previos = {}; pintaTodo(); };
+$('mbEscribirBtn').onclick = function () {
+  var c = $('mbEsc'); c.style.display = (c.style.display === 'none') ? '' : 'none';
+  if (c.style.display === '') pintaEscritura();
+};
+$('escReg').onchange = ayudaEscritura;
+$('escGo').onclick = haceEscritura;
+$('escVal').onkeydown = function (e) { if (e.key === 'Enter') haceEscritura(); };
 $('mbUnidad').onchange = function () {
   var v = +this.value;
   if ($('mbDev').value !== 'hsu') { sel = v; sincronizaAverias(); }
@@ -1447,6 +1523,7 @@ pintaParams();
 construye();
 aplicaEstrategia();
 aplicaPoliticaDifusa();
+pintaEscritura();
 conectaCanon();          /* si el motor está, manda él; si no, se dice */
 sincronizaAverias();
 etiquetaTiempo();

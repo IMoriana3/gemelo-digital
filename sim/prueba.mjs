@@ -667,5 +667,79 @@ ok(Pk.tcu(1).stow > 0 && Math.abs(Pk.tcu(1).objetivo) >= 30,
    'y con viento fuerte manda el abanderamiento, no la trayectoria del motor',
    Pk.tcu(1).objetivo.toFixed(1) + '°');
 
+/* ───────── escritura del mapa ─────────
+   Hasta ahora el gemelo se mandaba las órdenes por dentro. Un equipo real no tiene
+   esa puerta: todo entra escribiendo registros, y por eso la toolbox puede hacer lo
+   que hace. Lo que se comprueba es que la puerta se comporta como la del equipo:
+   aplica, RELEE lo escrito, y rechaza lo que el firmware rechazaría. */
+function f32aRegs(x) {
+  const dv = new DataView(new ArrayBuffer(4));
+  dv.setFloat32(0, x, false);
+  return [dv.getUint16(0, false), dv.getUint16(2, false)];
+}
+function regsAf32(a, b) {
+  const dv = new DataView(new ArrayBuffer(4));
+  dv.setUint16(0, a, false); dv.setUint16(2, b, false);
+  return dv.getFloat32(0, false);
+}
+const Pw = new SIM.Planta({ nTCU: 6, nHSU: 2, grupos: 4, perfil: 'SP_45W_6Ah',
+                            hora: 11, dia: 172, lat: 42.82, lon: -1.60, tz: 1 });
+
+/* 1 · un comando cambia el modo de verdad */
+ok(Pw.escribe('tcu', 1, 40000, [2]).ok && Pw.tcu(1).modo === SIM.MODO.MANUAL,
+   '40000 = 2 pone el equipo en MANUAL');
+
+/* 2 · el mando del motor mueve la consigna, como desde la toolbox */
+const m0 = Pw.tcu(1).manual;
+Pw.escribe('tcu', 1, 40017, [2]);                     /* 2 = oeste */
+for (let i = 0; i < 30; i++) Pw.paso(10);
+ok(Pw.tcu(1).manual > m0 + 5, '40017 mueve el motor a mano',
+   m0.toFixed(1) + '° → ' + Pw.tcu(1).manual.toFixed(1) + '°');
+Pw.escribe('tcu', 1, 40017, [0]);
+
+/* 3 · el offset del inclinómetro: el registro del ensayo D.1.1 */
+Pw.escribe('tcu', 1, 41058, f32aRegs(3 * Math.PI / 180));
+ok(Math.abs(Pw.tcu(1).sensor.offsetCfg - 3) < 1e-6,
+   '41058 calibra el inclinómetro de verdad', Pw.tcu(1).sensor.offsetCfg.toFixed(3) + '°');
+
+/* 4 · lo escrito SE RELEE: sin esto no se puede verificar una puesta en marcha */
+Pw.escribe('tcu', 1, 41040, [5500]); Pw.escribe('tcu', 1, 41065, [7]);
+Pw.paso(1);
+const Rw = Pw.regsTCU(Pw.tcu(1));
+ok(Rw[41040] === 5500 && Rw[41065] === 7, 'la configuración escrita se relee igual');
+ok(Math.abs(regsAf32(Rw[41058], Rw[41059]) * 180 / Math.PI - 3) < 1e-4,
+   'y el f32 vuelve con su valor, no con el de fábrica');
+
+/* 5 · y TIENE EFECTO: bajar la sobrecorriente hace saltar antes la alarma */
+ok(Pw.tcu(1).cfgTcu.iMotorMax === 5500, 'el límite de sobrecorriente es el del equipo, no el de la planta');
+Pw.escribe('tcu', 2, 41037, [900]);                   /* tope oeste a ~26° */
+ok(Math.abs(Pw.tcu(2).cfgTcu.topeOeste - 900 / Pw.tcu(2).sensor.pulsosGrado) < 1e-6,
+   '41037 recorta el tope de eje del equipo',
+   Pw.tcu(2).cfgTcu.topeOeste.toFixed(1) + '°');
+Pw.escribe('tcu', 2, 40000, [2]); Pw.escribe('tcu', 2, 40017, [2]);
+for (let i = 0; i < 400; i++) Pw.paso(10);
+ok(Pw.tcu(2).anguloReal <= Pw.tcu(2).cfgTcu.topeOeste + 0.2,
+   'y el seguidor se para en ese tope, no en los 55° de fábrica',
+   Pw.tcu(2).anguloReal.toFixed(1) + '°');
+
+/* 6 · rechaza lo que el equipo rechazaría */
+ok(!Pw.escribe('tcu', 1, 30001, [1]).ok, 'un registro de SOLO LECTURA se rechaza');
+ok(!Pw.escribe('tcu', 1, 41040, [99999]).ok, 'y un valor fuera de rango también');
+ok(!Pw.escribe('tcu', 1, 47777, [1]).ok, 'y una dirección que no existe');
+
+/* 7 · los forzados de la NCU son un mapa de bits POR GRUPO */
+Pw.escribe('ncu', 0, 40001, [0b0011]);                /* SP1 a los grupos 1 y 2 */
+Pw.paso(1);
+ok(Pw.tcu(1).sp === SIM.SP.VIENTO && Pw.tcu(3).sp !== SIM.SP.VIENTO,
+   'force_sp_1 llega solo a los grupos de su máscara');
+Pw.escribe('ncu', 0, 40001, [0]);
+Pw.paso(1);
+ok(Pw.tcu(1).sp !== SIM.SP.VIENTO, 'y escribir 0 lo suelta');
+
+/* 8 · limpiar alarmas por 40007.13, que es como se hace de verdad */
+Pw.tcu(1).alarmaMotorEnclavada = true;
+Pw.escribe('tcu', 1, 40007, [1 << 13]);
+ok(!Pw.tcu(1).alarmaMotorEnclavada, '40007 bit 13 limpia las alarmas enclavadas');
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);

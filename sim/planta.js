@@ -461,6 +461,29 @@ function TCU(id, planta, opts) {
   this.angulo = this.anguloReal;                        /* lo que MIDE el TCU y publica */
   this.objetivo = this.anguloReal;
 
+  this.forzadoLocal = 0;             /* 40000 = 11..17: forzado escrito a ESTE equipo */
+  this.jog = 0;                      /* 40017: mando manual del motor (−1 este, +1 oeste) */
+  this.escrito = {};                 /* lo que se le ha escrito, para releerlo tal cual */
+
+  /* --- CONFIGURACIÓN DEL PROPIO EQUIPO ---
+     Hasta ahora estos valores salían de K, o sea que eran de la planta entera y no
+     se podían tocar más que desde el panel. Un TCU real los lleva EN SUS REGISTROS
+     y se cambian escribiéndolos, uno a uno, con la toolbox. Aquí igual: cada TCU
+     tiene los suyos, `escribe()` los cambia y `regsTCU()` los publica de vuelta. */
+  this.cfgTcu = {
+    topeOeste: K.AXIS_MAX, topeEste: -K.AXIS_MAX,   /* 41037 / 41038, en grados */
+    evalMotorS: K.EVAL_MOTOR_S,                     /* 41039 */
+    iMotorMax: (planta.cfg && planta.cfg.iMotorMax) || 7000,  /* 41040 */
+    nightPos: K.NIGHT_POS,                          /* 41042 */
+    dbPulsos: K.DB_PULSOS,                          /* 41060 / 41061 */
+    dbPulsosBaja: K.DB_PULSOS_BAJA,                 /* 41062 / 41063 */
+    reintentos: K.REINTENTOS_MOTOR,                 /* 41065 */
+    velSinCarga: K.VEL_SIN_CARGA,                   /* 41067 */
+    spTilt: ((planta.cfg && planta.cfg.spTilt) || []).slice(),   /* 41044…41056 */
+    jeita: [K.T_CHG_MIN, K.JEITA_T3, K.JEITA_T3, K.JEITA_T4],    /* 40008…40011 */
+    heaterT: 0                                      /* 40035 */
+  };
+
   /* --- inclinómetro: entrada analógica --- */
   this.sensor = {
     desajuste: 0,                    /* error de montaje REAL del sensor (°) */
@@ -535,7 +558,9 @@ TCU.prototype.entradas = function () {
     vientoInvertido: n.vientoInvertido,
     nieve: n.alarmaNieve,
     limpieza: n.limpieza[g - 1],
-    forzado: n.forzadoDe(g),               /* 0 o el número de safe position forzada */
+    /* el forzado puede venir de la NCU (a todo el grupo) o del propio equipo, si
+       alguien le ha escrito 40000 con 11..17. Gana el local, que es el más cercano. */
+    forzado: this.forzadoLocal || n.forzadoDe(g),
     comNcu: this.online
   };
 };
@@ -661,15 +686,19 @@ TCU.prototype.decide = function (dt, ang) {
   } else if (this.bajaCapacidad === 2) {
     obj = this.angulo; crit = CRIT.BATERIA;
 
-  /* 6 — MANUAL */
+  /* 6 — MANUAL. Con 40017 escrito, el operador está dando al motor a mano: la
+     consigna se arrastra en esa dirección mientras el registro siga puesto, que es
+     como se mueve un seguidor desde la toolbox. */
   } else if (this.modo === MODO.MANUAL) {
+    if (this.jog) this.manual = clamp(this.manual + this.jog * K.SLEW_DPS * dt,
+                                      this.cfgTcu.topeEste, this.cfgTcu.topeOeste);
     obj = this.manual; crit = CRIT.MANUAL;
 
   /* 7 — AUTO (o parado en OFF) */
   } else if (this.modo === MODO.OFF) {
     obj = this.angulo; crit = CRIT.INHIBIDO; inhibido = true;
   } else if (!ang.dia) {
-    obj = K.NIGHT_POS; crit = CRIT.NOCHE;
+    obj = this.cfgTcu.nightPos; crit = CRIT.NOCHE;
   } else if (this.p.canonEn(this.p.t.hora)) {
     /* EL ALGORITMO ES DEL MOTOR. Aquí no se decide el ángulo de seguimiento: se
        ejecuta el que ha calculado SolarGPT, con su backtracking y su política de
@@ -708,7 +737,7 @@ TCU.prototype.decide = function (dt, ang) {
   /* el repetidor no tiene seguidor que mover: se queda plano y solo repite señal */
   if (this.repetidor) { obj = 0; crit = CRIT.INHIBIDO; inhibido = true; sp = SP.NINGUNA; }
 
-  var top = clamp(obj, -K.AXIS_MAX, K.AXIS_MAX);
+  var top = clamp(obj, this.cfgTcu.topeEste, this.cfgTcu.topeOeste);
   if (top !== obj) crit = CRIT.LIMITE;
   this.objetivo = top; this.sp = sp; this.fuenteSp = fuente; this.criterio = crit;
   this.bt = (crit === CRIT.BACKTRACKING);
@@ -726,7 +755,8 @@ TCU.prototype.mueve = function (dt, inhibido) {
   /* deadband en PULSOS, como el firmware: 45 normal (41060/41061) y 90 con alarma de
      baja capacidad (41063) — el propio equipo engorda el lazo cuando va justo de
      batería, que es la versión de fábrica del winter mode */
-  var pulsos = this.bajaCapacidad > 0 ? K.DB_PULSOS_BAJA : K.DB_PULSOS;
+  var C = this.cfgTcu;
+  var pulsos = this.bajaCapacidad > 0 ? C.dbPulsosBaja : C.dbPulsos;
   var dead = this.p.cfg.deadband != null ? this.p.cfg.deadband : pulsos / this.sensor.pulsosGrado;
   /* en seguimiento solo corrige si el error supera el deadband; en posición de
      seguridad va sin histéresis (la orden es de seguridad, no de precisión) */
@@ -751,7 +781,7 @@ TCU.prototype.mueve = function (dt, inhibido) {
      de alarma no se pone aquí — lo deduce el firmware unas líneas más abajo. */
   if (!this.ejeAtascado) {
     var real = this.ejeDuro ? esperado * 0.2 : esperado;   /* el eje duro se arrastra */
-    this.anguloReal = clamp(this.anguloReal + dir * real, -K.AXIS_MAX, K.AXIS_MAX);
+    this.anguloReal = clamp(this.anguloReal + dir * real, C.topeEste, C.topeOeste);
   }
   var mov = Math.abs(this.anguloReal - antes);
   this.moviendo = dir;                    /* está MANDADO a moverse, se mueva o no */
@@ -762,13 +792,13 @@ TCU.prototype.mueve = function (dt, inhibido) {
      como eje bloqueado. Es justo el fallo que esconde un modelo sin sensor. */
   /* si lo que impide moverse es el TOPE MECÁNICO, no es un eje bloqueado: es un
      final de carrera, y el equipo lo sabe por sus propios límites (30006 bits 0 y 1) */
-  var enTope = (dir > 0 && antes >= K.AXIS_MAX - 1e-6) || (dir < 0 && antes <= -K.AXIS_MAX + 1e-6);
+  var enTope = (dir > 0 && antes >= C.topeOeste - 1e-6) || (dir < 0 && antes <= C.topeEste + 1e-6);
   if (!enTope && esperado > 1e-3 && mov < esperado * 0.5) {
     this.tSinMoverse += dt;
-    if (this.tSinMoverse >= K.EVAL_MOTOR_S) {
+    if (this.tSinMoverse >= C.evalMotorS) {
       this.velocidadBaja = true;          /* 30003.14 «motor moves at a lower speed» */
       this.tSinMoverse = 0;
-      if (++this.reintentos > K.REINTENTOS_MOTOR) {
+      if (++this.reintentos > C.reintentos) {
         this.ejeBloqueado = true;         /* 30003.8, y queda enclavada */
         this.alarmaMotorEnclavada = true;
       }
@@ -802,8 +832,8 @@ TCU.prototype.mueve = function (dt, inhibido) {
   this.iMotor = this.vBat > 1 ? (w / this.vBat) * 1000 : 0;                 /* mA */
   if (this.iMotor > this.iMotorPico) this.iMotorPico = this.iMotor;
   /* los finales de carrera los ve el TCU con SU medida, no con la mesa */
-  this.limiteOeste = this.angulo >= K.AXIS_MAX - 0.01;
-  this.limiteEste = this.angulo <= -K.AXIS_MAX + 0.01;
+  this.limiteOeste = this.angulo >= C.topeOeste - 0.01;
+  this.limiteEste = this.angulo <= C.topeEste + 0.01;
   return wh;
 };
 
@@ -963,11 +993,11 @@ TCU.prototype.paso = function (dt) {
   var whMotor = this.mueve(dt, inhibido);
   this.energia(dt, ang, whMotor);
   /* 30002.2: «tilt fuera de rango» compara la MEDIDA contra el límite SW más 5° */
-  this.fueraRango = Math.abs(this.angulo) > K.AXIS_MAX + 5;
+  this.fueraRango = this.angulo > this.cfgTcu.topeOeste + 5 || this.angulo < this.cfgTcu.topeEste - 5;
   /* la sobrecorriente ENCLAVA: si solo mirase la corriente instantánea, el bit se
      borraría en el mismo paso en que el propio disparo corta el motor y la alarma no
      llegaría ni al siguiente ciclo de lectura del SCADA */
-  if (this.iMotor > this.p.cfg.iMotorMax) {
+  if (this.iMotor > this.cfgTcu.iMotorMax) {
     this.sobrecorriente = true;
     this.alarmaMotorEnclavada = true;
   }
@@ -1327,7 +1357,7 @@ Planta.prototype.regsTCU = function (t) {
 
   /* configuración que el simulador respeta de verdad (el resto del bloque 41xxx
      lo sirve el visor con su valor por defecto documentado) */
-  var sp = this.cfg.spTilt;
+  var sp = t.cfgTcu.spTilt.length ? t.cfgTcu.spTilt : this.cfg.spTilt;
   for (var k = 1; k <= 7; k++) {
     if (k === 6) continue;                                  /* el mapa salta la 6 */
     pon32(41042 + k * 2, f32((sp[k] || 0) * D2R, wo));       /* 41044, 41046, … en rad */
@@ -1336,16 +1366,30 @@ Planta.prototype.regsTCU = function (t) {
 
   /* configuración de las ENTRADAS y del motor: ahora estos registros no son adorno,
      son los que el simulador está usando de verdad para medir y para moverse */
+  /* La configuración se publica desde la del EQUIPO, no desde las constantes de la
+     planta: si alguien le ha escrito un registro, al releerlo tiene que salir lo que
+     escribió. Media puesta en marcha consiste justo en eso. */
+  var C = t.cfgTcu, pg = t.sensor.pulsosGrado;
   pon32(41058, f32(t.sensor.offsetCfg * D2R, wo));        /* offset del inclinómetro */
-  pon(41037, s16(K.PULSOS_TOPE));                         /* límite oeste (pulsos) */
-  pon(41038, s16(-K.PULSOS_TOPE));                        /* límite este (pulsos) */
-  pon(41039, u16(K.EVAL_MOTOR_S * 1000));                 /* ventana de evaluación (ms) */
-  pon(41040, u16(this.cfg.iMotorMax));                    /* sobrecorriente software (mA) */
-  pon32(41042, f32(K.NIGHT_POS * D2R, wo));               /* posición nocturna */
-  pon(41060, u16(K.DB_PULSOS)); pon(41061, u16(K.DB_PULSOS));
-  pon(41062, u16(K.DB_PULSOS_BAJA)); pon(41063, u16(K.DB_PULSOS_BAJA));
-  pon(41065, u16(K.REINTENTOS_MOTOR));
-  pon(41067, u16(K.VEL_SIN_CARGA * 1000));                /* velocidad en vacío (m°/s) */
+  pon(41037, s16(Math.round(C.topeOeste * pg)));          /* límite oeste (pulsos) */
+  pon(41038, s16(Math.round(C.topeEste * pg)));           /* límite este (pulsos) */
+  pon(41039, u16(C.evalMotorS * 1000));                   /* ventana de evaluación (ms) */
+  pon(41040, u16(C.iMotorMax));                           /* sobrecorriente software (mA) */
+  pon32(41042, f32(C.nightPos * D2R, wo));                /* posición nocturna */
+  pon(41060, u16(C.dbPulsos)); pon(41061, u16(C.dbPulsos));
+  pon(41062, u16(C.dbPulsosBaja)); pon(41063, u16(C.dbPulsosBaja));
+  pon(41065, u16(C.reintentos));
+  pon(41067, u16(C.velSinCarga * 1000));                  /* velocidad en vacío (m°/s) */
+  for (var jj = 0; jj < 4; jj++) pon(40008 + jj, u16(C.jeita[jj] * 10));
+  pon(40035, u16(C.heaterT * 10));
+  pon(40017, u16(t.jog < 0 ? 1 : (t.jog > 0 ? 2 : 0)));
+
+  /* y lo que se le haya escrito y no tenga modelo propio se devuelve tal cual: un
+     registro que no se relee es un registro que no se puede verificar */
+  for (var d in t.escrito) {
+    var dn = +d;
+    if (R[dn] == null) { var vv = t.escrito[d]; for (var q = 0; q < vv.length; q++) R[dn + q] = u16(vv[q]); }
+  }
   return R;
 };
 
@@ -1397,6 +1441,14 @@ Planta.prototype.regsNCU = function () {
 
   /* forzados y modos por grupo (bloque 40000+, escritura) */
   for (i = 1; i <= 7; i++) R[40000 + i] = n.forzados[i] & 0x3FF;
+  /* auto_mode / manual_mode: se reconstruyen del estado real de la flota, no de lo
+     último que se escribió — si alguien pasa un equipo a mano, aquí se nota */
+  var mAuto = 0, mMan = 0;
+  for (i = 0; i < this.tcus.length; i++) {
+    var tt = this.tcus[i], bg = 1 << (tt.grupo - 1);
+    if (tt.modo === MODO.AUTO) mAuto |= bg; else if (tt.modo === MODO.MANUAL) mMan |= bg;
+  }
+  R[40070] = u16(mAuto); R[40071] = u16(mMan);
   var auto = 0, man = 0;
   for (i = 0; i < this.tcus.length; i++) {
     var t = this.tcus[i], bit = 1 << (t.grupo - 1);
@@ -1503,11 +1555,191 @@ Planta.prototype.fechaSim = function () {
            hora: Math.floor(h), min: Math.floor((h % 1) * 60), seg: Math.floor((h * 3600) % 60) };
 };
 
+
+/* ═══════════════════ ESCRITURA DEL MAPA ═══════════════════
+   Hasta aquí el gemelo se mandaba las órdenes por dentro: `limpiaAlarmas()`,
+   `force_sp`, tocar `modo`. Un equipo real no tiene esa puerta: TODO entra
+   escribiendo registros, y por eso la toolbox puede hacer lo que hace.
+
+   Esto es esa puerta. `escribe(dev, id, dir, valores)` es el único camino, y hace
+   lo mismo que haría el firmware:
+
+     1. GUARDA lo escrito y lo publica de vuelta en la lectura. Un registro de
+        configuración que no se relee es un registro que no se puede verificar, y
+        media puesta en marcha consiste justo en releer lo que acabas de escribir.
+     2. APLICA el efecto si lo tiene. Los que solo se guardan se dicen como tales
+        (`efecto:false` en el catálogo) en vez de fingir que hacen algo.
+     3. RECHAZA lo que el equipo rechazaría: dirección desconocida, registro de solo
+        lectura o valor fuera de rango. Un simulador que acepta todo enseña a
+        escribir cosas que el equipo real va a rechazar.
+
+   Devuelve {ok, aplicados:[], avisos:[]} — nunca lanza, porque un maestro Modbus
+   tampoco recibe excepciones: recibe una excepción Modbus o un eco. */
+
+/* qué sabe hacer de verdad cada registro. El catálogo es público (SIM.ESCRITURA)
+   para que la interfaz pueda marcar cuáles tienen efecto y cuáles solo se guardan. */
+var ESCRITURA = {
+  tcu: {
+    40000: { n: 'main_change_request', efecto: true, ay: 'modo: 1 OFF · 2 MANUAL · 3 AUTO · 10+n fuerza SPn' },
+    40001: { n: 'input_time_seconds', efecto: true }, 40002: { n: 'input_time_minutes', efecto: true },
+    40003: { n: 'input_time_hours', efecto: true },   40004: { n: 'input_date_day', efecto: true },
+    40005: { n: 'input_date_month', efecto: true },   40006: { n: 'input_date_year', efecto: true },
+    40007: { n: 'extended_control_command', efecto: true, ay: 'bit 13: limpiar alarmas' },
+    40008: { n: 'jeita_T1', efecto: true }, 40009: { n: 'jeita_T2', efecto: true },
+    40010: { n: 'jeita_T3', efecto: true }, 40011: { n: 'jeita_T4', efecto: true },
+    40017: { n: 'manual_control_of_motor', efecto: true, ay: '1 este · 2 oeste · 0 parar' },
+    40035: { n: 'heater_activation_temperature_threshold', efecto: true },
+    41037: { n: 'maximum_west_tilt_angle', efecto: true, pulsos: true, min: 0, max: 3000 },
+    41038: { n: 'maximum_east_tilt_angle', efecto: true, pulsos: true, min: -3000, max: 0 },
+    41039: { n: 'motor_velocity_evaluation_time', efecto: true, ms: true, min: 500, max: 60000 },
+    41040: { n: 'motor_over_current_software', efecto: true, min: 500, max: 20000 },
+    41042: { n: 'nighttime_tilt_angle', efecto: true, f32: true },
+    41044: { n: 'safe_position_1_tilt', efecto: true, f32: true, sp: 1 },
+    41046: { n: 'safe_position_2_tilt', efecto: true, f32: true, sp: 2 },
+    41048: { n: 'safe_position_3_tilt', efecto: true, f32: true, sp: 3 },
+    41050: { n: 'safe_position_4_tilt', efecto: true, f32: true, sp: 4 },
+    41052: { n: 'safe_position_5_tilt', efecto: true, f32: true, sp: 5 },
+    41056: { n: 'safe_position_7_tilt', efecto: true, f32: true, sp: 7 },
+    41058: { n: 'inclinometer_offset', efecto: true, f32: true, ay: 'compensa el desajuste de montaje (ensayo D.1.1)' },
+    41060: { n: 'deadband_west', efecto: true, min: 1, max: 500 },
+    41061: { n: 'deadband_east', efecto: true, min: 1, max: 500 },
+    41063: { n: 'deadband_low_capacity', efecto: true, min: 1, max: 999 },
+    41065: { n: 'motor_retries', efecto: true, min: 0, max: 20 },
+    41067: { n: 'no_load_speed', efecto: true, ms: true }
+  },
+  ncu: {
+    40001: { n: 'force_sp_1', efecto: true, sp: 1 }, 40002: { n: 'force_sp_2', efecto: true, sp: 2 },
+    40003: { n: 'force_sp_3', efecto: true, sp: 3 }, 40004: { n: 'force_sp_4', efecto: true, sp: 4 },
+    40005: { n: 'force_sp_5', efecto: true, sp: 5 }, 40006: { n: 'force_sp_6', efecto: true, sp: 6 },
+    40007: { n: 'force_sp_7', efecto: true, sp: 7 },
+    40070: { n: 'auto_mode', efecto: true, ay: 'un bit por grupo: pasa a AUTO' },
+    40071: { n: 'manual_mode', efecto: true, ay: 'un bit por grupo: pasa a MANUAL' }
+  },
+  hsu: {
+    40010: { n: 'wind_level_1_threshold', efecto: true },
+    40011: { n: 'wind_level_2_threshold', efecto: true },
+    40012: { n: 'wind_level_3_threshold', efecto: true }
+  }
+};
+
+/* qué grupos enciende un mapa de bits, para poder decirlo en claro */
+function gruposDe(v) {
+  var out = [];
+  for (var g = 1; g <= 10; g++) if ((v >> (g - 1)) & 1) out.push(g);
+  return out;
+}
+
+/* lee 1 o 2 registros como el tipo que toque */
+function valDe(vals, def) {
+  if (def.f32) {
+    var b = new ArrayBuffer(4), dv = new DataView(b);
+    dv.setUint16(0, vals[0] & 0xFFFF, false); dv.setUint16(2, (vals[1] || 0) & 0xFFFF, false);
+    return dv.getFloat32(0, false);
+  }
+  var v = vals[0] & 0xFFFF;
+  return v > 32767 && def.min != null && def.min < 0 ? v - 65536 : v;
+}
+
+Planta.prototype.escribe = function (dev, id, dir, vals) {
+  vals = (vals == null) ? [0] : (Array.isArray(vals) ? vals : [vals]);
+  var out = { ok: false, aplicados: [], avisos: [] };
+  var cat = ESCRITURA[dev];
+  if (!cat) { out.avisos.push('dispositivo desconocido: ' + dev); return out; }
+  var def = cat[dir];
+  if (!def) {
+    /* como el equipo: lo que no es escribible se rechaza, no se traga en silencio */
+    out.avisos.push(dir + ' no es un registro escribible de la ' + dev.toUpperCase());
+    return out;
+  }
+  var v = valDe(vals, def);
+  if (def.min != null && v < def.min) { out.avisos.push(dir + ': ' + v + ' por debajo del mínimo (' + def.min + ')'); return out; }
+  if (def.max != null && v > def.max) { out.avisos.push(dir + ': ' + v + ' por encima del máximo (' + def.max + ')'); return out; }
+
+  if (dev === 'ncu') return this._escribeNcu(dir, def, v, out);
+  if (dev === 'hsu') {
+    var h = this.hsus[(id | 0) - 1] || this.hsus[0];
+    if (!h) { out.avisos.push('no hay HSU ' + id); return out; }
+    h.escrito = h.escrito || {}; h.escrito[dir] = vals.slice();
+    if (dir >= 40010 && dir <= 40012) { h.umbral = h.umbral || {}; h.umbral[dir - 40009] = v / 3.6; }
+    out.ok = true; out.aplicados.push(def.n + ' = ' + v);
+    return out;
+  }
+
+  var t = this.tcu(id | 0);
+  if (!t) { out.avisos.push('no hay TCU ' + id); return out; }
+  t.escrito = t.escrito || {};
+  t.escrito[dir] = vals.slice();                 /* se relee tal cual se escribió */
+  var C = t.cfgTcu, R2 = 180 / Math.PI, ok = true;
+
+  if (dir === 40000) {
+    if (v === 1) t.modo = MODO.OFF;
+    else if (v === 2) t.modo = MODO.MANUAL;
+    else if (v === 3) t.modo = MODO.AUTO;
+    else if (v >= 11 && v <= 17) t.forzadoLocal = v - 10;
+    else if (v === 10) t.forzadoLocal = 0;
+    else ok = false;
+  } else if (dir >= 40001 && dir <= 40006) {
+    t.reloj = t.reloj || {};
+    t.reloj[{ 40001: 'seg', 40002: 'min', 40003: 'hora', 40004: 'dia', 40005: 'mes', 40006: 'anio' }[dir]] = v;
+  } else if (dir === 40007) {
+    if ((v >> 13) & 1) t.limpiaAlarmas();
+  } else if (dir >= 40008 && dir <= 40011) {
+    C.jeita[dir - 40008] = v / 10;               /* décimas de °C, como el resto del mapa */
+  } else if (dir === 40017) {
+    t.jog = (v === 1) ? -1 : (v === 2 ? 1 : 0);  /* 1 este (θ negativo) · 2 oeste */
+  } else if (dir === 40035) { C.heaterT = v / 10;
+  } else if (dir === 41037) { C.topeOeste = v / t.sensor.pulsosGrado;
+  } else if (dir === 41038) { C.topeEste = v / t.sensor.pulsosGrado;
+  } else if (dir === 41039) { C.evalMotorS = v / 1000;
+  } else if (dir === 41040) { C.iMotorMax = v;
+  } else if (dir === 41042) { C.nightPos = v * R2;
+  } else if (def.sp) { C.spTilt[def.sp] = v * R2;
+  } else if (dir === 41058) { t.sensor.offsetCfg = v * R2;
+  } else if (dir === 41060 || dir === 41061) { C.dbPulsos = v;
+  } else if (dir === 41063) { C.dbPulsosBaja = v;
+  } else if (dir === 41065) { C.reintentos = v;
+  } else if (dir === 41067) { C.velSinCarga = v / 1000;
+  } else ok = false;
+
+  out.ok = ok;
+  if (ok) out.aplicados.push(def.n + ' = ' + (def.f32 ? v.toFixed(4) : v));
+  else out.avisos.push(def.n + ': valor ' + v + ' no reconocido');
+  return out;
+};
+
+Planta.prototype._escribeNcu = function (dir, def, v, out) {
+  var n = this.ncu;
+  n.escrito = n.escrito || {}; n.escrito[dir] = v;
+  if (def.sp) {
+    /* El registro ES un mapa de bits por grupo, tal cual lo define el R7, y la NCU ya
+       lo guarda así. Se escribe entero de una vez —incluidos los ceros— porque
+       escribir 0 es como se SUELTA un forzado, y eso también tiene que funcionar. */
+    n.forzados[def.sp] = v & 0x3FF;
+    out.ok = true;
+    out.aplicados.push(def.n + ' = 0x' + v.toString(16) + ' (grupos ' +
+      (v ? gruposDe(v).join(',') : '—') + ')');
+    return out;
+  }
+  if (dir === 40070 || dir === 40071) {
+    var modo = (dir === 40070) ? MODO.AUTO : MODO.MANUAL;
+    var tocadas = 0;
+    for (var i = 0; i < this.tcus.length; i++) {
+      var t = this.tcus[i];
+      if ((v >> (t.grupo - 1)) & 1) { t.modo = modo; tocadas++; }
+    }
+    out.ok = true; out.aplicados.push(def.n + ': ' + tocadas + ' equipos a ' + MODO_TXT[modo]);
+    return out;
+  }
+  out.avisos.push(def.n + ': sin efecto modelado');
+  return out;
+};
+
 /* ═══════════════════ exportación ═══════════════════ */
 var API = {
   Planta: Planta, TCU: TCU, HSU: HSU, NCU: NCU, Meteo: Meteo,
   PERFILES: PERFILES, perfilDe: perfilDe, TIPO_REG: TIPO_REG, FISICA: F,
   Abanderamiento: Abanderamiento, Difusa: Difusa, Cielo: Cielo,
+  ESCRITURA: ESCRITURA,
   K: K, K_CANON: K_CANON, ajusta: ajusta, restauraCanon: restauraCanon, tocados: tocados,
   PARAMS: PARAMS,
   MODO: MODO, MODO_TXT: MODO_TXT, SP: SP, SP_TXT: SP_TXT,
