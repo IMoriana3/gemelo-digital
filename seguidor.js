@@ -93,6 +93,26 @@
     return mats;
   };
 
+  /* ---------- EJE DE TRANSMISIÓN (bífila) ----------
+     En una bífila el motor está en UNA viga y la gemela se mueve por un eje que sale de
+     la reductora y cruza hasta la otra. `parts()` describe UNA viga, así que este eje no
+     cabe ahí: va ENTRE las dos, y lo coloca la app, igual que el cable motor↔TCU y los
+     amortiguadores. El modelo pone la cota y la geometría para que no se la invente cada
+     página.
+
+     OJO con el diámetro: 50 mm es una ESTIMACIÓN, no una cota del proyecto como el resto
+     de este fichero. El eje sale a la altura de la reductora, que es donde está su piñón
+     de entrada (y = −0,04 local, justo bajo el tubo). Si aparece la cota buena, se
+     cambia aquí y cambia en todas las páginas. */
+  D.ejeTransD = 0.05;        // ESTIMADO — pendiente de cota de proyecto
+  D.ejeTransY = -0.04;       // a la altura del cuerpo de la reductora
+  S.ejeTransGeom = function (THREE, sep) {
+    var g = new THREE.CylinderGeometry(D.ejeTransD / 2, D.ejeTransD / 2, sep, 8);
+    g.rotateX(Math.PI / 2);            // el cilindro nace en Y; el eje cruza en Z
+    g.translate(0, D.ejeTransY, 0);
+    return g;
+  };
+
   S.materials = function (THREE) {
     return {
       glass:  new THREE.MeshStandardMaterial({ color:0xffffff, roughness:.14, metalness:.10, emissive:0x0a1626, emissiveIntensity:.07 }),

@@ -68,7 +68,11 @@ function Campo3D(cont, cfg) {
   this.sol = new T.DirectionalLight(0xfff0dd, 1.45);
   this.sol.castShadow = true;
   this.sol.shadow.mapSize.set(2048, 2048);
-  this.sol.shadow.bias = -0.0006;
+  /* `bias` a secas desplaza en profundidad y en un tubo casi de canto no llega: hay que
+     separar en la NORMAL de la superficie, que es lo que quita el aserrado de los bordes
+     sin despegar la sombra del objeto. */
+  this.sol.shadow.bias = -0.00015;
+  this.sol.shadow.normalBias = 0.06;
   this.scene.add(this.sol);
   this.scene.add(this.sol.target);
   this.hemi = new T.HemisphereLight(0x9fc3e8, 0x2b2a24, 0.50);
@@ -90,7 +94,7 @@ function Campo3D(cont, cfg) {
   this.blancoOrbita = new T.Vector3(0, 2, 0);
   this._sucio = true;                       /* hay algo que pintar */
   this.orbita = orbita(this.renderer.domElement, this.camera, this.blancoOrbita, 120, 12, 3000, T,
-                       function () { yo._sucio = true; });
+                       function () { yo._sucio = true; yo.ajustaSombra(); });
   this.picar();
   this.redimensiona();
 
@@ -112,6 +116,35 @@ function Campo3D(cont, cfg) {
     if (yo._sucio) yo.dibuja();
   })();
 }
+
+/* ── el mapa de sombras, a la medida de LO QUE SE VE ────────────────────────
+   Cubría el campo entero pasara lo que pasara: 287 m con un mapa de 2048 son 14 cm por
+   texel, y con un tubo de 12 cm y correas de 3 la sombra sale en sierra. Pero el campo
+   entero solo hace falta cuando se mira el campo entero: al acercarse, la mitad de esos
+   texels están gastados en suelo que no se ve.
+
+   Así que el recuadro sigue a la cámara —su punto de mira y su distancia—, sin pasarse
+   del campo. Acercándose a una fila se baja a 3 cm por texel sin tocar la resolución del
+   mapa, que es donde el aserrado desaparece. Se recentra en el objetivo, no en el origen,
+   porque si no al desplazarse la sombra se queda atrás. */
+Campo3D.prototype.ajustaSombra = function () {
+  if (!this._radioCampo) return;
+  var r = Math.max(22, Math.min(this._radioCampo, this.orbita.radio() * 0.75));
+  var b = this.blancoOrbita;
+  /* solo se rehace si ha cambiado de verdad: cada ajuste obliga a repintar el mapa */
+  if (this._rSombra && Math.abs(r - this._rSombra) < r * 0.12 &&
+      Math.abs(b.x - this._sx) < r * 0.25 && Math.abs(b.z - this._sz) < r * 0.25) return;
+  this._rSombra = r; this._sx = b.x; this._sz = b.z;
+  this.sol.target.position.set(b.x, 0, b.z);
+  this.sol.target.updateMatrixWorld();
+  this._zen = null;                     /* el sol se recoloca sobre el nuevo objetivo */
+  var sc = this.sol.shadow.camera;
+  sc.near = 1; sc.far = this._radioCampo * 5 + 400;
+  sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r;
+  sc.updateProjectionMatrix();
+  this.renderer.shadowMap.needsUpdate = true;
+  this._sucio = true;
+};
 
 /* Cambiar de bífila a monofila rehace el campo entero: cambian las piezas de cada
    equipo y el paso entre filas. */
@@ -166,13 +199,18 @@ Campo3D.prototype.construye = function (P) {
   var largo = D.span || 34;              /* la fila entera, con su vano de motor */
   var porLinea = Math.max(1, Math.round(Math.sqrt(this.n * pasoFila / largo * 2.2)));
   var lineas = Math.ceil(this.n / porLinea);
+  /* El eje del tubo va a la ALTURA DEL POSTE. Estaba a y = 0, o sea con 1,10 m de poste
+     bajo tierra y las mesas rozando el suelo: por eso no se veían los postes y la sombra
+     salía pegada al panel y aserrada — un receptor a centímetros del proyector es acné de
+     shadow map garantizado. La cota es del modelo (postH), la misma que usa index.html. */
+  var hEje = D.postH || 2.0;
   this.bases = [];
   this.pos = [];                          /* {x,z} sin desempaquetar matrices en el bucle */
   for (var i = 0; i < this.n; i++) {
     var c = i % porLinea, f = Math.floor(i / porLinea);
     var x = (c - (porLinea - 1) / 2) * (largo + 6);
     var z = (f - (lineas - 1) / 2) * pasoFila;
-    this.bases.push(new T.Matrix4().makeTranslation(x, 0, z));
+    this.bases.push(new T.Matrix4().makeTranslation(x, hEje, z));
     this.pos.push({ x: x, z: z });
   }
   this._ext = { x: (porLinea - 1) * (largo + 6) + largo,
@@ -187,11 +225,31 @@ Campo3D.prototype.construye = function (P) {
   /* OJO con el contrato del modelo: `mat` es una CLAVE del mapa de materiales y
      `geom` una FÁBRICA `(THREE) -> BufferGeometry`, no objetos ya construidos.
      Pasárselos tal cual a InstancedMesh revienta dentro del render, no al crearlo. */
+  /* El poste viene marcado `terrainScaled`: el modelo lo dibuja con un largo nominal y
+     cuenta con que la app lo ESTIRE hasta donde esté el suelo —o el terreno, en las
+     páginas que lo tienen—. Sin eso queda colgando en el aire con el pie a 0,9 m, que es
+     como estaba. La cabeza no se toca: va donde va, debajo de la corona. */
+  function alSuelo(geom, locals) {
+    if (!geom.boundingBox) geom.computeBoundingBox();
+    var bb = geom.boundingBox, alto = bb.max.y - bb.min.y;
+    if (alto <= 0) return locals;
+    return locals.map(function (m) {
+      var top = m.elements[13] + bb.max.y;          /* la cabeza, tal cual la puso el modelo */
+      var s = (top + hEje) / alto;                  /* hasta y = −hEje local, o sea el suelo */
+      if (!(s > 1)) return m;
+      var n = m.clone();
+      n.elements[5] = s;
+      n.elements[13] = top - s * bb.max.y;
+      return n;
+    });
+  }
   function monta(plan, dz) {
     plan.forEach(function (p) {
       var geom = (typeof p.geom === 'function') ? p.geom(T) : p.geom;
       var mat = (typeof p.mat === 'string') ? (SG[p.mat] || SG.steel) : p.mat;
       if (!geom || !geom.isBufferGeometry) return;
+      if (p.terrainScaled) p = { key: p.key, mat: p.mat, spin: p.spin, cast: p.cast,
+                                 locals: alSuelo(geom, p.locals) };
       var im = new T.InstancedMesh(geom, mat, yo.n * p.locals.length);
       im.castShadow = !!p.cast; im.receiveShadow = true;
       im.frustumCulled = false;
@@ -206,6 +264,19 @@ Campo3D.prototype.construye = function (P) {
         bifila ? -pitch / 2 : 0);
   if (bifila) {
     monta(S.instancePlan(T, { materials: SG, detail: 'mass', west: false }), pitch / 2);
+
+    /* El EJE DE TRANSMISIÓN: lo que hace que la gemela se mueva sin motor propio. Sin él
+       la bífila son dos vigas girando a la vez porque sí. No es una pieza de `parts()`
+       —eso describe UNA viga— sino algo que va entre las dos, así que lo coloca la app
+       con la cota del modelo. No bascula: sale de la reductora, que es fija. */
+    if (S.ejeTransGeom) {
+      var ejeIM = new T.InstancedMesh(S.ejeTransGeom(T, pitch), SG.steel, this.n);
+      ejeIM.castShadow = true; ejeIM.receiveShadow = true; ejeIM.frustumCulled = false;
+      this.grupoPlanta.add(ejeIM);
+      var me = new T.Matrix4(), id = new T.Matrix4();
+      for (var e = 0; e < this.n; e++) { me.copy(this.bases[e]).multiply(id); ejeIM.setMatrixAt(e, me); }
+      ejeIM.instanceMatrix.needsUpdate = true;
+    }
   }
 
   /* Testigos de salud, uno por seguidor. Van al EXTREMO de la fila y a poca altura: en
@@ -219,7 +290,7 @@ Campo3D.prototype.construye = function (P) {
   this.grupoPlanta.add(this.testigos);
   this._colTmp = new T.Color();
   this._salud = new Array(this.n);
-  var mt = new T.Matrix4(), off = new T.Matrix4().makeTranslation(largo / 2 + 1.6, 2.6, 0);
+  var mt = new T.Matrix4(), off = new T.Matrix4().makeTranslation(largo / 2 + 1.6, 1.2, 0);
   for (var q = 0; q < this.n; q++) {
     mt.multiplyMatrices(this.bases[q], off);
     this.testigos.setMatrixAt(q, mt);
@@ -239,11 +310,8 @@ Campo3D.prototype.construye = function (P) {
      seguidores mide 350: las tres cuartas partes del campo no proyectaban sombra, y eso
      es lo que hacía que se viera plano y falso. */
   var diag = Math.hypot(this._ext.x, this._ext.z);
-  var radio = Math.max(60, diag * 0.62);
-  var sc = this.sol.shadow.camera;
-  sc.near = 1; sc.far = radio * 5 + 400;
-  sc.left = -radio; sc.right = radio; sc.top = radio; sc.bottom = -radio;
-  sc.updateProjectionMatrix();
+  this._radioCampo = Math.max(60, diag * 0.62);
+  this.ajustaSombra();
 
   /* La niebla empieza PASADO el campo. Puesta antes, lavaba de gris la mitad de lejos
      de la planta y parecía que faltaba render, no que hubiera atmósfera. Y el suelo se
@@ -322,7 +390,11 @@ Campo3D.prototype.actualiza = function (P) {
       this._zen = s.zen; this._az = s.az; solMovio = true;
       var el = Math.max((90 - s.zen) * D2R, 0.04), az = s.az * D2R, ce = Math.cos(el);
       var d = Math.max(320, Math.hypot(this._ext.x, this._ext.z));
-      this.sol.position.set(Math.cos(az) * ce * d, Math.sin(el) * d, Math.sin(az) * ce * d);
+      /* RELATIVO al objetivo de la sombra: si se pone en absoluto y el recuadro de
+         sombras se desplaza con la cámara, la luz cambia de dirección al moverse */
+      var tg = this.sol.target.position;
+      this.sol.position.set(tg.x + Math.cos(az) * ce * d, tg.y + Math.sin(el) * d,
+                            tg.z + Math.sin(az) * ce * d);
       this.sol.intensity = s.dia ? 1.45 : 0.05;
       this.hemi.intensity = s.dia ? 0.50 : 0.16;
       var cielo = s.dia ? 0x87a8c4 : 0x0b1119;
@@ -477,7 +549,8 @@ function orbita(dom, cam, blanco, r0, rmin, rmax, T, alMover) {
     e.preventDefault(); st.radius = clampR(st.radius * (1 + Math.sign(e.deltaY) * 0.1)); aplica();
   }, { passive: false });
   aplica();
-  return { aplica: aplica, pon: function (r) { st.radius = clampR(r); aplica(); } };
+  return { aplica: aplica, radio: function () { return st.radius; },
+           pon: function (r) { st.radius = clampR(r); aplica(); } };
 }
 
 if (typeof window !== 'undefined') window.Campo3D = Campo3D;

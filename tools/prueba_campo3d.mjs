@@ -130,6 +130,26 @@ const r = await pg.evaluate(async () => {
     sinOpcion: clavesDe({ detail: 'mass' }).length
   };
   o.dz = [...new Set(C.piezas.map((p) => (p.mT ? +p.mT.elements[14].toFixed(2) : 0)))].sort((a, b) => a - b);
+  o.eje = !!S.ejeTransGeom;
+
+  /* Nada enterrado ni flotando: el eje del tubo a la altura del poste y el poste
+     tocando el suelo. Estaba todo 2 m mas abajo, con 1,10 m de poste bajo tierra. */
+  const caja = new T.Box3(), mm = new T.Matrix4();
+  C.grupoPlanta.children.forEach((m) => {
+    if (!m.isInstancedMesh) return;
+    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+    for (let i = 0; i < m.count; i++) { m.getMatrixAt(i, mm); caja.union(m.geometry.boundingBox.clone().applyMatrix4(mm)); }
+  });
+  o.alturas = { min: +caja.min.y.toFixed(2), max: +caja.max.y.toFixed(2), postH: S.DIMS.postH };
+
+  /* el recuadro de sombras sigue a la camara: al acercarse, mas texels por metro */
+  const cmTexel = () => {
+    const sc = C.sol.shadow.camera;
+    return +((sc.right - sc.left) / C.sol.shadow.mapSize.x * 100).toFixed(1);
+  };
+  C.orbita.pon(1e5); o.sombraLejos = cmTexel();
+  C.orbita.pon(40);  o.sombraCerca = cmTexel();
+  C.encuadra();
 
   /* los mandos de la NCU tienen que pasar por P.escribe(), no tocar el estado a mano */
   const vistas = [];
@@ -196,6 +216,11 @@ ok(r.viga.sinOpcion === r.viga.oeste,
    `sin la opción west, instancePlan devuelve lo de siempre (${r.viga.sinOpcion})`);
 ok(r.mono.bifila === false && r.mono.dz.join() === '0' && r.vuelta === true,
    'el selector monofila/bífila rehace el campo y vuelve');
+ok(r.eje, 'el modelo trae el eje de transmisión, que es lo que mueve la viga gemela');
+ok(r.alturas.min >= -0.01 && r.alturas.max > r.alturas.postH,
+   `nada enterrado ni flotando: de ${r.alturas.min} a ${r.alturas.max} m, con el eje del tubo a ${r.alturas.postH} m`);
+ok(r.sombraCerca < r.sombraLejos / 2,
+   `el mapa de sombras se afina al acercarse: ${r.sombraLejos} → ${r.sombraCerca} cm por texel`);
 
 console.log('');
 ok(r.mandos.forzar.join() === 'ncu:40001',

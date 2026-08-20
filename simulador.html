@@ -415,9 +415,11 @@
             <button class="btn" id="escPlay" style="width:auto;padding:7px 16px">▶ Reproducir</button>
             <button class="btn sec" id="escRec" style="width:auto;padding:7px 14px">⏺ Grabar</button>
             <button class="btn sec" id="escLink" style="width:auto;padding:7px 14px">🔗 Enlace</button>
+            <button class="btn sec" id="escSalta" style="width:auto;padding:7px 14px;display:none">⏩ Al próximo</button>
             <button class="btn sec" id="escNuevo" style="width:auto;padding:7px 14px">Vaciar</button>
           </div>
           <div class="note" id="escDesc"></div>
+          <div class="note" id="escFalta"></div>
           <div class="note" id="escLinkOut"></div>
         </div>
         <div class="card">
@@ -875,13 +877,59 @@ function pintaEscenario() {
   var evs = ESC ? ESC.eventos : [];
   $('escN').textContent = evs.length + (evs.length === 1 ? ' evento' : ' eventos');
   $('escDesc').textContent = (ESC && ESC.desc) || '';
+
+  /* CUÁNTO FALTA. Sin esto un escenario parece roto: el «Temporal» arranca a las 9:00 y
+     su primer evento es a las 10:00, así que a ×60 hay que esperar UN MINUTO real
+     mirando cuatro «pendiente» sin que se mueva nada. No estaba estropeado; es que la
+     interfaz no contaba que el reloj iba de camino. */
+  var falta = null;
+  if (ESC && P && !GRABANDO && ESC.i < evs.length) {
+    var dh = evs[ESC.i].h - P.t.hora;
+    if (dh > -0.001) falta = { ev: evs[ESC.i], h: dh, s: dh * 3600 / (+$('vel').value || 1) };
+  }
+  $('escFalta').innerHTML = !ESC ? '' : (
+    GRABANDO ? 'Grabando: todo lo que toques entra en el guion con la hora simulada.'
+    : !evs.length ? ''
+    : falta ? ('Próximo: <b>' + Escenario.textoDe(falta.ev).replace(/^\S+ · /, '') + '</b> a las ' +
+               hhmm(falta.ev.h) + ' · faltan <b>' + minSim(falta.h) + '</b> simulados' +
+               (corriendo ? ' (' + segReal(falta.s) + ' de reloj a ×' + $('vel').value + ')'
+                          : ' — <b>y la simulación está parada</b>: dale a ▶'))
+    : 'Guion terminado: los ' + evs.length + ' eventos se han disparado.');
+
   $('escGuion').innerHTML = evs.length
     ? evs.map(function (e, i) {
         var hecho = ESC && i < ESC.i;
-        return '<div><span>' + (hecho ? '✓ ' : '· ') + Escenario.textoDe(e) + '</span><b>' +
-               (hecho ? 'hecho' : 'pendiente') + '</b></div>';
+        var prox = falta && falta.ev === e;
+        return '<div><span>' + (hecho ? '✓ ' : (prox ? '▸ ' : '· ')) + Escenario.textoDe(e) + '</span><b>' +
+               (hecho ? 'hecho' : (prox ? 'en ' + minSim(falta.h) : 'pendiente')) + '</b></div>';
       }).join('')
     : '<div><span>Vacío. Elige uno de la lista o dale a ⏺ Grabar y trastea.</span><b>—</b></div>';
+  $('escSalta').style.display = falta && falta.h > 0.02 ? '' : 'none';
+}
+function hhmm(h) { return dosD(Math.floor(h)) + ':' + dosD(Math.round((h % 1) * 60)); }
+function minSim(h) {
+  var m = Math.round(h * 60);
+  return m >= 60 ? (Math.floor(m / 60) + ' h ' + (m % 60) + ' min') : (m + ' min');
+}
+function segReal(s) {
+  return s >= 90 ? (Math.round(s / 60) + ' min') : (Math.max(1, Math.round(s)) + ' s');
+}
+
+/* Adelantar el reloj hasta justo antes del próximo evento. Se avanza con el MISMO paso
+   de 60 s que usa el bucle cuando va rápido, así que la planta llega en el estado en el
+   que habría llegado esperando: no se teletransporta el reloj, se simula el hueco. */
+function saltaAlEvento() {
+  if (!ESC || !P) return;
+  var e = ESC.eventos[ESC.i];
+  if (!e) return;
+  var meta = e.h - 1 / 60;                       /* un minuto antes, para verlo llegar */
+  var guarda = 0;
+  while (P.t.hora < meta && guarda++ < 2000) {
+    P.paso(Math.min(60, (meta - P.t.hora) * 3600));
+    HIST.paso(P, sel);
+  }
+  $('dia').value = P.t.dia; $('hora').value = P.t.hora;
+  etiquetaTiempo(); pintaTodo();
 }
 
 /* lo que se apunta cuando estás grabando */
@@ -1938,6 +1986,7 @@ $('avOn').onchange = function () {
 });
 $('escLista').onchange = function () { cargaEscenario(this.value); };
 $('escPlay').onclick = reproduce;
+$('escSalta').onclick = saltaAlEvento;
 $('escNuevo').onclick = function () { ESC = new Escenario({ n: 'el mío' }); ESC._mio = true; $('escLista').value = 'mio'; pintaEscenario(); };
 $('escRec').onclick = function () {
   if (!ESC || !ESC._mio) { ESC = new Escenario({ n: 'el mío' }); ESC._mio = true; $('escLista').value = 'mio'; }
