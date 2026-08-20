@@ -315,7 +315,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `historia.js` | la traza de lo que ha pasado: objetivo, real, medido, SoC, viento y los eventos que lo explican |
 | `escenario.js` | situaciones grabables y reproducibles, compartibles por URL |
 | `careo.js` | superpone una captura de la TCU Toolbox a la traza simulada: de «creemos que» a «±X» |
-| `campo3d.js` | el campo en 3D, con la geometría de `seguidor.js` |
+| `campo3d.js` | el campo en 3D, con la geometría de `seguidor.js`: el seguidor **bífila** de la casa —dos vigas, un motor— o monofila si la planta lo es |
 | `servidor.mjs` | publica el motor por HTTP para que `scada/tools/ncu_simulada.py` lo sirva por **Modbus TCP de verdad** |
 | `impacto.mjs` | informe de impacto de las divergencias entre los dos cálculos de batería |
 | `prueba.mjs` | prueba de humo: 196 comprobaciones sobre un día de planta |
@@ -373,6 +373,9 @@ El contraste que decide es directo: **Wh de motor por día y por TCU**, que es l
   ```
 
   Con eso el colector y la toolbox reales hablan con la planta simulada, con su jerarquía, su inclinómetro que miente y su seta enclavada. Y **la escritura vuelve por el mismo sitio**: un FC06/FC16 contra esa NCU entra por `P.escribe()`, la misma puerta que usa la interfaz. No hay un camino «de la web» y otro «de Modbus». `python3 tools/ncu_simulada.py --gemelo … --autotest` recorre el camino entero y lo comprueba.
+- **La seta no es un mando.** Es la entrada digital `30100.13`, y 30100 es de solo lectura: escribirla por Modbus se rechaza con excepción 02. El botón del panel simula que alguien la pulsa en el armario. Los mandos de verdad —forzados `40001…40007`, modo `40070`/`40071`— sí escriben, por `P.escribe()`, la misma puerta que el Modbus. **Un OFF de flota no existe en la NCU**: como en campo, va equipo por equipo con `40000 = 1`.
+- **La consigna de ángulo manual no tiene registro** en el mapa: el R7 la publica en el bloque de 50000 (solo lectura) y el mapa del TCU solo trae `40017`, que es jog este/oeste. La interfaz la pone por dentro y lo dice; es un hueco del mapa, no un atajo elegido.
+- **El selector bífila/monofila solo cambia la geometría del Campo 3D.** El consumo de motor y la batería salen de la física canónica, que ya es la del seguidor real.
 - **Dos registros llevan codificación inventada.** 30113 (criterio del ángulo objetivo) y 30114 (fuente de la posición segura) los nombra el documento pero no transcribe su enumerado; lo mismo con los valores del campo *TCU type* de 30000. Lo que sale ahí es del simulador, y el visor lo pinta en violeta para que no se confunda con lo documentado.
 - **Las filas atenuadas del visor no están simuladas.** Se listan igual para que el mapa esté entero: es preferible un hueco visible a un cero que parece un dato.
 - **No es un modelo bancable de producción.** Es un banco de pruebas de control y de lectura de mapas, no un PVsyst.

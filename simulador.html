@@ -208,6 +208,13 @@
         </div>
         <div class="fld"><label>Grupos de limpieza <span class="rv" id="nGrupV">4</span></label>
           <input type="range" id="nGrup" min="1" max="10" step="1" value="4"></div>
+        <div class="fld"><label>Configuración de la mesa</label>
+          <select id="filas">
+            <option value="bifila" selected>Bífila · dos vigas, un motor</option>
+            <option value="monofila">Monofila · una viga</option>
+          </select>
+          <div class="note" style="margin-top:4px">El seguidor de la casa es <b>1V bífila</b>: dos vigas a 6 m gobernadas por <b>un solo</b> motor — una lleva el slew, la TCU, la antena y el seccionador; la gemela va por el eje de transmisión y no lleva nada. Esto cambia <b>la geometría del Campo 3D</b> y nada más: el consumo de motor y la batería salen de la física canónica, que ya es la del seguidor real.</div>
+        </div>
         <div class="fld">
           <label>Alimentación y batería</label>
           <select id="perfil"></select>
@@ -288,11 +295,20 @@
       </div>
 
       <div class="grp">
-        <h3>Mandos de la NCU</h3>
+        <h3>Entradas de hardware de la NCU</h3>
+        <div class="note" style="margin-top:0">Esto <b>no se manda</b>: son contactos del armario que la NCU <b>lee</b>. Viven en 30100, que es de solo lectura — escribirla por Modbus se rechaza con excepción 02. El botón simula que alguien va y la pulsa.</div>
         <button class="btn dang" id="btnSeta">⏹ SETA de emergencia</button>
-        <div class="note" style="margin-bottom:8px">Inhibe el motor de toda la planta. Entrada digital 30100.13.</div>
+        <div class="note" style="margin-bottom:8px">Inhibe el motor de toda la planta. Entrada digital <b>30100.13</b>. Va <b>enclavada</b>: soltarla no rearma.</div>
         <div class="fld"><label>Limpieza por grupo (30100 bits 12:3)</label>
           <div class="chipsg" id="limpieza"></div></div>
+        <label class="sw"><input type="checkbox" id="upsFallo"><span>Fallo de red en el SAI</span></label>
+        <label class="sw"><input type="checkbox" id="acFallo"><span>Corte de alterna en planta</span></label>
+        <div class="note" style="margin-top:0">Solo lo notan los TCU de tipo <b>AC</b>: los de panel propio y los de string siguen a lo suyo.</div>
+      </div>
+
+      <div class="grp">
+        <h3>Mandos de la NCU</h3>
+        <div class="note" style="margin-top:0">Aquí sí se <b>escribe</b>. Todo pasa por la misma puerta que usaría la toolbox por Modbus, así que se aplica igual y se rechaza igual.</div>
         <div class="fld"><label>Forzar posición segura (40001…40007)</label>
           <div class="row2">
             <select id="fzSp">
@@ -316,10 +332,9 @@
             <button class="btn sec" id="btnManual">MANUAL</button>
             <button class="btn sec" id="btnOff">OFF</button>
           </div>
+          <div class="note" style="margin-top:6px">40070 es AUTO y 40071 MANUAL, un bit por grupo. <b>OFF no existe en la NCU</b>: como en campo, va equipo por equipo con 40000 = 1.</div>
         </div>
-        <label class="sw"><input type="checkbox" id="upsFallo"><span>Fallo de red en el SAI</span></label>
-        <label class="sw"><input type="checkbox" id="acFallo"><span>Corte de alterna en planta</span></label>
-        <div class="note" style="margin-top:0">Solo lo notan los TCU de tipo <b>AC</b>: los de panel propio y los de string siguen a lo suyo.</div>
+        <div class="note" id="ncuEco" style="margin-top:0">Sin órdenes todavía.</div>
       </div>
 
       <div class="grp">
@@ -1013,6 +1028,7 @@ function montaCampo() {
   if (CAMPO || !P) { if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); } return; }
   try {
     CAMPO = new Campo3D($('campo3d'), {
+      bifila: $('filas').value !== 'monofila',
       alSeleccionar: function (i) {
         var t = P.tcus[i]; if (!t) return;
         sel = t.id; sincronizaAverias();
@@ -1708,21 +1724,67 @@ function estadoForzados() {
   }
   $('fzEstado').innerHTML = l.length ? l.join('<br>') : 'Sin forzados activos.';
 }
+/* ═══════════════════ mandos de la NCU ═══════════════════
+   Estos botones llevaban la dirección escrita en la etiqueta —40001…40007, 40070/40071—
+   pero por dentro tocaban el estado a mano: `P.ncu.fuerza(...)`, `t.modo = ...`. O sea
+   que enseñaban un registro y ejecutaban otra cosa, que es justo el atajo que la puerta
+   de escritura venía a quitar. Ahora escriben de verdad, por `P.escribe()`, la misma que
+   entra desde Modbus, y por tanto pueden ser RECHAZADOS y se ve por qué. */
+function mandaNcu(dir, vals) {
+  var r = P.escribe('ncu', 0, dir, vals);
+  if (r.ok) graba({ t: 'w', dev: 'ncu', id: 0, dir: dir, vals: vals });
+  var txt = r.ok ? ('✓ ' + dir + ' · ' + r.aplicados.join(' · '))
+                 : ('✗ ' + dir + ' · ' + r.avisos.join(' · '));
+  $('ncuEco').innerHTML = '<span class="' + (r.ok ? 'eco-ok' : 'eco-no') + '">' + txt + '</span>';
+  eco(r.ok, txt.slice(2));
+  previos = {};
+  toca();
+  return r;
+}
+
+/* Los forzados son un MAPA DE BITS por grupo, no un «forzar este»: se lee el que hay,
+   se le mete o se le quita el bit del grupo y se escribe la palabra entera. Escribir 0
+   es como se suelta un forzado, y eso también tiene que funcionar. */
 function fuerza(on) {
   var sp = +$('fzSp').value, g = +$('fzGrupo').value;
-  if (g === 0) { for (var i = 1; i <= P.cfg.grupos; i++) P.ncu.fuerza(sp, i, on); }
-  else P.ncu.fuerza(sp, g, on);
-  estadoForzados(); toca();
+  var mask = (g === 0) ? ((1 << P.cfg.grupos) - 1) : (1 << (g - 1));
+  var actual = P.ncu.forzados[sp] || 0;
+  mandaNcu(40000 + sp, [on ? (actual | mask) : (actual & ~mask)]);
+  estadoForzados();
 }
 $('btnFzOn').onclick = function () { fuerza(true); };
 $('btnFzOff').onclick = function () { fuerza(false); };
+
 function modoFlota(m) {
-  P.tcus.forEach(function (t) { t.modo = m; if (m === SIM.MODO.MANUAL) t.manual = +$('manSet').value; });
-  toca();
-};
+  var todos = (1 << P.cfg.grupos) - 1;
+  if (m === SIM.MODO.AUTO) { mandaNcu(40070, [todos]); return; }
+  if (m === SIM.MODO.MANUAL) {
+    mandaNcu(40071, [todos]);
+    /* El ÁNGULO manual no tiene registro en el mapa: el R7 lo publica en el bloque de
+       50000 (solo lectura) y el mapa del TCU solo trae 40017, que es jog este/oeste, no
+       una consigna. Así que esto se pone por dentro, y se dice — no es un atajo elegido,
+       es un hueco del mapa. */
+    var a = +$('manSet').value;
+    P.tcus.forEach(function (t) { t.manual = a; });
+    $('ncuEco').innerHTML += ' <span class="eco-no">· la consigna de ' + a.toFixed(0) +
+      '° va por dentro: no hay registro de ángulo manual en el mapa</span>';
+    return;
+  }
+  /* OFF de flota NO EXISTE en la NCU: 40070 es AUTO y 40071 MANUAL, y no hay un tercero.
+     En campo se hace como aquí, equipo por equipo con 40000=1 por el passthrough. */
+  var n = 0, fallo = 0;
+  P.tcus.forEach(function (t) { (P.escribe('tcu', t.id, 40000, [1]).ok ? n++ : fallo++); });
+  $('ncuEco').innerHTML = '<span class="eco-ok">✓ 40000 = 1 en ' + n + ' TCU</span>' +
+    '<span class="eco-no"> · la NCU no tiene un OFF de flota: va equipo por equipo' +
+    (fallo ? ' (' + fallo + ' rechazados)' : '') + '</span>';
+  previos = {}; toca();
+}
 $('btnAuto').onclick = function () { modoFlota(SIM.MODO.AUTO); };
 $('btnManual').onclick = function () { modoFlota(SIM.MODO.MANUAL); };
 $('btnOff').onclick = function () { modoFlota(SIM.MODO.OFF); };
+$('filas').onchange = function () {
+  if (CAMPO) { CAMPO.ponBifila(this.value !== 'monofila', P); CAMPO.selecciona(indiceDe(sel)); }
+};
 $('btnSeta').onclick = function () {
   P.ncu.seta = !P.ncu.seta;
   this.textContent = P.ncu.seta ? '⏹ SETA PULSADA — soltar' : '⏹ SETA de emergencia';

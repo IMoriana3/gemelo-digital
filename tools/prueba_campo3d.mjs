@@ -118,6 +118,35 @@ const r = await pg.evaluate(async () => {
   o.sombraCubre = Math.min(sc.right, sc.top) * 2;
   o.autoSombras = C.renderer.shadowMap.autoUpdate;
 
+  /* BIFILA: dos vigas por equipo, y la electrónica en UNA sola. Si esto se rompe, el
+     campo vuelve a enseñar la mitad de la estructura y el doble de TCU. */
+  const S = window.Seguidor;
+  const clavesDe = (opts) => S.instancePlan(T, opts).map((p) => p.key);
+  const soloOeste = /tcu|motor|secc|antena/;
+  o.viga = {
+    oeste: clavesDe({ detail: 'mass', west: true }).length,
+    gemela: clavesDe({ detail: 'mass', west: false }).length,
+    gemelaConElectronica: clavesDe({ detail: 'mass', west: false }).filter((k) => soloOeste.test(k)),
+    sinOpcion: clavesDe({ detail: 'mass' }).length
+  };
+  o.dz = [...new Set(C.piezas.map((p) => (p.mT ? +p.mT.elements[14].toFixed(2) : 0)))].sort((a, b) => a - b);
+
+  /* los mandos de la NCU tienen que pasar por P.escribe(), no tocar el estado a mano */
+  const vistas = [];
+  const orig2 = P.escribe.bind(P);
+  P.escribe = (d, i, dir, v) => { vistas.push(d + ':' + dir); return orig2(d, i, dir, v); };
+  const pulsa = (id) => { vistas.length = 0; document.getElementById(id).click(); return vistas.slice(); };
+  document.getElementById('fzSp').value = '1';
+  document.getElementById('fzGrupo').value = '0';
+  o.mandos = {
+    forzar: pulsa('btnFzOn'),
+    auto: pulsa('btnAuto'),
+    manual: pulsa('btnManual'),
+    off: pulsa('btnOff').length,
+    seta: pulsa('btnSeta')
+  };
+  P.escribe = orig2;
+
   /* Rehacer la planta no puede dejar geometrías tiradas en la GPU. Se PINTA después de
      cada reconstrucción: `info.memory` cuenta lo subido a la tarjeta, y sin un render
      por medio las mallas nuevas aún no están subidas — se leería un cero engañoso. */
@@ -125,6 +154,13 @@ const r = await pg.evaluate(async () => {
   const antes = C.renderer.info.memory.geometries;
   for (let i = 0; i < 4; i++) { C.construye(P); C.actualiza(P); C.dibuja(); }
   o.geom = { antes, despues: C.renderer.info.memory.geometries };
+
+  /* el selector rehace el campo */
+  const s = document.getElementById('filas');
+  s.value = 'monofila'; s.dispatchEvent(new Event('change', { bubbles: true }));
+  o.mono = { bifila: C.bifila, dz: [...new Set(C.piezas.map((p) => (p.mT ? 1 : 0)))] };
+  s.value = 'bifila'; s.dispatchEvent(new Event('change', { bubbles: true }));
+  o.vuelta = C.bifila;
   return o;
 });
 
@@ -147,6 +183,30 @@ ok(r.autoSombras === false,
    'el mapa de sombras no se rehace en cada frame (solo cuando la escena se mueve)');
 ok(r.geom.despues <= r.geom.antes + 2,
    `rehacer la planta no deja geometría en la GPU: ${r.geom.antes} → ${r.geom.despues} tras 4 reconstrucciones`);
+
+console.log('');
+ok(r.dz.length === 2 && r.dz[0] === -3 && r.dz[1] === 3,
+   `el seguidor es BIFILA: dos vigas a ${r.dz.join(' y ')} m del centro`);
+ok(r.viga.gemela < r.viga.oeste,
+   `la gemela lleva menos piezas que la del motor (${r.viga.gemela} vs ${r.viga.oeste})`);
+ok(r.viga.gemelaConElectronica.length === 0,
+   'la gemela NO lleva TCU, motor, seccionador ni antena' +
+   (r.viga.gemelaConElectronica.length ? ': ' + r.viga.gemelaConElectronica.join(', ') : ''));
+ok(r.viga.sinOpcion === r.viga.oeste,
+   `sin la opción west, instancePlan devuelve lo de siempre (${r.viga.sinOpcion})`);
+ok(r.mono.bifila === false && r.mono.dz.join() === '0' && r.vuelta === true,
+   'el selector monofila/bífila rehace el campo y vuelve');
+
+console.log('');
+ok(r.mandos.forzar.join() === 'ncu:40001',
+   `forzar SP1 escribe el registro, no toca el estado: ${r.mandos.forzar.join(' ') || '(nada)'}`);
+ok(r.mandos.auto.join() === 'ncu:40070' && r.mandos.manual.join() === 'ncu:40071',
+   `AUTO y MANUAL escriben 40070/40071: ${r.mandos.auto.concat(r.mandos.manual).join(' ') || '(nada)'}`);
+ok(r.mandos.off > 1,
+   `OFF va equipo por equipo, porque la NCU no tiene ese registro: ${r.mandos.off} escrituras`);
+ok(r.mandos.seta.length === 0,
+   'la SETA no escribe nada: es una entrada de hardware, no un mando');
+
 ok(rotos.length === 0, 'sin errores de JavaScript' + (rotos.length ? ': ' + rotos[0] : ''));
 
 await nav.close();

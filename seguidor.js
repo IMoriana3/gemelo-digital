@@ -339,19 +339,32 @@
    * Devuelve { spin, static, modCols }: 'spin' bascula (rotation.x), 'static'
    * fija (slew); 'modCols' = centros de módulo {x,z} (p.ej. para capas de nieve).
    * ==================================================================== */
+  /* Piezas que van SOLO en la viga del motor: la TCU con sus abarcones y chapas, la
+     antena, y el seccionador con sus derivaciones DC. La gemela lleva el eje de
+     transmisión y punto. La lista y el criterio son ÚNICOS y los comparten buildBeam e
+     instancePlan: con una copia en cada sitio, el día que se toque una acaba habiendo
+     una bífila con dos TCU y dos motores, que es un seguidor que no existe. */
+  var SOLO_OESTE = { tcu:1, tcuabarcon:1, tcuchapa:1, antena:1, antenatip:1, motorlink:1,
+                     secc:1, seccknob:1, seccmaneta:1, seccchapa:1, seccabarcon:1,
+                     secclink:1, seccdca:1, seccdcb:1 };
+  function esDeEstaViga(p, west) {
+    if (west) return true;
+    if (SOLO_OESTE[p.key] || p.antenna) return false;   // TCU / antena / seccionador
+    return !!(p.spin || p.twin);                        // del slew, en la gemela solo las twin
+  }
+  S.SOLO_OESTE = SOLO_OESTE;
+
   S.buildBeam = function (THREE, opts) {
     opts = opts || {};
     var mats = opts.materials || S.materials(THREE);
     var west = opts.west !== false;
     var skip = opts.skip || {};
-    var WEST = { tcu:1, tcuabarcon:1, tcuchapa:1, antena:1, antenatip:1, motorlink:1, secc:1, seccknob:1, seccmaneta:1, seccchapa:1, seccabarcon:1, secclink:1, seccdca:1, seccdcb:1 };   // el seccionador (y sus derivaciones DC) va con la TCU: solo viga oeste
     var spin = new THREE.Group(), stat = new THREE.Group(), modCols = [], dampers = [];
     S.parts(THREE, { size:opts.size||'largo', detail:opts.detail||'full' }).forEach(function (p) {
       if (p.motorLink) return;                                   // cable motor↔TCU: lo gestiona la app por frame (pendiente)
       if (p.damperLink) { dampers.push({ a:p.a, b:p.b }); return; }   // amortiguadores: en AMBAS vigas; render per-frame en la app
       if (skip[p.key]) return;
-      if (!west && (WEST[p.key] || p.antenna)) return;           // TCU/antena/abarcón-TCU/chapa: solo viga oeste
-      if (!west && !p.spin && !p.twin) return;                   // slew completo solo oeste; en la gemela solo piezas twin
+      if (!esDeEstaViga(p, west)) return;
       var mesh = new THREE.Mesh(p.geom(THREE), mats[p.mat]);
       mesh.applyMatrix4(p.m);
       mesh.castShadow = !!p.cast; mesh.receiveShadow = true;
@@ -368,10 +381,19 @@
    *   plan = Seguidor.instancePlan(THREE, {detail:'mass', size:'largo'})
    *   -> [{ key, mat, geom, spin, cast, locals:[Matrix4,...] }]
    * La app: por cada tracker t y cada local L -> setMatrixAt(base_t · (spin?Rx:1) · L)
+   *
+   * opts.west funciona IGUAL que en buildBeam, y por el mismo motivo: un seguidor es
+   * BIFILA, dos vigas, y solo una lleva motor, TCU, antena y seccionador. Antes esta
+   * función ignoraba la opción y devolvía siempre la viga completa; quien la llamaba
+   * con west:true creyendo que pedía «la del motor» dibujaba en realidad un campo de
+   * seguidores monofila, cada uno con su propia TCU. Sin la opción no se filtra nada,
+   * que es lo que hacía siempre: los que ya la usan así no notan el cambio.
    * ==================================================================== */
   S.instancePlan = function (THREE, opts) {
     var byType = {}, order = [];
+    var west = !opts || opts.west !== false;
     S.parts(THREE, opts).forEach(function (p) {
+      if (!esDeEstaViga(p, west)) return;
       if (!byType[p.key]) { byType[p.key] = { key:p.key, mat:p.mat, geom:p.geom, spin:p.spin, cast:p.cast, terrainScaled:!!p.terrainScaled, twin:!!p.twin, antenna:!!p.antenna, tip:!!p.tip, motorLink:!!p.motorLink, damperLink:!!p.damperLink, a:p.a, b:p.b, as:[], bs:[], locals:[] }; order.push(p.key); }
       byType[p.key].locals.push(p.m);
       if (p.a) byType[p.key].as.push(p.a);
@@ -380,6 +402,6 @@
     return order.map(function (k){ return byType[k]; });
   };
 
-  S.VERSION = '0.4.19';
+  S.VERSION = '0.4.20';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);

@@ -39,6 +39,7 @@ var D2R = Math.PI / 180;
 function Campo3D(cont, cfg) {
   cfg = cfg || {};
   this.cont = cont;
+  this.bifila = cfg.bifila !== false;      /* el seguidor de la casa; monofila se pide */
   this.alSeleccionar = cfg.alSeleccionar || function () {};
   this.THREE = global.THREE;
   if (!this.THREE) throw new Error('falta lib/three.min.js');
@@ -112,6 +113,15 @@ function Campo3D(cont, cfg) {
   })();
 }
 
+/* Cambiar de bífila a monofila rehace el campo entero: cambian las piezas de cada
+   equipo y el paso entre filas. */
+Campo3D.prototype.ponBifila = function (b, P) {
+  b = !!b;
+  if (b === this.bifila) return;
+  this.bifila = b;
+  if (P) { this.construye(P); this.actualiza(P); }
+};
+
 Campo3D.prototype.para = function () {
   this._vivo = false;
   if (this._ro) this._ro.disconnect();
@@ -142,42 +152,61 @@ Campo3D.prototype.construye = function (P) {
   var D = S.DIMS;
   /* El tubo de par del modelo va a lo largo de X y bascula sobre X, así que el PASO
      ENTRE FILAS (6 m canónicos) va en Z. Varios seguidores de la misma línea se
-     alinean en X, separados por su vano. */
-  var pitch = 6.0;                       /* CANONICAL_PITCH_M */
+     alinean en X, separados por su vano.
+
+     Y un seguidor de la casa es BIFILA: DOS vigas a 6 m, gobernadas por un solo motor
+     —una lleva el slew, la TCU, la antena y el seccionador; la gemela va por el eje de
+     transmisión y no lleva nada—. Aquí se dibujaba una sola viga por equipo, y encima
+     con TCU y motor propios: el campo enseñaba la mitad de la estructura y el doble de
+     electrónica. `monofila` existe para las plantas que sí lo son; el modelo canónico
+     es la bífila y es lo que sale por defecto. */
+  var bifila = this.bifila !== false;
+  var pitch = 6.0;                       /* CANONICAL_PITCH_M: entre vigas contiguas */
+  var pasoFila = bifila ? pitch * 2 : pitch;   /* de un seguidor al siguiente */
   var largo = D.span || 34;              /* la fila entera, con su vano de motor */
-  var porLinea = Math.max(1, Math.round(Math.sqrt(this.n * pitch / largo * 2.2)));
+  var porLinea = Math.max(1, Math.round(Math.sqrt(this.n * pasoFila / largo * 2.2)));
   var lineas = Math.ceil(this.n / porLinea);
   this.bases = [];
   this.pos = [];                          /* {x,z} sin desempaquetar matrices en el bucle */
   for (var i = 0; i < this.n; i++) {
     var c = i % porLinea, f = Math.floor(i / porLinea);
     var x = (c - (porLinea - 1) / 2) * (largo + 6);
-    var z = (f - (lineas - 1) / 2) * pitch;
+    var z = (f - (lineas - 1) / 2) * pasoFila;
     this.bases.push(new T.Matrix4().makeTranslation(x, 0, z));
     this.pos.push({ x: x, z: z });
   }
-  this._ext = { x: (porLinea - 1) * (largo + 6) + largo, z: (lineas - 1) * pitch + 4 };
+  this._ext = { x: (porLinea - 1) * (largo + 6) + largo,
+                z: (lineas - 1) * pasoFila + (bifila ? pitch : 0) + 4 };
 
   /* el modelo compartido, en instancias. `vistePaneles` le pone las células al vidrio:
      sin ellas `glass` es blanco liso y el campo sale a trozos cegado o negro según le
      dé el sol, que es media parte de lo que se veía «raro». */
   var SG = S.vistePaneles ? S.vistePaneles(T, S.materials(T)) : S.materials(T);
-  this.plan = S.instancePlan(T, { materials: SG, detail: 'mass', west: true });
   this.piezas = [];
   var yo = this;
   /* OJO con el contrato del modelo: `mat` es una CLAVE del mapa de materiales y
      `geom` una FÁBRICA `(THREE) -> BufferGeometry`, no objetos ya construidos.
      Pasárselos tal cual a InstancedMesh revienta dentro del render, no al crearlo. */
-  this.plan.forEach(function (p) {
-    var geom = (typeof p.geom === 'function') ? p.geom(T) : p.geom;
-    var mat = (typeof p.mat === 'string') ? (SG[p.mat] || SG.steel) : p.mat;
-    if (!geom || !geom.isBufferGeometry) return;
-    var im = new T.InstancedMesh(geom, mat, yo.n * p.locals.length);
-    im.castShadow = !!p.cast; im.receiveShadow = true;
-    im.frustumCulled = false;
-    yo.grupoPlanta.add(im);
-    yo.piezas.push({ im: im, locals: p.locals, spin: !!p.spin });
-  });
+  function monta(plan, dz) {
+    plan.forEach(function (p) {
+      var geom = (typeof p.geom === 'function') ? p.geom(T) : p.geom;
+      var mat = (typeof p.mat === 'string') ? (SG[p.mat] || SG.steel) : p.mat;
+      if (!geom || !geom.isBufferGeometry) return;
+      var im = new T.InstancedMesh(geom, mat, yo.n * p.locals.length);
+      im.castShadow = !!p.cast; im.receiveShadow = true;
+      im.frustumCulled = false;
+      yo.grupoPlanta.add(im);
+      /* la traslación a SU viga va antes del giro: cada tubo bascula sobre su propio
+         eje, no sobre el del vecino */
+      yo.piezas.push({ im: im, locals: p.locals, spin: !!p.spin,
+                       mT: dz ? new T.Matrix4().makeTranslation(0, 0, dz) : null });
+    });
+  }
+  monta(S.instancePlan(T, { materials: SG, detail: 'mass', west: true }),
+        bifila ? -pitch / 2 : 0);
+  if (bifila) {
+    monta(S.instancePlan(T, { materials: SG, detail: 'mass', west: false }), pitch / 2);
+  }
 
   /* Testigos de salud, uno por seguidor. Van al EXTREMO de la fila y a poca altura: en
      el centro y a 3,6 m quedaban flotando sueltos, sin que se viera de quién era cada
@@ -197,11 +226,12 @@ Campo3D.prototype.construye = function (P) {
   }
   this.testigos.instanceMatrix.needsUpdate = true;
 
-  /* aro del seleccionado: elipse a la medida de la fila, no un donut de 3,4 m */
+  /* aro del seleccionado: elipse a la medida del SEGUIDOR —las dos vigas si es bífila—,
+     no un donut de 3,4 m suelto en medio */
   this.aro = new T.Mesh(new T.TorusGeometry(1, 0.06, 6, 48),
                         new T.MeshBasicMaterial({ color: 0x36D399, fog: false }));
   this.aro.rotation.x = -Math.PI / 2;
-  this.aro.scale.set(largo * 0.55, 4.2, 1);
+  this.aro.scale.set(largo * 0.55, bifila ? pitch / 2 + 2.6 : 4.2, 1);
   this.aro.visible = false;
   this.grupoPlanta.add(this.aro);
 
@@ -258,6 +288,7 @@ Campo3D.prototype.actualiza = function (P) {
         if (pz.spin) this._rx.makeRotationX(this._ang[i] * D2R);
         for (var l = 0; l < pz.locals.length; l++) {
           this._acc.copy(this.bases[i]);
+          if (pz.mT) this._acc.multiply(pz.mT);     /* a su viga, antes de bascular */
           if (pz.spin) this._acc.multiply(this._rx);
           this._acc.multiply(pz.locals[l]);
           pz.im.setMatrixAt(k++, this._acc);
