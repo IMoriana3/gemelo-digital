@@ -155,6 +155,34 @@ Historia.prototype.pinta = function (cv, opt) {
   curva('real', C.real, yA, 1.8);
   curva('med', C.med, yA, 1);
   curva('soc', C.soc, yB, 1.6);
+
+  /* la captura de campo, si la hay: a trazos y por encima, para que se distinga de
+     lo simulado de un vistazo. Se dibuja con la MISMA escala de ángulos, así que la
+     separación vertical ES el error. */
+  if (opt.careo && opt.careo.pares && opt.careo.pares.length) {
+    var yFn = opt.careoEnBaja ? yB : yA;
+    ctx.save();
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = opt.careoColor || '#ff9d5c'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    var pr = opt.careo.pares;
+    for (var q = 0; q < pr.length; q++) {
+      /* la captura viene por hora civil, no por epoch: se coloca buscando la muestra
+         de esa hora, que es lo mismo que hizo el careo para emparejarlas */
+      var xx = xDeHora(pr[q].h);
+      if (xx == null) continue;
+      var yy = yFn(pr[q].real);
+      if (q === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+    }
+    ctx.stroke(); ctx.restore();
+  }
+  function xDeHora(h) {
+    var mejor = null, dmin = 1e9;
+    for (var i = 0; i < m.length; i++) {
+      var d = Math.abs(((m[i].h - h + 36) % 24) - 12);
+      if (d < dmin) { dmin = d; mejor = m[i]; }
+    }
+    return (mejor && dmin < 0.25) ? x(mejor.t) : null;
+  }
   ctx.strokeStyle = C.viento; ctx.lineWidth = 1.2; ctx.beginPath();
   for (var i = 0; i < m.length; i++) {
     var py = yBaj + hBaj - Math.min(1, m[i].viento / 120) * hBaj;

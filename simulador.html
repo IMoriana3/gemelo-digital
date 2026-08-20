@@ -500,6 +500,17 @@
           <div class="note" id="hUltimos"></div>
         </div>
         <div class="card">
+          <h2>Careo contra un equipo de verdad</h2>
+          <div class="sub">Que el gemelo y SolarGPT digan lo mismo no demuestra que ninguno se parezca a un TCU en un poste. Eso solo lo dice una captura. Carga un CSV de la <b>TCU Toolbox</b> —sus columnas llevan la dirección delante, así que se leen solas— y se superpone a la traza.</div>
+          <div class="escfila">
+            <input type="file" id="carFile" accept=".csv,.txt,.CSV">
+            <select id="carReg" style="min-width:220px"></select>
+            <label style="font-size:12.5px;color:var(--tx2)">desfase <input type="number" id="carDesf" value="0" style="width:64px"> min</label>
+          </div>
+          <div class="note" id="carEstado">Sin captura cargada.</div>
+          <div class="kv" id="carRes"></div>
+        </div>
+        <div class="card">
           <h2>Jerarquía de control</h2>
           <div class="sub">De arriba abajo, en orden de prioridad. En verde, la regla que decide el objetivo ahora mismo; en ámbar, las que están activas pero las gana otra de más arriba.</div>
           <div class="jer" id="jer"></div>
@@ -528,6 +539,7 @@
 <script src="sim/campo3d.js"></script>
 <script src="sim/historia.js"></script>
 <script src="sim/escenario.js"></script>
+<script src="sim/careo.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/planta.js"></script>
 <script>
@@ -888,11 +900,40 @@ function reproduce() {
   pintaEscenario();
 }
 
+
+/* ═══════════════════ careo con capturas ═══════════════════ */
+var CAPTURA = null, CAREO = null;
+function pintaCareo() {
+  if (!$('carReg')) return;
+  if (!$('carReg').dataset.hecho) {
+    Careo.CAREABLES.filter(function (c) { return c.campo; })
+      .forEach(function (c, i) { $('carReg').add(new Option(c.n, String(i))); });
+    $('carReg').dataset.hecho = '1';
+  }
+  if (!CAPTURA) { CAREO = null; $('carRes').innerHTML = ''; return; }
+  var c = Careo.CAREABLES.filter(function (x) { return x.campo; })[+$('carReg').value] || Careo.CAREABLES[0];
+  CAREO = Careo.compara(CAPTURA, HIST.m, c.addr, c.campo,
+                        { escala: c.esc, banda: c.banda, desfaseMin: +$('carDesf').value || 0 });
+  if (!CAREO || !CAREO.n) {
+    $('carRes').innerHTML = kv('Puntos emparejados', '0') +
+      kv('Por qué', 'la captura y la traza no coinciden en hora. Prueba el desfase, o corre la simulación en el día y la hora de la captura.');
+    return;
+  }
+  var u = c.uni;
+  $('carRes').innerHTML =
+    kv('Puntos careados', CAREO.n + (CAREO.sinPar ? ' (' + CAREO.sinPar + ' sin pareja)' : '')) +
+    kv('Error medio (sim − real)', num(CAREO.medio, 2) + ' ' + u) +
+    kv('RMS', num(CAREO.rms, 2) + ' ' + u) +
+    kv('Peor', num(CAREO.max, 2) + ' ' + u + ' a las ' + num(Math.floor(CAREO.hMax), 0) + ':' + dosD(Math.floor((CAREO.hMax % 1) * 60))) +
+    kv('Dentro de ±' + CAREO.banda + ' ' + u, num(CAREO.dentroPct, 1) + ' %');
+}
+
 /* ═══════════════════ traza ═══════════════════ */
 var HIST = new Historia({ cadaS: 60 });
 function pintaHistoria() {
   if (!$('hCanvas')) return;
-  HIST.pinta($('hCanvas'));
+  var c = Careo.CAREABLES.filter(function (x) { return x.campo; })[+($('carReg') ? $('carReg').value : 0)];
+  HIST.pinta($('hCanvas'), CAREO ? { careo: CAREO, careoEnBaja: !!(c && c.campo === 'soc') } : {});
   $('hMuestras').textContent = HIST.m.length + ' muestras';
   $('hEvs').textContent = HIST.ev.length + ' eventos';
   var u = HIST.ev.slice(-4).reverse().map(function (e) {
@@ -900,6 +941,7 @@ function pintaHistoria() {
     var h = Math.floor(hh), mi = Math.floor((hh % 1) * 60);
     return '<b>' + (h < 10 ? '0' : '') + h + ':' + (mi < 10 ? '0' : '') + mi + '</b> ' + e.txt;
   });
+  pintaCareo();
   $('hUltimos').innerHTML = u.length ? ('Últimos: ' + u.join(' · ')) : 'Sin eventos todavía.';
 }
 
@@ -1789,6 +1831,22 @@ $('hCsv').onclick = function () {
   a.download = 'traza-tcu' + sel + '.csv'; a.click();
 };
 $('hLimpia').onclick = function () { HIST.limpia(); pintaHistoria(); };
+$('carFile').onchange = function () {
+  var f = this.files && this.files[0]; if (!f) return;
+  var fr = new FileReader();
+  fr.onload = function () {
+    CAPTURA = Careo.parsea(fr.result);
+    var av = CAPTURA.avisos.length ? ' · ' + CAPTURA.avisos.join(' · ') : '';
+    $('carEstado').innerHTML = '<b>' + f.name + '</b>: ' + CAPTURA.filas.length + ' filas, ' +
+      CAPTURA.cols.length + ' registros reconocidos (' +
+      CAPTURA.cols.slice(0, 6).map(function (c) { return c.addr; }).join(', ') +
+      (CAPTURA.cols.length > 6 ? '…' : '') + ')' + av;
+    pintaCareo(); pintaHistoria();
+  };
+  fr.readAsText(f);
+};
+$('carReg').onchange = function () { pintaCareo(); pintaHistoria(); };
+$('carDesf').oninput = function () { pintaCareo(); pintaHistoria(); };
 $('avOn').onchange = function () {
   $('avBox').style.display = this.checked ? '' : 'none';
   if (P) { P.cfg.averias.activo = this.checked; toca(); }

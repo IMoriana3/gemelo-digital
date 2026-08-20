@@ -830,5 +830,50 @@ for (let i = 0; i < 12 * 60; i++) Ptr.paso(60);
 ok(Ptr.tcus.every(t => t.online && !t.ejeDuro && !t.ejeAtascado),
    'con las averías apagadas la planta no se rompe sola');
 
+/* ───────── careo contra capturas ─────────
+   Que el gemelo y SolarGPT digan lo mismo no demuestra que ninguno se parezca a un
+   TCU en un poste. Lo que se comprueba aquí es que el careo MIDE: si a la captura se
+   le mete un sesgo conocido, tiene que salir ese sesgo y no otro. */
+const Careo = (await import('./careo.js')).default;
+const Historia = (await import('./historia.js')).default;
+
+const Pcar = new SIM.Planta({ nTcu: 2, nHsu: 1, perfil: 'SP_45W_6Ah', hora: 6, dia: 172,
+                            lat: 42.82, lon: -1.60, tz: 1 });
+const hcar = new Historia({ cadaS: 300 });
+const filasCar = ['Fecha;30111 tilt_angle [deg];30096 soc [%]'];
+const SESGO_CAR = 0.7;
+for (let i = 0; i < 14 * 60; i++) {
+  Pcar.paso(60); hcar.paso(Pcar, 1);
+  if (i % 5 === 0) {
+    const t = Pcar.tcu(1), hh = Pcar.t.hora;
+    const hs = String(Math.floor(hh)).padStart(2, '0') + ':' + String(Math.floor(hh % 1 * 60)).padStart(2, '0');
+    filasCar.push('2026-06-21 ' + hs + ':00;' + Math.round((t.angulo + SESGO_CAR) * 10) + ';' + Math.round(t.soc));
+  }
+}
+const capCar = Careo.parsea(filasCar.join('\n'));
+ok(capCar.cols.length === 2 && capCar.cols[0].addr === 30111,
+   'las columnas se leen por la dirección de delante, sin saberse los nombres',
+   capCar.cols.map(c => c.addr).join(', '));
+ok(capCar.filas.length === filasCar.length - 1 && !capCar.avisos.length,
+   'y la captura entera se lee sin avisos', capCar.filas.length + ' filas');
+
+const carRes = Careo.compara(capCar, hcar.m, 30111, 'med', { escala: 10, banda: 1 });
+ok(Math.abs(carRes.medio + SESGO_CAR) < 0.02,
+   'el careo mide el sesgo que se le metió, no otro',
+   'inyectado ' + SESGO_CAR + '° · medido ' + (-carRes.medio).toFixed(3) + '°');
+ok(carRes.n === capCar.filas.length && carRes.dentroPct === 100,
+   'empareja todos los puntos y los sitúa dentro de la banda');
+
+/* separador y formato de fecha: un Excel en inglés no es motivo para rechazar nada */
+const capComaCar = Careo.parsea('timestamp,30111 tilt [deg]\n21/06/2026 10:00,123\n21/06/2026 10:05,140');
+ok(capComaCar.filas.length === 2 && capComaCar.filas[0].v[30111] === 123,
+   'lee igual con comas y con fecha dd/mm/aaaa');
+
+/* sin pareja de hora no se inventa un careo */
+const lejosCar = Careo.compara(Careo.parsea('Fecha;30111 t [deg]\n2026-06-21 03:00:00;100'),
+                            hcar.m, 30111, 'med', { escala: 10 });
+ok(lejosCar.n === 0 && lejosCar.sinPar === 1,
+   'un punto sin muestra a esa hora se descarta, no se estira la curva para que case');
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);
