@@ -431,6 +431,17 @@
       <div id="vtcu" style="display:none">
         <div class="chips" id="chipsTcu"></div>
         <div class="card">
+          <h2>Traza <span class="badge" id="hMuestras">—</span></h2>
+          <div class="sub">Lo que ha pasado, no solo lo que pasa. <b style="color:#e0a52b">objetivo</b> · <b style="color:#36D399">real</b> · <b style="color:#6fb7ff">medido</b> arriba; <b style="color:#b98cff">SoC</b> y <b style="color:#5e7388">viento</b> abajo. Las líneas rojas son eventos: entre <i>objetivo</i> y <i>real</i> está la banda muerta; entre <i>real</i> y <i>medido</i>, el inclinómetro.</div>
+          <canvas id="hCanvas" style="width:100%;height:260px;display:block;border-radius:8px"></canvas>
+          <div class="escfila" style="margin-top:8px">
+            <button class="btn sec" id="hCsv" style="width:auto;padding:6px 12px">CSV de la traza</button>
+            <button class="btn sec" id="hLimpia" style="width:auto;padding:6px 12px">Limpiar</button>
+            <span class="badge" id="hEvs">—</span>
+          </div>
+          <div class="note" id="hUltimos"></div>
+        </div>
+        <div class="card">
           <h2>Jerarquía de control</h2>
           <div class="sub">De arriba abajo, en orden de prioridad. En verde, la regla que decide el objetivo ahora mismo; en ámbar, las que están activas pero las gana otra de más arriba.</div>
           <div class="jer" id="jer"></div>
@@ -457,6 +468,7 @@
 <script src="lib/three.min.js"></script><!-- LOCAL, sin CDN: el simulador sigue abriendo sin red -->
 <script src="seguidor.js?v=13"></script><!-- FUENTE ÚNICA del modelo del seguidor -->
 <script src="sim/campo3d.js"></script>
+<script src="sim/historia.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/planta.js"></script>
 <script>
@@ -706,7 +718,22 @@ function ve(que) {
    paso mínimo para que el estado derivado (posición segura, alarmas, alimentación)
    se recalcule antes de repintar. Sin esto, pulsar la seta en pausa no hace nada
    visible hasta darle a Simular. */
-function toca() { if (P) P.paso(0.001); pintaTodo(); }
+function toca() { if (P) { P.paso(0.001); HIST.paso(P, sel); } pintaTodo(); }
+
+/* ═══════════════════ traza ═══════════════════ */
+var HIST = new Historia({ cadaS: 60 });
+function pintaHistoria() {
+  if (!$('hCanvas')) return;
+  HIST.pinta($('hCanvas'));
+  $('hMuestras').textContent = HIST.m.length + ' muestras';
+  $('hEvs').textContent = HIST.ev.length + ' eventos';
+  var u = HIST.ev.slice(-4).reverse().map(function (e) {
+    var hh = e.h != null ? e.h : 0;
+    var h = Math.floor(hh), mi = Math.floor((hh % 1) * 60);
+    return '<b>' + (h < 10 ? '0' : '') + h + ':' + (mi < 10 ? '0' : '') + mi + '</b> ' + e.txt;
+  });
+  $('hUltimos').innerHTML = u.length ? ('Últimos: ' + u.join(' · ')) : 'Sin eventos todavía.';
+}
 
 /* ═══════════════════ escribir registros ═══════════════════
    La interfaz no tiene un camino propio para mandar órdenes: usa `P.escribe()`, la
@@ -882,7 +909,7 @@ function bucle(ahora) {
   tPrev = ahora;
   if (corriendo && P) {
     var dtSim = dtReal * (+$('vel').value || 1), resto = dtSim;
-    while (resto > 0) { var p = Math.min(60, resto); P.paso(p); resto -= p; }
+    while (resto > 0) { var p = Math.min(60, resto); P.paso(p); HIST.paso(P, sel); resto -= p; }
     $('dia').value = P.t.dia; $('hora').value = P.t.hora;
     etiquetaTiempo();
     apunta();
@@ -907,7 +934,7 @@ function pintaTodo() {
   if (vista === 'planta') { pintaChips(); pintaFlota(); pintaNcu(); pintaHsu(); }
   else if (vista === 'campo') { if (CAMPO) { CAMPO.redimensiona(); CAMPO.paso(P); CAMPO.selecciona(indiceDe(sel)); } }
   else if (vista === 'modbus') pintaModbus();
-  else pintaDetalle();
+  else { pintaDetalle(); pintaHistoria(); }
 }
 function cabecera() {
   var f = P.fechaSim(), r = P.resumen();
@@ -1488,6 +1515,12 @@ $('mbEscribirBtn').onclick = function () {
 $('escReg').onchange = ayudaEscritura;
 $('escGo').onclick = haceEscritura;
 $('escVal').onkeydown = function (e) { if (e.key === 'Enter') haceEscritura(); };
+$('hCsv').onclick = function () {
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([HIST.csv()], { type: 'text/csv' }));
+  a.download = 'traza-tcu' + sel + '.csv'; a.click();
+};
+$('hLimpia').onclick = function () { HIST.limpia(); pintaHistoria(); };
 $('mbUnidad').onchange = function () {
   var v = +this.value;
   if ($('mbDev').value !== 'hsu') { sel = v; sincronizaAverias(); }
