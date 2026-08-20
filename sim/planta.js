@@ -75,7 +75,6 @@ var K = {
   DESTOW_MIN: F.e.DESTOW_HOLD_MIN,        /* histéresis de desabanderamiento (min) — canon EPC */
   IDLE_W: F.idleW, SLEEP_W: F.sleepW,     /* electrónica, de día y de noche (W) */
   MOT_K0: F.motor.K0, MOT_K1: F.motor.K1, /* motor: Wh/° = K0 + K1·|θ| */
-  MOTOR_PEAK_W: F.motor.picoW,            /* tope instantáneo del motor (W) */
   ETA_CHG: F.e.ETA_CHG,                   /* rendimiento de la carga */
   DEG_H_NORMAL: F.e.DEG_H_NORMAL, DEG_H_WINTER: F.e.DEG_H_WINTER,
   ALBEDO: F.e.ALBEDO,
@@ -155,7 +154,6 @@ var PARAMS = [
   { k: 'SLEEP_W',       n: 'Consumo de reposo (noche)',    u: 'W',     d: 2, g: 'Energía', o: 'canon' },
   { k: 'MOT_K0',        n: 'Motor · K0',                   u: 'Wh/°',  d: 4, g: 'Energía', o: 'canon' },
   { k: 'MOT_K1',        n: 'Motor · K1',                   u: 'Wh/°²', d: 6, g: 'Energía', o: 'canon' },
-  { k: 'MOTOR_PEAK_W',  n: 'Pico de motor',                u: 'W',     d: 1, g: 'Energía', o: 'canon' },
   { k: 'ETA_CHG',       n: 'Rendimiento de carga',         u: '',      d: 3, g: 'Energía', o: 'canon' },
   { k: 'V_NOM',         n: 'Tensión nominal del bus',      u: 'V',     d: 2, g: 'Energía', o: 'canon' },
   { k: 'ALBEDO',        n: 'Albedo del suelo',             u: '',      d: 2, g: 'Energía', o: 'canon' },
@@ -790,7 +788,7 @@ TCU.prototype.mueve = function (dt, inhibido) {
      mueve y en qué ángulo; cuántos Wh cuesta eso lo dice el canon. */
   wh = consumoTCU({ dtH: dtH, dia: true, mov: efec, pos: medio,
                     motorModel: this.p.cfg.motorModel, calefactada: false, tAmb: 20,
-                    k0: K.MOT_K0, k1: K.MOT_K1, picoW: K.MOTOR_PEAK_W,
+                    k0: K.MOT_K0, k1: K.MOT_K1,
                     vNom: K.V_NOM, slew: K.SLEW_DPS }).motor;
   /* con el eje en apuros el motor no consume menos: consume MÁS. Calado, corriente de
      calado y salta 41040; duro, corriente alta pero por debajo del disparo — que es

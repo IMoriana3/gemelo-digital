@@ -545,12 +545,15 @@ const esperado = SIM.FISICA.consumoTCU({
 ok(Math.abs(p1.wh - esperado) < 1e-12,
    'los Wh de motor del gemelo son los del módulo, al bit', p1.wh.toFixed(6) + ' Wh');
 
-/* el paso de arriba va a tope de velocidad, y ahí el motor topa en su pico: a 0,17 °/s
-   la curva medida pide ~49 W, o sea que el tope de 50 W está a un pelo. Que el consumo
-   salga exactamente MOTOR_PEAK_W·dtH no es casualidad, es el limitador haciendo su
-   trabajo — y por eso SUBIR K0 no cambiaría nada aquí. */
-ok(Math.abs(p1.wh - SIM.K.MOTOR_PEAK_W * (60 / 3600)) < 1e-12,
-   'a plena velocidad el motor topa en su pico, como debe', SIM.K.MOTOR_PEAK_W + ' W');
+/* NO hay tope de potencia. El «peak limit» de 50 W de las constantes canónicas es un
+   envolvente de diseño, no una lectura del ensayo: la curva medida llega a 67,2 W a 55°,
+   así que recortar a 50 truncaba consumo real. El límite por paso lo pone la velocidad. */
+ok(SIM.K.MOTOR_PEAK_W === undefined, 'no hay tope de potencia de motor en el motor de planta');
+ok(Math.abs(SIM.FISICA.motorW(55) - 2800 / 1000 * 24) < 1e-9,
+   'y la curva medida llega a 67,2 W a 55°, por encima del envolvente de 50',
+   SIM.FISICA.motorW(55).toFixed(1) + ' W');
+ok(SIM.FISICA.motorW(0) < SIM.FISICA.motorW(30) && SIM.FISICA.motorW(30) < SIM.FISICA.motorW(55),
+   'la curva de motor crece con el ángulo, que es de lo que iba');
 
 /* y los parámetros del motor tienen que seguir teniendo efecto a través del módulo:
    moverlos sin que el consumo cambie sería peor que no poder moverlos */

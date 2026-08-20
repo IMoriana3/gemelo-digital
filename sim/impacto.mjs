@@ -163,11 +163,11 @@ function balance(nombre, opts) {
 const casos = [
   balance('REFERENCIA · como está hoy (bateria.html)', {}),
   balance('A · η del cargador: curva η(G) de PS26002', { etaCurva: true }),
-  balance('B · motor: curva medida I(θ), misma velocidad', { motorCurva: true }),
+  balance('B · motor: curva medida I(θ) — YA ADOPTADA', { motorCurva: true }),
   balance('C · límite por corriente de carga (1,2 A)', { limiteCorriente: true }),
   balance('D · coef. térmico del panel (γ=−0,0035)', { etaCurva: true, gamma: true }),
   balance('TODO · lo que sigue abierto, junto', {
-    etaCurva: true, gamma: true, motorCurva: true, limiteCorriente: true }),
+    etaCurva: true, gamma: true, limiteCorriente: true }),
   balance('· (ya resuelto) sleep 0,45 W como estaba', { sleep45: true }),
   balance('· (ya resuelto) 0,16 °/s + la curva de motor', { motorCurva: true, slew16: true })
 ];
@@ -245,9 +245,17 @@ console.log('\nSobre ' + DIAS_V + ' días. El criterio del SCADA solo abandera p
 console.log('así que pasa mucho menos tiempo en bandera — pero cada viaje suyo es a ±55° completos,');
 console.log('mientras que B2 se queda en el sector parcial (≥30°) buena parte del tiempo.\n');
 
-console.log('┌─ DECISIÓN ABIERTA ' + '─'.repeat(72));
-console.log('│ La curva de motor NO se adopta todavía. Se espera a contrastarla con la curva');
-console.log('│ medida que tenemos y con los datos de campo de EL BURGO (23003) y AYORA (24025).');
-console.log('│ Lo que desempata son los Wh de MOTOR por día y por TCU: es donde los dos modelos');
-console.log('│ se separan un 14 %. El SoC no sirve — se mueve 0,1 pp, o sea nada.');
+console.log('┌─ LA CURVA DE MOTOR: RESUELTA ' + '─'.repeat(61));
+console.log('│ Ya no es una decisión abierta. bateria.html adoptó la tabla medida I(θ) —13 puntos,');
+console.log('│ 1.500→2.800 mA, «Consumos motor_02.xlsx», TCU 33— y retiró el tope de 50 W por ser');
+console.log('│ un envolvente de diseño y no una lectura del ensayo (la curva llega a 67,2 W).');
+console.log('│');
+console.log('│ Esta medición se hizo por separado y CONCUERDA: +14 % de consumo de motor frente al');
+console.log('│ ajuste lineal, dentro del «9-16 % por debajo» que declara el propio fichero. Dos');
+console.log('│ caminos distintos dando el mismo número es lo más parecido a una confirmación que');
+console.log('│ hay sin datos de campo.');
+console.log('│');
+console.log('│ Lo que siguen esperando El Burgo y Ayora es la VALIDACIÓN: la curva es del banco,');
+console.log('│ no de una planta. Los Wh de motor por día y por TCU medidos en campo son lo que');
+console.log('│ dirá si el banco se parece a la realidad.');
 console.log('└' + '─'.repeat(90) + '\n');

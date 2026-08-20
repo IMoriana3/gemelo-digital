@@ -217,8 +217,17 @@ const canon = {
   perfilPorDefecto: pyStr(tcuPy, 'DEFAULT_PROFILE'),
   capWhTfm: pyNum(tfmPy, 'TCU_CAP_WH', 'tfm_constants.py'),
   perfiles: perfiles(),
-  difusa: difusaCanonica()
+  difusa: difusaCanonica(),
+  motorAng: tablaMotor('MOTOR_ANG'),
+  motorMa: tablaMotor('MOTOR_MA'),
+  motorVmeas: jsNum('MOTOR_V_MEAS')
 };
+/* la tabla medida del motor, que es ahora el dato primario */
+function tablaMotor(nombre) {
+  const m = bat.match(new RegExp('\\b' + nombre + '\\s*=\\s*\\[([^\\]]*)\\]'));
+  if (!m) throw new Error('no encuentro la tabla ' + nombre + ' en bateria.html');
+  return m[1].split(',').map(x => parseFloat(x.trim())).filter(x => isFinite(x));
+}
 const estrategia = {
   AXIS_MAX: jsNum('AXIS_MAX'), NIGHT_POS: jsNum('NIGHT_POS'), DEFENSE_POS: jsNum('DEFENSE_POS'),
   GCR: (function () { const m = bat.match(/GCR\s*=\s*([\d.]+)\s*\/\s*([\d.]+)/); if (!m) throw new Error('no encuentro GCR'); return parseFloat(m[1]) / parseFloat(m[2]); })(),
@@ -233,13 +242,13 @@ const estrategia = {
      va en continuo. Se lee del módulo de estrategias, que es quien manda. */
   DESTOW_HOLD_MIN: destowCanonico(),
   IDLE_W: jsNum('IDLE_W'), SLEEP_W: jsNum('SLEEP_W'),
-  K0: jsNum('K0'), K1: jsNum('K1'), MOTOR_PEAK_W: jsNum('MOTOR_PEAK_W'),
+  K0: jsNum('K0'), K1: jsNum('K1'),
   JEITA_T3: jsNum('JEITA_T3'), JEITA_T4: jsNum('JEITA_T4'),
   DEG_H_NORMAL: jsNum('DEG_H_NORMAL'), DEG_H_WINTER: jsNum('DEG_H_WINTER')
 };
 /* consumoTCU va la ÚLTIMA porque llama a heaterW: que el fichero generado se lea en
    el mismo orden en que se depende, aunque las declaraciones de función se icen. */
-const funciones = ['cRateSafeLFP', 'hotDerate', 'heaterW', 'poaAt', 'consumoTCU'].map(jsFuncion);
+const funciones = ['cRateSafeLFP', 'hotDerate', 'heaterW', 'poaAt', 'motorW', 'consumoTCU'].map(jsFuncion);
 
 /* ---------- contraste entre fuentes ---------- */
 const choques = [];   /* divergencias que impiden generar */
@@ -249,7 +258,10 @@ function cotejar(que, a, fa, b, fb) {
 }
 cotejar('K0 del motor', canon.motorK0, 'tcu.py', estrategia.K0, 'bateria.html');
 cotejar('K1 del motor', canon.motorK1, 'tcu.py', estrategia.K1, 'bateria.html');
-cotejar('pico de motor', canon.motorPeakW, 'tcu.py', estrategia.MOTOR_PEAK_W, 'bateria.html');
+/* El «motor peak limit» de 50 W de tcu.py SIGUE ahí y se lee, pero ya NO se coteja
+   contra bateria.html ni se aplica como tope: es un ENVOLVENTE DE DISEÑO, no una lectura
+   del ensayo. La curva medida llega a 2800 mA × 24 V = 67,2 W a 55°, así que recortar a
+   50 W truncaba consumo real. El límite físico por paso lo pone la velocidad de giro. */
 cotejar('consumo idle', canon.idleW, 'tcu.py', estrategia.IDLE_W, 'bateria.html');
 cotejar('consumo sleep', canon.sleepW, 'tcu.py', estrategia.SLEEP_W, 'bateria.html');
 cotejar('tensión nominal', canon.vNom, 'tcu.py', estrategia.V_NOM, 'bateria.html');
@@ -389,7 +401,11 @@ ${perfilesJs}
    se puedan traer tal cual sin tocarles ni una línea. */
 var D2R = Math.PI / 180;
 var JEITA_T3 = FISICA.e.JEITA_T3, JEITA_T4 = FISICA.e.JEITA_T4, ALBEDO = FISICA.e.ALBEDO;
-var K0 = FISICA.motor.K0, K1 = FISICA.motor.K1, MOTOR_PEAK_W = FISICA.motor.picoW;
+var K0 = FISICA.motor.K0, K1 = FISICA.motor.K1;
+/* la curva de motor MEDIDA (Consumos motor_02.xlsx, TCU 33), tal cual la trae bateria.html */
+var MOTOR_ANG = ${JSON.stringify(canon.motorAng)};
+var MOTOR_MA = ${JSON.stringify(canon.motorMa)};
+var MOTOR_V_MEAS = ${canon.motorVmeas};
 var V_NOM = FISICA.vNom, SLEW_DPS = FISICA.e.SLEW_DPS;
 var IDLE_W = FISICA.idleW, SLEEP_W = FISICA.sleepW;
 
@@ -400,6 +416,7 @@ FISICA.cRateSafeLFP = cRateSafeLFP;
 FISICA.hotDerate = hotDerate;
 FISICA.heaterW = heaterW;
 FISICA.poaAt = poaAt;
+FISICA.motorW = motorW;
 FISICA.consumoTCU = consumoTCU;
 
 if (typeof window !== "undefined") window.FISICA = FISICA;

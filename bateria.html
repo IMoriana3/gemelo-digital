@@ -119,15 +119,26 @@
   </div>
   <div class="grp"><h3>Perfil TCU (00.2t)</h3>
     <div class="fld"><select id="prof"></select></div>
+    <div class="fld"><label>Montaje del panel / fuente de carga</label>
+      <select id="mount">
+        <option value="trk">Solidario al seguidor — montaje real (plano del generador)</option>
+        <option value="fix">Fijo orientado al ecuador (hipotético)</option>
+      </select>
+      <div class="note">En las TCU de Factiun el panel dedicado va <b>solidario a la estructura</b>: gira con el seguidor y ve el mismo plano que los módulos. La opción de panel fijo queda para estudiar configuraciones alternativas.</div></div>
+    <div class="fld" id="tiltFld" style="display:none"><label>Inclinación del panel fijo <span class="rv" id="tiltV">30°</span></label>
+      <input type="range" id="tilt" min="0" max="60" step="5" value="30">
+      <div class="note">Un panel fijo capta ~10 % menos al año pero ~14 % más en invierno y en los días críticos, que es cuando decide la disponibilidad.</div></div>
     <div class="fld"><label>Modelo de consumo del motor</label>
       <select id="motor">
-        <option value="factiun">Factiun · Wh/° medido en campaña (canónico)</option>
+        <option value="curva">Factiun · curva I(|θ|) medida — TCU 33 @24 V</option>
+        <option value="factiun">Factiun · ajuste Wh/° = K0 + K1·|θ|</option>
         <option value="2500">SUNNER · 2500 mA medio @25,6 V</option>
         <option value="3250">SUNNER · 3250 mA medio @25,6 V</option>
         <option value="4000">SUNNER · 4000 mA medio @25,6 V</option>
       </select></div>
-    <div class="fld"><label>Irradiancia mínima de carga <span class="rv" id="poaMinV">50 W/m²</span></label>
-      <input type="range" id="poaMin" min="0" max="200" step="10" value="50"></div>
+    <div class="fld"><label>Umbral duro de carga <span class="rv" id="poaMinV">0 W/m²</span></label>
+      <input type="range" id="poaMin" min="0" max="200" step="10" value="0">
+      <div class="note">0 = sólo la curva del regulador η(G) de PS26002_RevA, que ya arranca despacio con poca luz.</div></div>
     <div class="note" id="profNote"></div>
   </div>
   <div class="grp"><h3>Meteorología · periodo</h3>
@@ -171,6 +182,8 @@
       <input type="range" id="fc" min="1" max="15" step="1" value="5"></div>
     <div class="fld"><label>Tª mínima de carga (°C)</label>
       <input type="number" id="tmin" value="0" step="1"></div>
+    <label class="sw"><input type="checkbox" id="cmp" checked>
+      <span>Comparar sistemas de control<small>Simula 5 estrategias sobre la misma meteo y las enfrenta</small></span></label>
     <label class="sw"><input type="checkbox" id="winter">
       <span>Winter mode<small>Correcciones gruesas 3°/h · política canónica: objetivo 90 % y carga completa cada 3 días · calefactor auto en LT</small></span></label>
   </div>
@@ -182,11 +195,18 @@
   </div>
   <button class="btn" id="run">▶ Simular</button>
   <div class="note">
-    <b>Metodología</b>: estrategia oficial SUNNER (Battery Availability Study) — CASO 1: crítico&lt;SOC&lt;objetivo,
+    <b>Metodología</b>: el panel dedicado de las TCU SP va solidario al seguidor (confirmado), de modo que su
+    captación es la del plano del generador y cae cuando el seguidor va a defensa o abanderado; los TCU String
+    toman su potencia nominal de un string de varios kW, disponible desde muy poca luz.
+    Estrategia oficial SUNNER (Battery Availability Study) — CASO 1: crítico&lt;SOC&lt;objetivo,
     carga + consumo; CASO 2: SOC&gt;objetivo, sin carga; CASO 3: SOC&lt;crítico → <b>defensa 55°</b>,
     tracker no disponible, solo electrónica. Sin carga bajo la Tª mínima; por encima, C-rate seguro LiFePO₄
-    según Tª (11.5b). Consumo electrónica 0,64 W y motor Wh/° medidos por Factiun (00.2t). Comparativa contra el mismo TCU
+    según Tª (11.5b). Consumo de electrónica (0,64 W) y curva de motor I(|θ|) medidos por Factiun: 36 W a 0° y 67,2 W a 55°. Comparativa contra el mismo TCU
     sin estrategia (siempre seguimiento). Rainflow según el estudio; posición nocturna −5°.
+    Envejecimiento: ciclado LFP (Nf = 6000/DoD^1,2) más calendario integrado con el SOC y la temperatura
+    de celda (Arrhenius × factor de SOC), 1,5 %/año en el punto de referencia 25 °C y SOC 50 %.
+    <b>El viento sólo dispara el abanderamiento: no se valora su efecto sobre el par del motor</b>, así que en
+    emplazamientos ventosos el consumo real será mayor que el simulado.
   </div>
 </div>
 
@@ -220,61 +240,78 @@ var LOCS=[
 ];
 
 /* ═══════════ Perfiles TCU — 00.2t (medidos por Factiun, campaña "Consumos motor_02 @24V") ═══════════ */
-var K0=0.0503, K1=0.000845, MOTOR_PEAK_W=50, IDLE_W=0.64, SLEEP_W=0.64, ETA_CHG=0.90, V_NOM=25.6;
+var K0=0.0503, K1=0.000845, IDLE_W=0.64, SLEEP_W=0.64, ETA_CHG=0.90, V_NOM=25.6;
+/* Curva de corriente del motor MEDIDA — «Consumos motor_02.xlsx», TCU 33, media de los
+   barridos E→O y O→E a 24 V. Es el dato primario del que salió el ajuste Wh/° = K0+K1·|θ|,
+   que corre un 9-16 % por debajo.
+   NO se aplica ningún tope de potencia. El «motor peak limit: 50 W» de las constantes canónicas
+   (solargpt_core/tcu.py y celda 00.2t) es un envolvente de diseño, no una lectura del ensayo:
+   la propia curva llega a 2800 mA × 24 V = 67,2 W a 55°, así que ese tope truncaba consumo real.
+   El límite físico del consumo por paso lo pone la velocidad de giro, no un recorte de potencia. */
+var MOTOR_ANG=[0,2.5,7.5,12.5,17.5,22.5,27.5,32.5,37.5,42.5,47.5,52.5,55];
+var MOTOR_MA =[1500,1588,1600,1714,1860,1975,2135,2277,2409,2497,2651,2740,2800];
+var MOTOR_V_MEAS=24.0;
+/* Un TCU STRING no se alimenta de un panel dedicado sino de un string completo de varios kW:
+   sus 60 W son una fracción mínima de lo que el string produce, así que dispone de la potencia
+   nominal en cuanto hay generación apreciable, en vez de escalar con la irradiancia como el
+   panel de 45 W de un SP. Ese es el motivo de que los modelos String salgan mucho mejor en los
+   estudios de referencia. Se satura a partir de POA_STRING_FULL. */
+var POA_STRING_FULL=100;
+function motorW(ang){
+  var a=Math.min(MOTOR_ANG[MOTOR_ANG.length-1],Math.abs(ang||0)), i=0;
+  while(i<MOTOR_ANG.length-2 && MOTOR_ANG[i+1]<a) i++;
+  var f=(a-MOTOR_ANG[i])/((MOTOR_ANG[i+1]-MOTOR_ANG[i])||1);
+  f=Math.max(0,Math.min(1,f));
+  return (MOTOR_MA[i]+(MOTOR_MA[i+1]-MOTOR_MA[i])*f)/1000*MOTOR_V_MEAS;
+}
 var SLEW_DPS=0.17;                      /* velocidad real de giro (°/s) — misma que el gemelo */
 var PROFILES=[
  {id:"SP_45W_3Ah",       n:"SP · panel 45 W · 3 Ah (76,8 Wh)",       wh:76.8,  chgW:45},
  {id:"SP_45W_6Ah",       n:"SP · panel 45 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:45},
  {id:"SP_60W_6Ah",       n:"SP · panel 60 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:60},
- {id:"STRING_60W_3Ah",   n:"STRING · regulador 60 W · 3 Ah",         wh:76.8,  chgW:60},
- {id:"STRING_60W_6Ah",   n:"STRING · regulador 60 W · 6 Ah",         wh:153.6, chgW:60},
+ {id:"STRING_60W_3Ah",   n:"STRING · regulador 60 W · 3 Ah",         wh:76.8,  chgW:60, string:true},
+ {id:"STRING_60W_6Ah",   n:"STRING · regulador 60 W · 6 Ah",         wh:153.6, chgW:60, string:true},
  {id:"SP_45W_6Ah_LT",    n:"SP · 45 W · 6 Ah · LT calefactada",      wh:153.6, chgW:45, heated:true},
- {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6 Ah · LT calefactada",  wh:153.6, chgW:60, heated:true}
+ {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6 Ah · LT calefactada",  wh:153.6, chgW:60, heated:true, string:true}
 ];
 
 /* ═══════════ Tracker (constantes del estudio SUNNER + gemelo) ═══════════ */
 var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
-/* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies): parcial
-   ≥40 km/h (sector [30°,55°]), full ≥60 km/h (±55°), histéresis de desabanderamiento de
-   30 min, bandera hacia el lado del sol. La MÁQUINA está en sim/viento.js (compartida con
-   el simulador de planta y con terreno.html); aquí solo viven sus umbrales, que es lo que
-   coteja el generador de física. Con paso horario los 0,5 h de histéresis se redondean a
-   uno: un paso más de bandera, que es lo que hacía la versión anterior. */
+/* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies):
+   parcial ≥40 km/h (±30° mín), full ≥60 km/h (±55°), histéresis destow ~30 min (1 h aquí),
+   signo hacia el sol (az<0 este → θ negativo) */
 var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=0.5;
+
 /* ═══════════ CONSUMO DEL TCU — canónico, un solo sitio ═══════════
-   Lo que gasta un TCU en un paso: electrónica, motor y calefactor. Vive AQUÍ y lo
-   copia entero tools/extrae_fisica.mjs a sim/fisica.js, así que ni el simulador de
-   planta ni el informe de impacto lo recalculan: llaman a esta misma función. Tener
-   dos versiones de esto es justo lo que hizo falta medir cuando el consumo de motor
-   del gemelo y el de SolarGPT no daban lo mismo.
+   Lo que gasta un TCU en un paso: electrónica, motor y calefactor. Vive AQUÍ y lo copia
+   entero tools/extrae_fisica.mjs a sim/fisica.js, así que ni el simulador de planta ni el
+   informe de impacto lo recalculan: llaman a esta misma función.
+
+   Los tres modelos de motor son los de este fichero y NO se recortan con ningún tope: el
+   «peak limit» de 50 W de las constantes canónicas es un envolvente de diseño y la curva
+   medida llega a 67,2 W a 55°. El límite físico por paso lo pone la velocidad de giro.
 
      o.dtH        paso en horas
      o.dia        ¿hay luz? (electrónica en idle o en reposo)
      o.mov        grados EFECTIVOS movidos en el paso (ya con winter mode aplicado)
      o.pos        ángulo MEDIO del movimiento — el par depende de dónde está la mesa
-     o.motorModel 'factiun' (Wh/° medidos) o mA medios del estudio SUNNER
+     o.motorModel 'curva' (I(θ) medida) · 'factiun' (el ajuste) · mA medios del estudio
      o.calefactada  perfil -LT
      o.tAmb       temperatura que decide el calefactor
 
-   Devuelve los tres sumandos, el total y la temperatura EFECTIVA (el calefactor
-   desbloquea la carga: por debajo de 0 °C no se carga, pero calentando sí). */
+   Las constantes son las canónicas salvo que se pasen: el canon manda cuando no lo
+   configuras, no siempre. Sin eso, quien llame desde fuera (el gemelo) tendría sus
+   parámetros ajustables sin efecto sobre el consumo, que es peor que no tenerlos. */
 function consumoTCU(o){
-  /* Las constantes son las canónicas salvo que se pasen: el canon manda cuando no lo
-     configuras, no siempre. Sin esto, quien llame desde fuera (el gemelo) tendría sus
-     parámetros ajustables sin efecto ninguno sobre el consumo, que es peor que no
-     tenerlos: parece que hacen algo. */
   var d=function(v,c){return v!=null?v:c;};
-  var k0=d(o.k0,K0), k1=d(o.k1,K1), pico=d(o.picoW,MOTOR_PEAK_W);
-  var vNom=d(o.vNom,V_NOM), slew=d(o.slew,SLEW_DPS);
+  var k0=d(o.k0,K0), k1=d(o.k1,K1), vNom=d(o.vNom,V_NOM), slew=d(o.slew,SLEW_DPS);
   var idle=d(o.idleW,IDLE_W), sleep=d(o.sleepW,SLEEP_W);
   var motorWh=0;
   if(o.mov>0.01){
-    /* medición Factiun (Wh/° = K0 + K1·|θ|, con tope de pico) o SUNNER (mA medios
-       durante el tiempo que tarda en girar: por eso depende de la velocidad) */
-    if(o.motorModel==='factiun')
-      motorWh=Math.min(o.mov*(k0+k1*Math.abs(o.pos)),pico*o.dtH);
-    else
-      motorWh=(o.motorModel/1000)*vNom*(o.mov/slew)/3600;
+    var slewH=o.mov/slew/3600;                              /* tiempo real de giro (h) */
+    if(o.motorModel==='curva')      motorWh=motorW(o.pos)*Math.min(slewH,o.dtH);
+    else if(o.motorModel==='factiun') motorWh=o.mov*(k0+k1*Math.abs(o.pos));
+    else                            motorWh=(o.motorModel/1000)*vNom*Math.min(slewH,o.dtH);
   }
   var baseWh=(o.dia?idle:sleep)*o.dtH;
   var heatWh=0, tEff=o.tAmb;
@@ -320,6 +357,49 @@ function poaAt(Rdeg,el,az,bh,dh,gh){
   var rb=cosAOI/Math.max(Math.sin(el),0.087);
   var cb=Math.cos(Math.abs(R));
   return Math.max(0,bh)*rb + Math.max(0,dh)*(1+cb)/2 + ALBEDO*Math.max(0,gh)*(1-cb)/2;
+}
+
+/* ═══════════ Rendimiento del regulador de carga η(G) — PS26002_RevA ═══════════
+   η = 0,96·(1 − e^(−G/100)) con η(0)=0, interpolada sobre los puntos digitalizados.
+   Sustituye al rendimiento plano del 0,90 y al umbral duro de arranque: el propio
+   regulador arranca despacio con irradiancia baja (η≈0,38 a 50 W/m², 0,61 a 100)
+   y llega al 0,96 con sol pleno. */
+var ETA_G=[0,50,100,200,350,500,600,750,850,1000,1100,1350];
+var ETA_V=ETA_G.map(function(g){return 0.96*(1-Math.exp(-g/100))}); ETA_V[0]=0;
+function etaCharger(G){
+  var g=Math.abs(G||0); if(g<=0)return 0;
+  if(g>=ETA_G[ETA_G.length-1])return ETA_V[ETA_V.length-1];
+  var i=0; while(i<ETA_G.length-2 && ETA_G[i+1]<g) i++;
+  return ETA_V[i]+(ETA_V[i+1]-ETA_V[i])*((g-ETA_G[i])/(ETA_G[i+1]-ETA_G[i]));
+}
+
+/* ═══════════ Curva de carga CC/CV — BatteryModel v2 canónico (notebook 11.0) ═══════════
+   La corriente admisible cae en SOC altos (fase CV): sin esto la batería sube en línea
+   recta hasta el 100 %, que es la crítica clásica a los modelos de balance simple.
+   Ref: Plett (2015) Battery Management Systems, cap. 4 */
+function socDerateCharge(soc){
+  if(soc>0.95)return 0.20;
+  if(soc>0.90)return 0.50;
+  if(soc>0.85)return 0.80;
+  return 1.0;
+}
+/* η de carga según C-rate real: η = η_nom − 0,06·(C − 0,5), saturada (Plett 2015, Smith 2017) */
+function etaAtCrate(etaNom,cRate){
+  /* corrección aditiva sobre el rendimiento nominal del regulador; el suelo del 0,80
+     que había aquí borraba la caída a irradiancia baja de la curva η(G) */
+  return Math.max(0,Math.min(0.995,etaNom-0.06*(cRate-0.5)));
+}
+
+/* POA sobre un plano FIJO orientado al ecuador con inclinación beta (mismo modelo isotrópico).
+   El panel dedicado de las TCU SP puede ir solidario a la estructura o fijo sobre poste: la
+   diferencia es pequeña en el año (−10 %) pero grande en invierno (+14 %), y el invierno es
+   el que fija la disponibilidad. */
+function poaFixed(beta,el,az,bh,dh,gh,lat){
+  if(el<=0)return 0;
+  var b=beta*D2R, s=(lat<0)?-1:1;
+  var cosAOI=Math.max(0,Math.sin(el)*Math.cos(b)+Math.cos(el)*Math.cos(az)*Math.sin(b)*s);
+  return Math.max(0,bh)*(cosAOI/Math.max(Math.sin(el),0.087))
+       + Math.max(0,dh)*(1+Math.cos(b))/2 + ALBEDO*Math.max(0,gh)*(1-Math.cos(b))/2;
 }
 
 /* ═══════════ C-rate seguro LiFePO4 según temperatura (11.5b) ═══════════ */
@@ -386,12 +466,19 @@ function parsePVSyst(text){
   if(hi<0)throw new Error("No es un CSV horario de PVSyst (falta cabecera 'date;…')");
   var sep=lines[hi].indexOf(';')>=0?';':',';
   var cols=lines[hi].split(sep).map(function(c){return c.trim()});
-  var ix={}; cols.forEach(function(c,k){ix[c]=k});
-  function col(row,name){var k=ix[name];return k==null?null:parseFloat((row[k]||'').replace(',','.'))}
+  var ix={}; cols.forEach(function(c,k){ix[c]=k; ix[c.toLowerCase()]=k;});
+  /* devuelve null (no NaN) si la columna falta o la celda no es numérica: todas las
+     comprobaciones aguas abajo son ==null y NaN se colaba como valor válido */
+  function col(row,name){
+    var k=ix[name]; if(k==null)k=ix[String(name).toLowerCase()];
+    if(k==null)return null;
+    var v=parseFloat(String(row[k]||'').replace(',','.'));
+    return isFinite(v)?v:null;
+  }
   var out=[];
   for(var r=hi+2;r<lines.length;r++){          /* +2: salta la línea de unidades */
     var row=lines[r].split(sep); if(row.length<3)continue;
-    var m=/^(\d{2})\/(\d{2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/.exec(row[ix['date']]);
+    var m=/^(\d{2})\/(\d{2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/.exec(row[ix['date']!=null?ix['date']:ix['Date']]||'');
     if(!m)continue;
     var yy=+m[3]; if(yy<100)yy+=yy<70?2000:1900;
     var t=new Date(Date.UTC(yy,+m[2]-1,+m[1],+m[4],+m[5]));
@@ -402,7 +489,9 @@ function parsePVSyst(text){
     var poa=col(row,'GlobEff'); if(poa==null)poa=col(row,'GlobInc');
     if(poa!=null)e.poa=Math.max(0,poa);
     var hs=col(row,'HSol'), as=col(row,'AzSol');
-    if(hs!=null){e.el=hs*D2R; e.az=(as||0)*D2R;}
+    /* sólo se usa la posición solar del fichero si vienen AMBAS: con AzSol ausente se
+       asumía azimut 0 (sur) a todas horas, que rompe el backtracking y la transposición */
+    if(hs!=null&&as!=null){e.el=hs*D2R; e.az=as*D2R;}
     var phi=col(row,'PhiAng'); if(phi!=null)e.phi=phi;
     out.push(e);
   }
@@ -439,14 +528,13 @@ function simulate(meteo,prof,loc,soc0,opts){
   var dtH=n>1?((+meteo[1].t)-(+meteo[0].t))/36e5:1;      /* paso en horas (uniforme) */
   var t0Day=Math.floor((+meteo[0].t)/864e5);
   var soc=soc0, parked=false, prevPos=null, stow=0;
-  /* El abanderamiento lo lleva el módulo compartido (sim/viento.js), el mismo que usan
-     el simulador de planta y terreno.html: una sola implementación para toda la casa.
-     Se le pasan los umbrales de AQUÍ (que el generador de física cotejo contra el canon)
-     y la histéresis en minutos. Lo que aporta de nuevo respecto a la copia que había:
-     el LADO SE FIJA AL ABANDERAR. Antes se recalculaba cada paso del signo del azimut,
-     así que un día de viento que cruzara el mediodía mandaba al seguidor de +55° a −55°
-     —110° de viaje con viento fuerte, justo lo que un abanderamiento existe para evitar—
-     y esos grados se contabilizaban además como consumo de motor. */
+  var lastFullDay=-1, nCalib=0, daysNoCalib=0;      /* calibración: última lograda, nº y peor racha */
+  /* El abanderamiento lo lleva el módulo compartido (sim/viento.js), el mismo que usan el
+     simulador de planta y terreno.html: una sola implementación para toda la casa. Lo que
+     aporta respecto a la copia que había: el LADO SE FIJA AL ABANDERAR. Antes se recalculaba
+     cada paso del signo del azimut, así que un día de viento que cruzara el mediodía mandaba
+     al seguidor de +55° a −55° —110° de viaje con viento fuerte, justo lo que un
+     abanderamiento existe para evitar— y esos grados se cobraban además como motor. */
   var AB=new Abanderamiento({t1:WIND_T1,t2:WIND_T2,parcialMin:PARTIAL_STOW_DEG,
                              total:AXIS_MAX,holdMin:DESTOW_HOLD_H*60});
   var rows=[];
@@ -472,59 +560,128 @@ function simulate(meteo,prof,loc,soc0,opts){
     var ab=AB.paso(dtH*3600,m.wind,trackPos,180+sun.az/D2R);
     stow=ab.estado;
     var target=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo))
-                     :(parked?DEFENSE_POS:trackPos);
+                     :(parked?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
     if(prevPos==null)prevPos=target;
-    /* histéresis del lazo: en seguimiento solo corrige si el error ≥ 2,5° (estudio SUNNER) */
+    /* Histéresis del lazo: en seguimiento sólo corrige si el error frente al sol ≥ 2,5°
+       (estudio SUNNER). Se evalúa sobre el error REAL, antes de limitar el avance. */
     var moveNow=(stow>0||parked)?Math.abs(target-prevPos)>0.01
                                 :Math.abs(target-prevPos)>=HYST_DEG;
+    /* Winter mode (11.5b): correcciones gruesas — cuando corrige, avanza como mucho
+       DEG_H_WINTER °/h, así que el seguidor va a la zaga del sol y barre ~3°/h en vez de
+       ~10°/h. Se aplica a la POSICIÓN: ángulo registrado, POA de carga y consumo de motor
+       hablan del mismo giro (antes se descontaba sólo la energía). */
+    if(moveNow && opts.winter && !parked && !stow){
+      var limW=DEG_H_WINTER*dtH, errW=target-prevPos;
+      target=prevPos+Math.sign(errW)*Math.min(Math.abs(errW),limW);
+    }
+    /* Límite físico de velocidad de giro (0,17°/s): a paso fino el aparcado y el
+       abanderamiento tardan varios pasos en completarse, como en el seguidor real. */
+    var maxSweep=SLEW_DPS*3600*dtH;
+    if(Math.abs(target-prevPos)>maxSweep) target=prevPos+Math.sign(target-prevPos)*maxSweep;
     var deltaEff=moveNow?Math.abs(target-prevPos):0;
-    if(!parked && !stow && opts.winter) deltaEff*=DEG_H_WINTER/DEG_H_NORMAL;
     var avgPos=(target+prevPos)/2;
     if(moveNow)prevPos=target;
 
-    /* — Consumo del paso: electrónica + motor + calefactor — */
+    /* — Consumo del paso: electrónica + motor + calefactor, todo en consumoTCU — */
     var cons=consumoTCU({dtH:dtH,dia:day,mov:deltaEff,pos:avgPos,
                          motorModel:opts.motorModel,calefactada:prof.heated,tAmb:m.temp});
     var motorWh=cons.motor, baseWh=cons.base, heatWh=cons.heat, tEff=cons.tEff, consWh=cons.total;
 
     /* — Carga: POA de la posición REAL (abanderado/defensa reduce), JEITA frío+calor, techo — */
     var poaChg;
-    if(target===trackPos && m.poa!=null) poaChg=m.poa;
+    if(opts.mountTilt!=null) poaChg=poaFixed(opts.mountTilt,sun.el,sun.az,bh,m.dhi,m.ghi,loc.lat);
+    else if(target===trackPos && m.poa!=null) poaChg=m.poa;
     else if(sun.el>0 && m.dhi>0) poaChg=poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi);
     else poaChg=(m.poa!=null)?m.poa:m.ghi;
-    var chgWh=0;
+    var chgWh=0, cRateNow=0;
     if(day && tEff>=opts.tMin && poaChg>=opts.poaMin){   /* cut-in del regulador: bajo el umbral no carga */
-      var chgP=prof.chgW*Math.min(poaChg/1000,1)*ETA_CHG;          /* W */
-      chgP=Math.min(chgP,cRateSafeLFP(tEff)*hotDerate(tEff)*capWh); /* límite C-rate (W) */
-      chgWh=chgP*dtH;
+      var chgP=prof.string ? prof.chgW*Math.min(poaChg/POA_STRING_FULL,1)   /* string: potencia nominal desde muy poca luz */
+                           : prof.chgW*Math.min(poaChg/1000,1);            /* panel dedicado: escala con la irradiancia */
+      /* límite de la batería: C-rate seguro por Tª (11.5b) × JEITA caliente × derate CC/CV por SOC */
+      var pMax=cRateSafeLFP(tEff)*hotDerate(tEff)*capWh*socDerateCharge(soc);
+      chgP=Math.min(chgP,pMax);
+      cRateNow=capWh>0?chgP/capWh:0;
+      chgWh=chgP*etaAtCrate(etaCharger(poaChg),cRateNow)*dtH;       /* Wh que entran de verdad */
     }
+    /* Carga completa (calibración del SoC): toca cada fcDays días DESDE LA ÚLTIMA LOGRADA.
+       Si el día no da para llegar al 100 %, la ventana sigue abierta y se reintenta al día
+       siguiente — no se espera otro ciclo completo. */
     var dayIdx=Math.floor((+m.t)/864e5)-t0Day;
-    var fullDay=opts.strategy && (dayIdx%opts.fcDays===opts.fcDays-1);
+    var fullDay=opts.strategy && (dayIdx-lastFullDay>=opts.fcDays);
     var ceil=opts.strategy?(fullDay?1.0:opts.socTgt/100):1.0;
-    /* CASO 2: por encima del techo no entra carga (el consumo sí sigue) */
+    /* CASO 2 — con el matiz físico del regulador: de día el panel alimenta PRIMERO la carga
+       (electrónica y motor) y sólo el excedente entra en la batería; el techo limita lo que
+       admite la BATERÍA, no lo que el panel puede dar al consumo. De ahí el "+consWh":
+       equivale a  net_batería = min(chgWh − consWh, hueco_hasta_el_techo),  que puede ser
+       negativo de noche. Sin ese término la batería nunca llega a tocar el techo (se queda
+       un paso de consumo por debajo) y la calibración al 100 % deja de dispararse: medido,
+       20 calibraciones al año con rachas de 51 días en vez de ~73 con rachas de 5. */
     var room=Math.max(0,(ceil-soc))*capWh+consWh;
     var chgEff=Math.min(chgWh,room);
 
     soc=Math.max(0,Math.min(1,soc+(chgEff-consWh)/capWh));
 
+    /* Calibración lograda: reinicia el contador el día en que se alcanza el 100 % */
+    var calibNow=false;
+    if(soc>=0.995 && lastFullDay!==dayIdx){lastFullDay=dayIdx;nCalib++;calibNow=true;}
+    daysNoCalib=Math.max(daysNoCalib,dayIdx-lastFullDay);
+
     /* — Producción perdida: POA seguimiento vs POA defensa en horas no disponibles — */
-    var poaPot=0, poaLost=0;
+    var poaPot=0, poaLost=0, poaReal=0;
     if(sun.el>0){
       poaPot=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
+      /* POA en la posición REAL del seguidor: recoge TODA la pérdida de producción de la
+         planta — defensa por batería, abanderamiento y el seguimiento grueso del winter
+         mode —, no sólo la imputable a la batería. */
+      if(Math.abs(target-trackPos)<0.01) poaReal=poaPot;
+      else{
+        var pIdeal=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
+        poaReal=pIdeal>0?poaPot*(poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi)/pIdeal):0;
+      }
       if(parked && !stow){                        /* pérdida por batería; el abanderamiento no cuenta */
-        var poaDef=poaAt(DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi);
-        poaLost=Math.max(0,poaPot-poaDef);
+        /* La fracción perdida se calcula SIEMPRE con el mismo modelo de transposición y se
+           aplica al POA potencial real: así no se mezcla el GlobEff medido con el calculado. */
+        var poaTrkM=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
+        var poaDefM=poaAt(opts.defPos!=null?opts.defPos:DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi);
+        var fracLost=poaTrkM>0?Math.max(0,(poaTrkM-poaDefM)/poaTrkM):0;
+        poaLost=poaPot*fracLost;
       }
     }
 
-    rows.push({t:m.t,ghi:m.ghi,temp:m.temp,wind:m.wind,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
+    rows.push({t:m.t,ghi:m.ghi,temp:m.temp,tCell:tEff,wind:m.wind,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
                heat:heatWh,net:chgEff-consWh,pos:target,parked:parked,stow:stow>0,mov:deltaEff,
-               poaPot:poaPot,poaLost:poaLost});
+               poaPot:poaPot,poaLost:poaLost,poaReal:poaReal,cal:calibNow,fullWin:!!fullDay,cRate:cRateNow});
   }
+  rows.nCalib=nCalib; rows.daysNoCalib=daysNoCalib;
   return rows;
 }
 
+/* ═══════════ Sistemas de control a comparar ═══════════
+   Todos comparten TCU, emplazamiento y meteo: sólo cambia la lógica de gestión. */
+var CONTROLS=[
+ {k:'none', n:'Sin gestión',                 d:'Seguimiento continuo, sin techo de carga ni defensa',
+  o:{strategy:false,socTgt:100,socCrit:0,fcDays:5,winter:false,defPos:DEFENSE_POS}},
+ {k:'sunner', n:'SUNNER estándar',           d:'Objetivo 80 % · crítico 30 % → defensa 55° · calibración 5 d',
+  o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:DEFENSE_POS}},
+ {k:'winter', n:'SUNNER + winter mode',      d:'Objetivo 90 % · calibración 3 d · seguimiento grueso 3°/h',
+  o:{strategy:true,socTgt:90,socCrit:30,fcDays:3,winter:true,defPos:DEFENSE_POS}},
+ {k:'tfm', n:'Restricción energética (TFM)', d:'Como SUNNER pero aparca plano a 0° para sobrevivir',
+  o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:0}},
+ {k:'cons', n:'Conservador',                 d:'Objetivo 80 % · crítico 40 %: aparca antes, más margen',
+  o:{strategy:true,socTgt:80,socCrit:40,fcDays:5,winter:false,defPos:DEFENSE_POS}}
+];
+var CONTROL_COL={none:'#8093A4',sunner:'#36D399',winter:'#3aa0ff',tfm:'#e0a52b',cons:'#c084fc'};
+function runControls(meteo,prof,loc,soc0,base){
+  return CONTROLS.map(function(c){
+    var o={};for(var k in base)o[k]=base[k];
+    for(var k2 in c.o)o[k2]=c.o[k2];
+    var rows=simulate(meteo,prof,loc,soc0,o);
+    return {c:c,rows:rows,S:summarize(rows)};
+  });
+}
+
 /* ═══════════ Rainflow (ASTM simplificado) + modelo de ciclos LFP (11.5b) ═══════════ */
+var RF_MIN=0.005;                 /* 0,5 % — filtro de amplitud: sin él el conteo depende del paso */
 function rainflow(soc){
   var tp=[],i;
   for(i=0;i<soc.length;i++){
@@ -532,6 +689,7 @@ function rainflow(soc){
     if(tp.length>=2){
       var a=tp[tp.length-2],b=tp[tp.length-1];
       if((b-a)*(v-b)>=0){tp[tp.length-1]=v;continue;}
+      if(Math.abs(v-b)<RF_MIN)continue;        /* oscilación por debajo del umbral: ruido */
     }
     tp.push(v);
   }
@@ -548,10 +706,19 @@ function rainflow(soc){
   }
   for(i=0;i+1<stack.length;i++)cycles.push({r:Math.abs(stack[i+1]-stack[i]),w:0.5});
   var tot=0,d30=0,d60=0;
-  cycles.forEach(function(c){tot+=c.w;if(c.r>=0.30)d30+=c.w;if(c.r>=0.60)d60+=c.w;});
+  cycles.forEach(function(c){if(c.r<RF_MIN)return;tot+=c.w;if(c.r>=0.30)d30+=c.w;if(c.r>=0.60)d60+=c.w;});
   return {total:tot,dod30:d30,dod60:d60};
 }
 var LFP_A=6000, LFP_B=1.2, LFP_EOL=20;   /* Nf = a/DoD^b · EOL = 80% SOH */
+/* Envejecimiento calendario — BatteryModel v2 canónico (notebook 11.0, _apply_calendar_aging):
+   tasa = base · exp(Ea/R·(1/T_ref − 1/T)) · (1 + 0,8·(SOC − 0,5))
+   Base calibrada a 1,5 %/año para LFP en el punto de referencia 25 °C y SOC 0,5 (Wang 2014, 11.5b),
+   así que un uso "medio" da el mismo número de antes, pero ahora vivir al 100 % penaliza y el frío premia. */
+var CAL_BASE_PCT_YR=1.5, T_REF_K=298.15, EA_OVER_R=3500;
+function calFadeRatePctYr(soc,tC){
+  var arr=Math.exp(EA_OVER_R*(1/T_REF_K-1/(Math.max(-40,tC)+273.15)));
+  return CAL_BASE_PCT_YR*arr*Math.max(0,1+0.8*(soc-0.5));
+}
 function cyclesAnalysis(rows){
   var n=rows.length; if(n<2)return null;
   var thr=0;
@@ -566,20 +733,41 @@ function cyclesAnalysis(rows){
   var dodMean=dods.reduce(function(a,b){return a+b},0)/dods.length;
   var dodM=Math.max(dodMean,0.01);
   var toEol=LFP_A/Math.pow(dodM,LFP_B);
-  var days=n*dtH/24, fade=0, years=30;
+  var days=n*dtH/24, fade=0, years=30, cycYr=0, calYr=CAL_BASE_PCT_YR;
+  /* calendario: se integra paso a paso con el SOC y la temperatura de celda reales */
+  var calAcc=0;
+  rows.forEach(function(r){calAcc+=calFadeRatePctYr(r.soc,(r.tCell!=null?r.tCell:r.temp))*dtH/8760;});
   if(days>=1){
     var cyclesYr=(efc/Math.max(dodM,1e-6))*(365/days);
-    fade=(cyclesYr/toEol)*LFP_EOL+1.5;                     /* cycle aging + calendar LFP ~1,5%/año */
+    cycYr=(cyclesYr/toEol)*LFP_EOL;                        /* fade por ciclado */
+    calYr=calAcc*365/days;                                 /* fade calendario anualizado */
+    fade=cycYr+calYr;
     years=Math.min(30,LFP_EOL/Math.max(fade,0.001));
   }
-  return {efc:efc,dodMean:dodMean,toEol:toEol,fadeYr:fade,years:years};
+  return {efc:efc,dodMean:dodMean,toEol:toEol,fadeYr:fade,cycYr:cycYr,calYr:calYr,
+          socMean:rows.reduce(function(a,r){return a+r.soc},0)/n,years:years};
+}
+/* Calibraciones (cargas al 100 %) logradas y peor racha sin calibrar — se recalcula
+   sobre las filas, así funciona igual con el periodo completo o con un recorte del zoom */
+function calibStats(rows){
+  var d0=Math.floor((+rows[0].t)/864e5), last=d0, n=0, worst=0, pend=0;
+  rows.forEach(function(r){
+    var d=Math.floor((+r.t)/864e5);
+    if(r.cal){n++;last=d;}
+    worst=Math.max(worst,d-last);
+    if(r.fullWin)pend=Math.max(pend,d-last);
+  });
+  return {n:n,worstGap:worst,pendGap:pend};
 }
 function summarize(rows){
   var dtH=rows.length>1?((+rows[1].t)-(+rows[0].t))/36e5:1;
   var soc=rows.map(function(r){return r.soc});
   var sum=function(k){return rows.reduce(function(a,r){return a+r[k]},0)};
   var minI=0; soc.forEach(function(v,i){if(v<soc[minI])minI=i});
-  var hPark=rows.filter(function(r){return r.parked&&!r.stow}).length*dtH;
+  /* No disponible = en defensa por batería, o simplemente sin energía para moverse.
+     Sin el segundo término, un control sin gestión salía con 0 % de indisponibilidad
+     aunque la batería estuviera muerta, porque nunca marca "parked". */
+  var hPark=rows.filter(function(r){return (r.parked&&!r.stow)||r.soc<=0.001}).length*dtH;
   var hStow=rows.filter(function(r){return r.stow}).length*dtH;
   return {
     socFinal:soc[soc.length-1], socMin:soc[minI], socMinT:rows[minI].t,
@@ -588,8 +776,9 @@ function summarize(rows){
     hParked:hPark, hStow:hStow, inactivePct:100*hPark/(rows.length*dtH),
     heatWh:sum('heat'),
     prodLostPct:(function(){var p=sum('poaPot'),l=sum('poaLost');return p>0?100*l/p:0})(),
+    prodRelPct:(function(){var p=sum('poaPot'),r=sum('poaReal');return p>0?100*r/p:100})(),
     chg:sum('chg'), base:sum('base'), motor:sum('motor'), net:sum('net'),
-    cyc:cyclesAnalysis(rows), rf:rainflow(soc)
+    cyc:cyclesAnalysis(rows), rf:rainflow(soc), cal:calibStats(rows)
   };
 }
 function aggDaily(rows){
@@ -603,7 +792,7 @@ function aggDaily(rows){
     cur.heat+=r.heat||0;cur.windMax=Math.max(cur.windMax,r.wind||0);if(r.stow)cur.stowH+=dtH;
     cur.ghiKwh+=r.ghi*dtH/1000;cur.tMin=Math.min(cur.tMin,r.temp);cur.tMax=Math.max(cur.tMax,r.temp);
     cur.socMin=Math.min(cur.socMin,r.soc);cur.socMax=Math.max(cur.socMax,r.soc);
-    if(r.parked)cur.parkedH+=dtH;
+    if(r.parked&&!r.stow)cur.parkedH+=dtH;
   });
   return out;
 }
@@ -630,8 +819,9 @@ function frame(g,yMin,yMax,rows,yFmt){
     x.strokeStyle='rgba(35,48,61,.8)';x.beginPath();x.moveTo(p.l,yy);x.lineTo(W-p.r,yy);x.stroke();
     x.fillStyle='#5e7388';x.fillText(yFmt(v),p.l-6,yy);
   }
-  var daily=rows.length>1&&(rows[1].t-rows[0].t)>=36e5*10;
-  var totalDays=daily?rows.length:rows.length/24;
+  var stepH=rows.length>1?((+rows[1].t)-(+rows[0].t))/36e5:1;
+  var daily=stepH>=10;
+  var totalDays=rows.length*stepH/24;
   x.textAlign='left';x.textBaseline='top';
   for(var i=0;i<rows.length;i++){
     var t=rows[i].t;
@@ -737,13 +927,16 @@ $('prof').value=1;   /* SP_45W_6Ah por defecto */
 (function(){var y=new Date().getFullYear();
   $('year').add(new Option('🏆 Peor año — barrido histórico','worst'));
   for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
+$('mount').onchange=function(){$('tiltFld').style.display=this.value==='fix'?'':'none'};
 $('year').onchange=function(){$('sweepFld').style.display=this.value==='worst'?'':'none'};
+$('year').onchange();      /* estado inicial coherente con la opción seleccionada */
 function profNote(){
   var P=PROFILES[$('prof').value];
-  $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · calefactor '+(P.heated?'<b>sí (LT)</b> — carga bajo 0 °C':'no');
+  $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · calefactor '+(P.heated?'<b>sí (LT)</b> — carga bajo 0 °C':'no')+
+    ' · motor 36 W a 0° … 67,2 W a 55° (curva medida, sin tope) · regulador η(G) PS26002_RevA';
 }
 profNote();$('prof').onchange=profNote;
-[['poaMin','poaMinV',' W/m²'],['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
+[['tilt','tiltV','°'],['poaMin','poaMinV',' W/m²'],['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
  ['socCrit','socCritV','%'],['fc','fcV',''],['doy','doyV',''],['sdays','sdaysV','']].forEach(function(a){
   $(a[0]).oninput=function(){$(a[1]).textContent=this.value+a[2]};
 });
@@ -789,12 +982,14 @@ function getMeteo(loc){
     .then(function(m){$('srcTag').textContent='Sintético · '+loc.n;return m});
 }
 
+var STEP_NOTE='';
 function applyStep(meteo){
+  STEP_NOTE='';
   var v=$('step').value;
   if(v==='auto'||meteo.length<2)return meteo;
   var stepMin=+v;
   var spanD=((+meteo[meteo.length-1].t)-(+meteo[0].t))/864e5;
-  if(stepMin===1&&spanD>35){stepMin=15;$('srcTag').textContent+=' · 1 min→15 min (rango >35 días)';}
+  if(stepMin===1&&spanD>35){stepMin=15;STEP_NOTE=' · 1 min→15 min (rango de '+Math.round(spanD)+' días)';}
   if(stepMin===15&&spanD>750)return meteo;
   var dtMin=((+meteo[1].t)-(+meteo[0].t))/60000;
   if(dtMin<=stepMin)return meteo;                 /* los datos ya son más finos */
@@ -826,7 +1021,6 @@ var PARAMS_FIS=[
  {k:'SLEEP_W',         n:'Reposo (noche)',               u:'W',     d:2, g:'Energía'},
  {k:'K0',              n:'Motor · K0',                   u:'Wh/°',  d:4, g:'Energía'},
  {k:'K1',              n:'Motor · K1',                   u:'Wh/°²', d:6, g:'Energía'},
- {k:'MOTOR_PEAK_W',    n:'Pico de motor',                u:'W',     d:1, g:'Energía'},
  {k:'ETA_CHG',         n:'Rendimiento de carga',         u:'',      d:3, g:'Energía'},
  {k:'V_NOM',           n:'Tensión nominal del bus',      u:'V',     d:2, g:'Energía'},
  {k:'ALBEDO',          n:'Albedo del suelo',             u:'',      d:2, g:'Energía'},
@@ -883,12 +1077,14 @@ pintaParams();
 $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
   var loc=getLoc(), prof=PROFILES[$('prof').value];
-  var mm=$('motor').value; mm=(mm==='factiun')?'factiun':+mm;
+  var mm=$('motor').value; mm=(mm==='factiun'||mm==='curva')?mm:+mm;
   var opts={motorModel:mm, winter:$('winter').checked, strategy:true,
             socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
-            fcDays:+$('fc').value, tMin:+$('tmin').value, poaMin:+$('poaMin').value};
+            fcDays:+$('fc').value, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
+            mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
   var refOpts={motorModel:mm, winter:false, strategy:false,
-            socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value, poaMin:+$('poaMin').value};
+            socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
+            mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
   var soc0=+$('soc0').value/100;
   var job;
   if($('src').value==='archive' && $('year').value==='worst'){
@@ -922,17 +1118,20 @@ $('run').onclick=function(){
       var wMeteo=applyStep(worst.meteo);           /* el barrido se evalúa horario; el detalle, al paso elegido */
       var mng=simulate(wMeteo,prof,loc,soc0,opts);
       var ref=simulate(wMeteo,prof,loc,soc0,refOpts);
-      $('srcTag').textContent='Peor año '+worst.year+' · '+loc.n;
-      LAST={meteo:wMeteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:{list:res,worst:worst.year}};
-      render(wMeteo,mng,ref,prof,loc,opts,LAST.sweep);
+      var ctrlW=$('cmp').checked?runControls(wMeteo,prof,loc,soc0,opts):null;
+      $('srcTag').textContent='Peor año '+worst.year+' · '+loc.n+STEP_NOTE;
+      LAST={meteo:wMeteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:{list:res,worst:worst.year},controls:ctrlW};
+      render(wMeteo,mng,ref,prof,loc,opts,LAST.sweep,null,ctrlW);
     });
   }else{
     job=getMeteo(loc).then(function(meteo){
       meteo=applyStep(meteo);
+      if(STEP_NOTE)$('srcTag').textContent+=STEP_NOTE;
       var mng=simulate(meteo,prof,loc,soc0,opts);
       var ref=simulate(meteo,prof,loc,soc0,refOpts);
-      LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:null};
-      render(meteo,mng,ref,prof,loc,opts);
+      var ctrl=$('cmp').checked?runControls(meteo,prof,loc,soc0,opts):null;
+      LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:null,controls:ctrl};
+      render(meteo,mng,ref,prof,loc,opts,null,null,ctrl);
     });
   }
   job.catch(function(e){
@@ -950,8 +1149,10 @@ function zoomTo(d0,d1){
   LAST.mng.forEach(function(r,i){var t=+r.t;if(t>=a&&t<=b)idx.push(i)});
   if(idx.length<12)return;
   var i0=idx[0], i1=idx[idx.length-1]+1;
+  var ctrlZ=LAST.controls?LAST.controls.map(function(x){
+    var r=x.rows.slice(i0,i1); return {c:x.c,rows:r,S:summarize(r)};}):null;
   render(LAST.meteo.slice(i0,i1),LAST.mng.slice(i0,i1),LAST.ref.slice(i0,i1),
-         LAST.prof,LAST.loc,LAST.opts,null,{d0:d0,d1:d1});
+         LAST.prof,LAST.loc,LAST.opts,null,{d0:d0,d1:d1},ctrlZ);
 }
 function zoomWorstDay(){
   if(!LAST)return;
@@ -961,9 +1162,276 @@ function zoomWorstDay(){
 }
 function zoomFull(){
   if(!LAST)return;
-  render(LAST.meteo,LAST.mng,LAST.ref,LAST.prof,LAST.loc,LAST.opts,LAST.sweep);
+  render(LAST.meteo,LAST.mng,LAST.ref,LAST.prof,LAST.loc,LAST.opts,LAST.sweep,null,LAST.controls);
 }
-function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
+/* ═══════════════════════════════════════════════════════════════════════════
+   INFORME — estructura del «Battery Availability Study» de SUNNER, alimentado
+   por la simulación en curso. Se abre en una pestaña aparte, tema claro y
+   maquetado A4: el navegador lo imprime o lo guarda como PDF.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var REPORT_CSS=`
+@page{size:A4;margin:16mm 14mm}
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:#1c2733;font:13px/1.5 "IBM Plex Sans",system-ui,sans-serif}
+.page{max-width:186mm;margin:0 auto;padding:10mm 0}
+h1{font-size:26px;margin:0 0 4px;color:#0d5c46;font-weight:600}
+h2{font-size:16px;margin:26px 0 8px;color:#0d5c46;border-bottom:2px solid #0d5c46;padding-bottom:4px;page-break-after:avoid}
+h3{font-size:13.5px;margin:16px 0 6px;color:#1c2733;page-break-after:avoid}
+p{margin:7px 0;text-align:justify}
+.cover{min-height:150mm;display:flex;flex-direction:column;justify-content:center;page-break-after:always}
+.cover .brand{font:600 15px "IBM Plex Mono",monospace;color:#0d5c46;letter-spacing:.14em;text-transform:uppercase}
+.cover h1{font-size:36px;margin:14px 0 6px;line-height:1.15}
+.cover .sub{font-size:19px;color:#4a5a6a}
+.cover .meta{margin-top:34px;font:12px "IBM Plex Mono",monospace;color:#4a5a6a;line-height:1.9}
+.conf{margin-top:auto;padding-top:20mm;font-size:10px;color:#8a97a4;border-top:1px solid #dde3e9}
+table{width:100%;border-collapse:collapse;font-size:11.5px;margin:9px 0;page-break-inside:avoid}
+th,td{padding:5px 7px;border:1px solid #d5dde4;text-align:right}
+th{background:#eef4f2;color:#0d5c46;font-weight:600;text-align:center}
+td:first-child,th:first-child{text-align:left}
+td.k{background:#f7f9fb;font-weight:500}
+td.ok{color:#0a7d55;font-weight:600} td.bad{color:#b3352b;font-weight:600} td.wn{color:#96650d}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:12px 0}
+.kpi{border:1px solid #d5dde4;border-radius:7px;padding:8px 10px;background:#f7f9fb}
+.kpi .l{font-size:9.5px;color:#6b7b8a;text-transform:uppercase;letter-spacing:.05em}
+.kpi .v{font:600 17px "IBM Plex Mono",monospace;color:#0d5c46}
+.kpi .s{font-size:9.5px;color:#8a97a4}
+img.fig{width:100%;border:1px solid #d5dde4;border-radius:6px;margin:8px 0;page-break-inside:avoid}
+.cap{font-size:10.5px;color:#6b7b8a;text-align:center;margin:-2px 0 12px}
+ul{margin:7px 0;padding-left:20px} li{margin:3px 0}
+.note{background:#f7f9fb;border-left:3px solid #0d5c46;padding:8px 11px;font-size:11.5px;margin:10px 0}
+.brk{page-break-before:always}
+@media print{.noprint{display:none}}
+.noprint{position:fixed;top:12px;right:12px;background:#0d5c46;color:#fff;border:0;border-radius:8px;padding:9px 16px;font:600 13px sans-serif;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.2)}
+`;
+
+function figFromCard(card){
+  var c=card&&card.querySelector('canvas.ch');
+  return c?c.toDataURL('image/png'):null;
+}
+function tbl(rows,head){
+  var h=head?'<tr>'+head.map(function(x){return '<th>'+x+'</th>'}).join('')+'</tr>':'';
+  return '<table>'+h+rows.map(function(r){
+    return '<tr>'+r.map(function(c,i){
+      var cls=(typeof c==='object')?(c.cls||''):(i===0?'k':'');
+      var v=(typeof c==='object')?c.v:c;
+      return '<td class="'+cls+'">'+v+'</td>';}).join('')+'</tr>';}).join('')+'</table>';
+}
+function buildReport(){
+  if(!LAST){alert('Ejecuta primero una simulación.');return;}
+  var mng=LAST.mng, ref=LAST.ref, prof=LAST.prof, loc=LAST.loc, opts=LAST.opts;
+  var S=summarize(mng), R=summarize(ref), C=LAST.controls, sweep=LAST.sweep;
+  var dtH=mng.length>1?((+mng[1].t)-(+mng[0].t))/36e5:1;
+  var d0=mng[0].t, d1=mng[mng.length-1].t, dias=mng.length*dtH/24;
+  var f=function(d){return ('0'+d.getUTCDate()).slice(-2)+'/'+('0'+(d.getUTCMonth()+1)).slice(-2)+'/'+d.getUTCFullYear()};
+  var hoy=new Date(), fHoy=('0'+hoy.getDate()).slice(-2)+'/'+('0'+(hoy.getMonth()+1)).slice(-2)+'/'+hoy.getFullYear();
+  var proyecto=/^\d{5}/.test(loc.n)?loc.n.slice(0,5):'—';
+  var sitio=loc.n.replace(/^\d{5}\s*·\s*/,'');
+  var fuente=$('srcTag').textContent||'—';
+  var motorTxt=opts.motorModel==='curva'?'curva I(|θ|) medida (TCU 33 @24 V)':
+               opts.motorModel==='factiun'?'ajuste Wh/° = 0,0503 + 0,000845·|θ|':
+               opts.motorModel+' mA medios @25,6 V (SUNNER)';
+
+  /* — figuras: se toman de las gráficas ya dibujadas — */
+  var cards=Array.prototype.slice.call(document.querySelectorAll('#out .card'));
+  var fig={};
+  cards.forEach(function(c){
+    var h=c.querySelector('h2'); if(!h)return;
+    var t=h.textContent;
+    if(/Estado de carga/.test(t))fig.soc=figFromCard(c);
+    else if(/Balance energético/.test(t))fig.bal=figFromCard(c);
+    else if(/Meteorolog/.test(t))fig.met=figFromCard(c);
+    else if(/Movimiento|Posición/.test(t))fig.pos=figFromCard(c);
+    else if(/sistemas de control/.test(t))fig.ctl=figFromCard(c);
+  });
+
+  /* — veredicto automático — */
+  var okDisp=S.inactivePct<1.0, okProd=S.prodLostPct<0.1, okSoc=S.socMin>0.05;
+  var apto=okDisp&&okProd&&okSoc;
+  var mejor=C?C.slice().sort(function(a,b){
+    return (a.S.inactivePct-b.S.inactivePct)||(b.S.prodRelPct-a.S.prodRelPct)})[0]:null;
+
+  var H='<div class="page">';
+  /* PORTADA */
+  H+='<div class="cover"><div class="brand">Factiun · Ingeniería de seguimiento solar</div>'+
+     '<h1>Estudio de disponibilidad<br>de batería de la TCU</h1>'+
+     '<div class="sub">'+sitio+'</div>'+
+     '<div class="meta">Proyecto: '+proyecto+'<br>Modelo de TCU: '+prof.id+' — '+fmt(prof.wh,1)+' Wh (25,6 V) · fuente de carga '+prof.chgW+' W<br>'+
+     'Periodo simulado: '+f(d0)+' – '+f(d1)+' ('+fmt(dias)+' días, paso '+fmt(dtH*60)+' min)<br>'+
+     'Origen de la meteorología: '+fuente+'<br>Fecha de emisión: '+fHoy+'</div>'+
+     '<div class="conf">Documento generado automáticamente por el simulador de gestión de batería del Gemelo Digital TCU '+
+     '(repositorio <b>gemelo-digital</b>, <i>bateria.html</i>). Reproducible: misma configuración y misma serie meteorológica '+
+     'devuelven los mismos resultados. Uso interno de Factiun.</div></div>';
+
+  /* 1. OBJETO */
+  H+='<h2>1. Objeto y conclusión</h2>';
+  H+='<p>Este informe evalúa si la unidad de control de seguidor (TCU) <b>'+prof.id+'</b> mantiene la alimentación '+
+     'necesaria para operar el seguidor en <b>'+sitio+'</b> a lo largo del periodo analizado, y cuantifica el impacto '+
+     'sobre la planta de las horas en que no puede hacerlo. La metodología replica la del <i>Battery Availability Study</i> '+
+     'aplicada por SUNNER, con la física de consumo y batería medida por Factiun.</p>';
+  H+='<div class="note"><b>Conclusión.</b> '+(apto
+      ? 'La configuración evaluada <b>cumple</b>: el seguidor permanece indisponible por falta de energía un '+fmt(S.inactivePct,4)+' % del tiempo, '+
+        'con una pérdida de producción imputable a la batería del '+fmt(S.prodLostPct,4)+' % y un SOC mínimo del '+fmt(S.socMin*100)+' %.'
+      : 'La configuración evaluada <b>presenta riesgo</b>: '+fmt(S.inactivePct,4)+' % de tiempo no disponible, '+
+        fmt(S.prodLostPct,4)+' % de producción perdida y un SOC mínimo del '+fmt(S.socMin*100)+' %'+
+        (S.hZero>0?', con '+fmt(S.hZero)+' h de batería completamente agotada':'')+'. Se recomienda revisar la capacidad, la potencia de carga o la estrategia de gestión.')+
+     (mejor?' De los sistemas de control evaluados, el más favorable en este emplazamiento es <b>'+mejor.c.n+'</b>.':'')+'</div>';
+  H+='<div class="kpis">'+
+     '<div class="kpi"><div class="l">Tiempo no disponible</div><div class="v">'+fmt(S.inactivePct,4)+' %</div><div class="s">'+fmt(S.hParked)+' h</div></div>'+
+     '<div class="kpi"><div class="l">Producción perdida</div><div class="v">'+fmt(S.prodLostPct,4)+' %</div><div class="s">imputable a batería</div></div>'+
+     '<div class="kpi"><div class="l">SOC mínimo</div><div class="v">'+fmt(S.socMin*100)+' %</div><div class="s">'+f(S.socMinT)+'</div></div>'+
+     '<div class="kpi"><div class="l">Vida a 80 % SOH</div><div class="v">'+fmt(S.cyc.years,1)+' a</div><div class="s">fade '+fmt(S.cyc.fadeYr,2)+' %/año</div></div>'+
+     '</div>';
+
+  /* 2. PROCEDIMIENTO */
+  H+='<h2>2. Procedimiento de evaluación</h2>';
+  H+='<p>El cálculo es un balance energético determinista, paso a paso, sin ajuste estadístico ni aprendizaje automático. '+
+     'Para cada intervalo de '+fmt(dtH*60)+' minutos se resuelve, en este orden:</p><ul>'+
+     '<li><b>Posición del seguidor</b>: seguimiento de eje N-S con <i>backtracking</i> (Anderson-Mikofski) y los topes mecánicos del proyecto, '+
+     'o la posición impuesta por el abanderamiento por viento o por la defensa de batería.</li>'+
+     '<li><b>Consumo</b>: electrónica permanente más el motor, según la curva de consumo medida y el recorrido angular efectivo del intervalo.</li>'+
+     '<li><b>Carga</b>: potencia disponible en el plano del panel de la TCU, limitada por el umbral de arranque del regulador, '+
+     'por la temperatura de la celda (C-rate seguro y JEITA) y por la fase CC/CV de la batería.</li>'+
+     '<li><b>Estado de carga</b>: integración del balance y aplicación de la estrategia de gestión.</li>'+
+     '<li><b>Métricas de impacto</b>: disponibilidad, producción perdida, ciclado (rainflow) y degradación.</li></ul>';
+
+  /* 3. EMPLAZAMIENTO Y SEGUIDOR */
+  H+='<h2>3. Emplazamiento y parámetros del seguidor</h2>';
+  H+=tbl([['Emplazamiento',{v:sitio}],['Proyecto',{v:proyecto}],
+     ['Latitud',{v:fmt(loc.lat,4)+'°'}],['Longitud',{v:fmt(loc.lon,4)+'°'}],
+     ['Tipo de seguidor',{v:'1 eje N-S, 1V bífila'}],
+     ['GCR',{v:fmt(GCR,3)}],['Límite mecánico',{v:'± '+AXIS_MAX+'°'}],
+     ['Posición nocturna',{v:NIGHT_POS+'°'}],['Posición de defensa',{v:(opts.defPos!=null?opts.defPos:DEFENSE_POS)+'°'}],
+     ['Histéresis del lazo',{v:fmt(HYST_DEG,1)+'° por corrección'}],
+     ['Velocidad de giro',{v:fmt(SLEW_DPS,2)+' °/s'}],
+     ['Abanderamiento por viento',{v:'parcial ≥ 40 km/h (±'+PARTIAL_STOW_DEG+'°) · total ≥ 60 km/h (±'+AXIS_MAX+'°), histéresis '+fmt(DESTOW_HOLD_H*60)+' min'}]
+    ],['Parámetro','Valor']);
+
+  /* 4. METEOROLOGÍA */
+  H+='<h2>4. Meteorología</h2>';
+  H+='<p>Serie de '+fmt(dias)+' días con paso de '+fmt(dtH*60)+' minutos procedente de: <b>'+fuente+'</b>. '+
+     'La temperatura ambiente se asume igual a la temperatura de operación de la batería.</p>';
+  if(fig.met)H+='<img class="fig" src="'+fig.met+'"><div class="cap">Figura 1 — Irradiación y temperatura del periodo, con el umbral de abanderamiento por viento.</div>';
+
+  /* 5. BATERÍA Y MOTOR */
+  H+='<h2 class="brk">5. Especificación de batería y motor</h2>';
+  H+=tbl([['Modelo de TCU',{v:prof.id}],
+     ['Capacidad nominal',{v:fmt(prof.wh,1)+' Wh ('+fmt(prof.wh/25.6,1)+' Ah a 25,6 V)'}],
+     ['Química',{v:'LiFePO₄'}],
+     ['Fuente de carga',{v:fmt(prof.chgW)+' W'}],
+     ['Versión calefactada (-LT)',{v:prof.heated?'sí — P = 1,0 + 0,15·|T| W bajo 0 °C':'no'}],
+     ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes (medido Factiun)'}],
+     ['Modelo de consumo de motor',{v:motorTxt}],
+     ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
+     ['Efecto del viento sobre el consumo',{v:'NO considerado — ver limitaciones',cls:'wn'}],
+     ['Tª mínima de carga',{v:opts.tMin+' °C'}],
+     ['Umbral duro de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
+     ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA'}],
+     ['Montaje de la fuente de carga',{v:opts.mountTilt!=null?('panel fijo a '+opts.mountTilt+'° orientado al ecuador'):'solidario al seguidor (plano del generador)'}],
+     ['Curva de carga',{v:'CC/CV — derate ×0,8 sobre 85 % SOC, ×0,5 sobre 90 %, ×0,2 sobre 95 %'}]
+    ],['Parámetro','Valor']);
+
+  /* 6. ESTRATEGIA */
+  H+='<h2>6. Estrategia de gestión del estado de carga</h2>';
+  H+='<p>Se modelan los tres escenarios de operación del control:</p><ul>'+
+     '<li><b>Caso 1 — '+opts.socCrit+' % &lt; SOC &lt; '+opts.socTgt+' %:</b> entra carga; consumen motor y electrónica.</li>'+
+     '<li><b>Caso 2 — SOC &gt; '+opts.socTgt+' %:</b> la batería no admite más carga (el panel sigue alimentando el consumo).</li>'+
+     '<li><b>Caso 3 — SOC &lt; '+opts.socCrit+' %:</b> <b>seguidor no disponible</b>: se lleva a la posición de defensa, sólo consume la electrónica y la batería se recupera.</li>'+
+     '</ul><p>La calibración del estimador de carga exige una carga completa cada <b>'+opts.fcDays+' días</b>; si el día no da para alcanzar el 100 %, '+
+     'la ventana permanece abierta y se reintenta al día siguiente. En el periodo se lograron <b>'+fmt(S.cal.n)+'</b> cargas completas, '+
+     'con una racha máxima de <b>'+fmt(S.cal.worstGap)+' días</b> sin calibrar.</p>';
+  if(fig.soc)H+='<img class="fig" src="'+fig.soc+'"><div class="cap">Figura 2 — Estado de carga durante el periodo. Franja roja: seguidor no disponible por batería. Franja azul: abanderamiento por viento.</div>';
+  if(fig.bal)H+='<img class="fig" src="'+fig.bal+'"><div class="cap">Figura 3 — Balance energético: captación solar frente a consumo de electrónica y motor.</div>';
+
+  /* 7. MÉTRICAS DE IMPACTO */
+  H+='<h2 class="brk">7. Métricas de impacto</h2>';
+  H+='<p><b>Tiempo no disponible:</b> porcentaje del periodo en que el seguidor no puede seguir al sol por falta de energía en la batería. '+
+     'El abanderamiento por viento no se contabiliza, por ser una maniobra de protección inevitable.</p>'+
+     '<p><b>Producción perdida:</b> diferencia entre la energía que habría captado el plano en seguimiento y la que capta en posición de defensa '+
+     'durante esas horas, referida a la producción potencial del periodo.</p>';
+  H+=tbl([
+    ['Tiempo no disponible',{v:fmt(S.inactivePct,4)+' %',cls:S.inactivePct>1?'bad':'ok'},{v:fmt(R.inactivePct,4)+' %'}],
+    ['Horas no disponible',{v:fmt(S.hParked)+' h'},{v:fmt(R.hParked)+' h'}],
+    ['Producción perdida (batería)',{v:fmt(S.prodLostPct,4)+' %',cls:S.prodLostPct>0.1?'bad':'ok'},{v:fmt(R.prodLostPct,4)+' %'}],
+    ['Producción relativa al seguimiento ideal',{v:fmt(S.prodRelPct,2)+' %'},{v:fmt(R.prodRelPct,2)+' %'}],
+    ['SOC mínimo',{v:fmt(S.socMin*100)+' %',cls:S.socMin<0.1?'bad':'ok'},{v:fmt(R.socMin*100)+' %'}],
+    ['SOC medio',{v:fmt(S.cyc.socMean*100)+' %'},{v:fmt(R.cyc.socMean*100)+' %'}],
+    ['Horas con batería agotada',{v:fmt(S.hZero)+' h',cls:S.hZero>0?'bad':'ok'},{v:fmt(R.hZero)+' h'}],
+    ['Horas abanderado por viento',{v:fmt(S.hStow)+' h'},{v:fmt(R.hStow)+' h'}],
+    ['Captación solar',{v:fmt(S.chg)+' Wh'},{v:fmt(R.chg)+' Wh'}],
+    ['Consumo de motor',{v:fmt(S.motor)+' Wh'},{v:fmt(R.motor)+' Wh'}],
+    ['Consumo de electrónica',{v:fmt(S.base)+' Wh'},{v:fmt(R.base)+' Wh'}]
+   ],['Métrica','Configuración evaluada','Sin gestión (referencia)']);
+  if(fig.pos)H+='<img class="fig" src="'+fig.pos+'"><div class="cap">Figura 4 — Recorrido del seguidor.</div>';
+
+  /* 8. BARRIDO MULTIANUAL */
+  if(sweep&&sweep.list&&sweep.list.length){
+    var v=sweep.list, mean=function(k){return v.reduce(function(a,r){return a+r[k]},0)/v.length};
+    var std=function(k){var m=mean(k);return Math.sqrt(v.reduce(function(a,r){return a+(r[k]-m)*(r[k]-m)},0)/v.length)};
+    H+='<h2 class="brk">8. Resultados año a año</h2>';
+    H+='<p>Cada año meteorológico completo se simula con la configuración evaluada. El año de proyecto es el más desfavorable, '+
+       'y se acompaña de la media (año típico) y del percentil 97,5 % (media + 2σ), como en la metodología de referencia.</p>';
+    var filas=v.map(function(r){return [String(r.year)+(r.year===sweep.worst?' (año de proyecto)':''),
+      {v:fmt(r.inact,4),cls:r.year===sweep.worst?'bad':''},{v:fmt(r.lost,4)},{v:fmt(r.socMin*100)+' %'},{v:fmt(r.hZero)}];});
+    filas.push([{v:'<b>Media (año típico)</b>'},{v:'<b>'+fmt(mean('inact'),4)+'</b>'},{v:'<b>'+fmt(mean('lost'),4)+'</b>'},{v:'—'},{v:'—'}]);
+    filas.push([{v:'<b>Media + 2σ (97,5 %)</b>'},{v:'<b>'+fmt(mean('inact')+2*std('inact'),4)+'</b>'},{v:'<b>'+fmt(mean('lost')+2*std('lost'),4)+'</b>'},{v:'—'},{v:'—'}]);
+    H+=tbl(filas,['Año','% no disponible','% producción perdida','SOC mínimo','h a cero']);
+  }
+
+  /* 9. SISTEMAS DE CONTROL */
+  if(C&&C.length){
+    H+='<h2 class="brk">9. Comparativa de sistemas de control</h2>';
+    H+='<p>Todas las alternativas comparten TCU, emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión.</p>';
+    H+=tbl([['Descripción'].concat(C.map(function(x){return {v:x.c.d}}))].concat([
+      ['% tiempo no disponible'].concat(C.map(function(x){return {v:fmt(x.S.inactivePct,4)}})),
+      ['% producción perdida (batería)'].concat(C.map(function(x){return {v:fmt(x.S.prodLostPct,4)}})),
+      ['Producción relativa al seguimiento'].concat(C.map(function(x){return {v:fmt(x.S.prodRelPct,2)+' %'}})),
+      ['SOC mínimo'].concat(C.map(function(x){return {v:fmt(x.S.socMin*100)+' %'}})),
+      ['Horas con batería agotada'].concat(C.map(function(x){return {v:fmt(x.S.hZero)}})),
+      ['Consumo de motor (Wh)'].concat(C.map(function(x){return {v:fmt(x.S.motor)}})),
+      ['Cargas completas logradas'].concat(C.map(function(x){return {v:fmt(x.S.cal.n)}})),
+      ['Ciclos rainflow'].concat(C.map(function(x){return {v:fmt(x.S.rf.total)}})),
+      ['Vida a 80 % SOH (años)'].concat(C.map(function(x){return {v:fmt(x.S.cyc.years,1)}}))
+    ]),['Métrica'].concat(C.map(function(x){return x.c.n})));
+    if(fig.ctl)H+='<img class="fig" src="'+fig.ctl+'"><div class="cap">Figura 5 — Estado de carga con cada sistema de control.</div>';
+  }
+
+  /* 10. CICLADO */
+  H+='<h2>10. Ciclado y durabilidad</h2>';
+  H+='<p>El ciclado se clasifica por conteo <i>rainflow</i> (ASTM E1049) sobre la serie de estado de carga. '+
+     'La degradación se descompone en la debida al ciclado, según el modelo LFP N<sub>f</sub> = 6000/DoD<sup>1,2</sup> con fin de vida al 80 % de capacidad, '+
+     'y la calendaria, integrada paso a paso en función del estado de carga y de la temperatura de celda.</p>';
+  H+=tbl([
+    ['Ciclos rainflow totales',{v:fmt(S.rf.total)}],
+    ['Ciclos con DoD ≥ 30 %',{v:fmt(S.rf.dod30)}],
+    ['Ciclos con DoD ≥ 60 %',{v:fmt(S.rf.dod60)}],
+    ['Ciclos equivalentes completos (EFC)',{v:fmt(S.cyc.efc,1)}],
+    ['DoD diario medio',{v:fmt(S.cyc.dodMean*100)+' %'}],
+    ['Degradación por ciclado',{v:fmt(S.cyc.cycYr,2)+' %/año'}],
+    ['Degradación calendaria',{v:fmt(S.cyc.calYr,2)+' %/año'}],
+    ['Degradación total',{v:fmt(S.cyc.fadeYr,2)+' %/año'}],
+    ['Vida estimada hasta el 80 % SOH',{v:fmt(S.cyc.years,1)+' años',cls:S.cyc.years<10?'wn':'ok'}]
+   ],['Parámetro','Valor']);
+
+  /* 11. HIPÓTESIS */
+  H+='<h2>11. Hipótesis y limitaciones</h2><ul>'+
+     '<li>La transposición al plano del generador es isotrópica; en cielos muy anisótropos subestima ligeramente la captación directa.</li>'+
+     '<li>La temperatura de la batería se toma igual a la ambiente, salvo en las versiones -LT con el calefactor activo.</li>'+
+     '<li><b>No se valora el efecto del viento sobre el consumo del motor.</b> El viento interviene únicamente para disparar el abanderamiento; el par adicional que opone sobre la estructura, y por tanto la corriente extra que exige al motor, no se modelan. El consumo simulado es en consecuencia un <b>límite inferior</b> en emplazamientos ventosos: la metodología de referencia declara 2 m/s como velocidad de viento de referencia para ese efecto, que aquí no se aplica. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
+     '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
+     '<li>La suciedad y la nieve acumulada no penalizan la captación del panel de la TCU.</li>'+
+     '<li>Los resultados dependen de la serie meteorológica empleada; para decisiones de compra conviene el barrido multianual del apartado 8.</li>'+
+     '</ul>';
+  H+='<div class="conf">Factiun · documento de trabajo interno. Generado el '+fHoy+'.</div></div>';
+
+  var doc='<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'+
+    '<title>Estudio de disponibilidad de batería TCU — '+sitio+'</title><style>'+REPORT_CSS+'</style></head><body>'+
+    '<button class="noprint" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>'+H+'</body></html>';
+  var w=window.open('','_blank');
+  if(!w){alert('El navegador ha bloqueado la ventana emergente. Permítela para ver el informe.');return;}
+  w.document.write(doc); w.document.close();
+}
+
+function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   var S=summarize(mng), R=summarize(ref);
   var out=$('out');out.innerHTML='';
   var dtH=mng.length>1?((+mng[1].t)-(+mng[0].t))/36e5:1;
@@ -976,18 +1444,23 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
   chips.innerHTML=
     chip('Tiempo no disponible',fmt(S.inactivePct,4)+'%',S.inactivePct>1?'bad':(S.inactivePct>0.1?'warn':'ok'),
          fmt(S.hParked)+' h en defensa')+
-    chip('Producción perdida',fmt(S.prodLostPct,4)+'%',S.prodLostPct>0.05?'warn':'ok','POA defensa vs seguimiento')+
+    chip('Producción perdida',fmt(S.prodLostPct,4)+'%',S.prodLostPct>0.05?'warn':'ok','por batería · POA defensa vs seguimiento')+
+    chip('Producción relativa',fmt(S.prodRelPct,2)+'%',S.prodRelPct<99?'warn':'ok','captación real / seguimiento ideal')+
     chip('SOC mínimo',fmt(S.socMin*100)+'%',socCls(S.socMin,crit),
          S.socMinT.getUTCDate()+' '+MES[S.socMinT.getUTCMonth()]+' '+('0'+S.socMinT.getUTCHours()).slice(-2)+'h')+
     chip('SOC final',fmt(S.socFinal*100)+'%',socCls(S.socFinal,crit))+
     chip('Horas SOC = 0',fmt(S.hZero),S.hZero>0?'bad':'ok')+
     chip('Balance neto',(S.net>=0?'+':'')+fmt(S.net)+' Wh',S.net>=0?'ok':'warn',
-         'carga '+fmt(S.chg)+' / consumo '+fmt(S.base+S.motor))+
+         'carga '+fmt(S.chg)+' / consumo '+fmt(S.base+S.motor+S.heatWh))+
+    chip('Cargas completas',fmt(S.cal.n),S.cal.worstGap>2*opts.fcDays?'warn':'ok',
+         'peor racha sin calibrar: '+fmt(S.cal.worstGap)+' d (objetivo '+opts.fcDays+')')+
     chip('Abanderamiento',fmt(S.hStow)+' h',S.hStow>0?'warn':'ok','viento ≥40/60 km/h (B2)')+
     (S.heatWh>0?chip('Calefactor LT',fmt(S.heatWh)+' Wh','','P = 1 + 0,15·|T| bajo 0 °C'):'')+
     chip('Rainflow',fmt(S.rf.total)+' ciclos','', '≥30% DoD: '+fmt(S.rf.dod30)+' · ≥60%: '+fmt(S.rf.dod60))+
     chip('Vida estimada',fmt(S.cyc.years,1)+' años',S.cyc.years<10?'warn':'ok',
-         fmt(S.cyc.efc,1)+' EFC · fade '+fmt(S.cyc.fadeYr,1)+'%/año');
+         'fade '+fmt(S.cyc.fadeYr,2)+'%/año = '+fmt(S.cyc.cycYr,2)+' ciclado + '+fmt(S.cyc.calYr,2)+' calendario')+
+    chip('SOC medio',fmt(S.cyc.socMean*100)+'%',S.cyc.socMean>0.92?'warn':'ok',
+         fmt(S.cyc.efc,1)+' EFC · a más SOC medio, más envejecimiento');
   out.appendChild(chips);
 
   /* — Zoom: día o rango concreto (como las vistas de día crítico del estudio) — */
@@ -1001,8 +1474,9 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
     '<button class="btn" style="width:auto;padding:6px 14px" onclick="zoomTo(document.getElementById(\'zd0\').value,document.getElementById(\'zd1\').value)">Aplicar</button>'+
     '<button class="btn" style="width:auto;padding:6px 14px;background:var(--card2);color:var(--tx);border:1px solid var(--line2)" onclick="zoomWorstDay()">📉 Día de SOC mínimo ±3</button>'+
     (zoom?'<button class="btn" style="width:auto;padding:6px 14px;background:var(--card2);color:var(--tx);border:1px solid var(--line2)" onclick="zoomFull()">Periodo completo</button>':'')+
+    '<button class="btn" style="width:auto;padding:6px 14px;margin-left:auto" onclick="buildReport()">📄 Generar informe</button>'+
     '</div>'+
-    (zoom?'<div class="sub" style="margin-top:6px">Mostrando '+zoom.d0+' → '+zoom.d1+' en resolución horaria; las métricas de arriba son de este rango.</div>':'');
+    (zoom?'<div class="sub" style="margin-top:6px">Mostrando '+zoom.d0+' → '+zoom.d1+' con paso de '+fmt(dtH*60)+' min; las métricas de arriba son de este rango.</div>':'');
   out.appendChild(zc);
 
   /* — Barrido multi-año: tabla por año + estadística TMY ± 2σ (como el estudio) — */
@@ -1031,7 +1505,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
   /* — Gráfica 1: SOC — */
   var c1=document.createElement('div');c1.className='card';
   c1.innerHTML='<h2>Estado de carga (SOC) — '+(sweep?('peor año '+sweep.worst):fmt(days)+' días')+'</h2><div class="sub">'+prof.id+' · '+loc.n+
-    ' · estrategia SUNNER (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días)'+
+    ' · paso '+fmt(dtH*60)+' min · estrategia SUNNER (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días, reintentando a diario)'+
     (opts.winter?' · winter mode':'')+'</div>';
   out.appendChild(c1);
   var g1=mkCanvas(c1,210), f1=frame(g1,0,100,mng,function(v){return fmt(v)+'%'});
@@ -1041,7 +1515,9 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
   hline(g1,f1,opts.socCrit,'#e2574c',true,'crítico '+opts.socCrit+'%');
   line(g1,f1,ref,function(r){return r.soc*100},'#5e7388',1);
   line(g1,f1,mng,function(r){return r.soc*100},'#36D399',LONG?1.1:2);
-  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con estrategia</span><span><i style="background:#5e7388"></i>Sin estrategia (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>No disponible (defensa 55°)</span><span><i style="background:rgba(58,160,255,.5)"></i>Abanderado (viento)</span></div>');
+  g1.x.fillStyle='#e0a52b';                       /* ✦ calibraciones (carga al 100 %) logradas */
+  mng.forEach(function(r,i){if(r.cal){g1.x.beginPath();g1.x.arc(f1.X(i),f1.Y(100),2.2,0,6.284);g1.x.fill();}});
+  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con estrategia</span><span><i style="background:#5e7388"></i>Sin estrategia (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>No disponible (defensa 55°)</span><span><i style="background:rgba(58,160,255,.5)"></i>Abanderado (viento)</span><span><i style="background:#e0a52b;border-radius:50%;width:6px;height:6px"></i>Carga completa lograda</span></div>');
 
   /* — Gráfica 2: balance energético — */
   var c2=document.createElement('div');c2.className='card';
@@ -1105,7 +1581,8 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
   out.appendChild(c4);
   if(LONG){
     c4.innerHTML='<h2>Movimiento diario del seguidor</h2><div class="sub">Σ|Δθ| por día (°) — la estrategia y el winter mode reducen el recorrido</div>';
-    var maxM=Math.max(10,Math.max.apply(null,dr.map(function(r){return r.mov})));
+    var maxM=Math.max(10,Math.max.apply(null,dr.map(function(r){return r.mov})),
+                          Math.max.apply(null,dm.map(function(r){return r.mov})));
     var g4=mkCanvas(c4,145), f4=frame(g4,0,maxM,dm,function(v){return fmt(v)+'°'});
     bandParked(g4,f4,dm,'rgba(226,87,76,.10)',function(r){return r.parkedH>0});
     line(g4,f4,dr,'mov','#5e7388',1);
@@ -1142,6 +1619,52 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
     out.appendChild(cM);
   }
 
+  /* — Comparativa entre sistemas de control — */
+  if(controls && controls.length){
+    var cc=document.createElement('div');cc.className='card';
+    cc.innerHTML='<h2>⚖️ Comparativa de sistemas de control</h2><div class="sub">Mismo TCU ('+prof.id+
+      '), mismo emplazamiento y misma meteo: sólo cambia la lógica de gestión de la batería.</div>';
+    out.appendChild(cc);
+    var gc=mkCanvas(cc,210), fc=frame(gc,0,100,mng,function(v){return fmt(v)+'%'});
+    controls.forEach(function(x){
+      line(gc,fc,x.rows,function(r){return r.soc*100},CONTROL_COL[x.c.k],x.c.k==='sunner'?2:1.2);
+    });
+    cc.insertAdjacentHTML('beforeend','<div class="leg">'+controls.map(function(x){
+      return '<span><i style="background:'+CONTROL_COL[x.c.k]+'"></i>'+x.c.n+'</span>';}).join('')+'</div>');
+
+    var filas=[
+      ['% tiempo no disponible', function(S){return fmt(S.inactivePct,4)}, 'min'],
+      ['% producción perdida (batería)', function(S){return fmt(S.prodLostPct,4)}, 'min'],
+      ['Producción relativa al seguimiento ideal', function(S){return fmt(S.prodRelPct,2)+'%'}, 'max'],
+      ['SOC mínimo',             function(S){return fmt(S.socMin*100)+'%'}, 'max'],
+      ['SOC medio',              function(S){return fmt(S.cyc.socMean*100)+'%'}, null],
+      ['Horas SOC = 0',          function(S){return fmt(S.hZero)}, 'min'],
+      ['Horas en defensa',       function(S){return fmt(S.hParked)}, 'min'],
+      ['Consumo de motor (Wh)',  function(S){return fmt(S.motor)}, 'min'],
+      ['Carga captada (Wh)',     function(S){return fmt(S.chg)}, 'max'],
+      ['Cargas completas',       function(S){return fmt(S.cal.n)}, null],
+      ['Peor racha sin calibrar (d)', function(S){return fmt(S.cal.worstGap)}, 'min'],
+      ['Ciclos rainflow',        function(S){return fmt(S.rf.total)}, 'min'],
+      ['Fade anual (%)',         function(S){return fmt(S.cyc.fadeYr,2)}, 'min'],
+      ['Vida a 80% SOH (años)',  function(S){return fmt(S.cyc.years,1)}, 'max']
+    ];
+    var th='<table class="cmp"><tr><th>Métrica</th>'+controls.map(function(x){
+      return '<th style="color:'+CONTROL_COL[x.c.k]+'">'+x.c.n+'</th>';}).join('')+'</tr>';
+    th+='<tr><td>Descripción</td>'+controls.map(function(x){
+      return '<td style="font-family:var(--sans);font-size:11px;color:var(--tx3);text-align:left">'+x.c.d+'</td>';}).join('')+'</tr>';
+    filas.forEach(function(f){
+      var vals=controls.map(function(x){return parseFloat(String(f[1](x.S)).replace(',','.'))});
+      var best=null;
+      if(f[2]==='min')best=Math.min.apply(null,vals);
+      if(f[2]==='max')best=Math.max.apply(null,vals);
+      th+='<tr><td>'+f[0]+'</td>'+controls.map(function(x,i){
+        var mejor=(best!==null && Math.abs(vals[i]-best)<1e-9);
+        return '<td class="'+(mejor?'ok':'')+'">'+f[1](x.S)+(mejor?' ★':'')+'</td>';}).join('')+'</tr>';
+    });
+    cc.insertAdjacentHTML('beforeend',th+'</table><div class="note">★ mejor valor de la fila. '+
+      'La producción perdida cuenta sólo la causada por batería: el abanderamiento por viento es inevitable y no se imputa.</div>');
+  }
+
   /* — Comparativa con/sin estrategia — */
   var c5=document.createElement('div');c5.className='card';
   c5.innerHTML='<h2>Comparativa: sin estrategia vs con estrategia</h2><div class="sub">Mismo TCU y misma meteo; cambia solo la operación (estrategia SUNNER'+(opts.winter?' + winter mode':'')+')</div>';
@@ -1159,7 +1682,10 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom){
     ['Rainflow: ciclos ≥30% DoD',fmt(R.rf.dod30),fmt(S.rf.dod30),S.rf.dod30<=R.rf.dod30],
     ['Rainflow: ciclos ≥60% DoD',fmt(R.rf.dod60),fmt(S.rf.dod60),S.rf.dod60<=R.rf.dod60],
     ['EFC',fmt(R.cyc.efc,1),fmt(S.cyc.efc,1),S.cyc.efc<=R.cyc.efc],
-    ['Fade anual estimado',fmt(R.cyc.fadeYr,1)+'%',fmt(S.cyc.fadeYr,1)+'%',S.cyc.fadeYr<=R.cyc.fadeYr],
+    ['SOC medio del periodo',fmt(R.cyc.socMean*100)+'%',fmt(S.cyc.socMean*100)+'%',null],
+    ['Fade por ciclado',fmt(R.cyc.cycYr,2)+'%',fmt(S.cyc.cycYr,2)+'%',S.cyc.cycYr<=R.cyc.cycYr],
+    ['Fade calendario (SOC+Tª)',fmt(R.cyc.calYr,2)+'%',fmt(S.cyc.calYr,2)+'%',S.cyc.calYr<=R.cyc.calYr],
+    ['Fade anual estimado',fmt(R.cyc.fadeYr,2)+'%',fmt(S.cyc.fadeYr,2)+'%',S.cyc.fadeYr<=R.cyc.fadeYr],
     ['Vida a 80% SOH (años)',fmt(R.cyc.years,1),fmt(S.cyc.years,1),S.cyc.years>=R.cyc.years]
   ];
   var tb2='<table class="cmp"><tr><th>Métrica</th><th>Sin estrategia</th><th>Con estrategia</th></tr>';
