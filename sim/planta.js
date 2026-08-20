@@ -1144,6 +1144,9 @@ function Planta(cfg) {
        SUNNER a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
     motorModel: cfg.motorModel || 'factiun',
     estrategiaViento: cfg.estrategiaViento || 'B2',   /* A1 · A2 · B1 · B2 */
+    /* averías por tasa: apagadas salvo que se pidan */
+    averias: cfg.averias || { activo: false, comsMtbfH: 0, comsMin: 10,
+                              duroMtbfD: 0, caladoMtbfD: 0, reparaH: 8, desajusteSig: 0 },
     politicaDifusa: cfg.politicaDifusa || 'none',     /* none · flat · continuous · limited · poa_switch */
     /* Trayectoria del ángulo calculada por el MOTOR canónico (SolarGPT, POST /tracker).
        Si está, el gemelo la EJECUTA y no calcula ni el backtracking ni la política de
@@ -1176,6 +1179,7 @@ function Planta(cfg) {
   this.loc = cfg.loc || { n: 'Gorraiz', lat: 42.81, lon: -1.58, tz: 1, dst: true };
   this.t = { dia: cfg.dia || 172, hora: cfg.hora != null ? cfg.hora : 9, epoch: Math.floor(Date.now() / 1000) };
   this.tResto = 0;
+  this.rndAv = new Rnd(90210);      /* averías por tasa: con semilla, para poder repetir */
   /* día 0 del contador de cargas completas: la de «una cada cinco días» se cuenta
      desde que arranca la planta, igual que en el simulador de batería */
   this.diaBase = Math.floor(this.t.epoch / 86400);
@@ -1203,6 +1207,7 @@ function Planta(cfg) {
       t0.sensor.crudo = t0.sensor.filtrado = ang0.sel;
     }
   }
+  this.repartaDesajustes(this.cfg.averias && this.cfg.averias.desajusteSig);
   /* y un paso mínimo para que el estado derivado (sol, objetivo, alarmas) exista */
   this.paso(0.001);
 }
@@ -1229,6 +1234,7 @@ Planta.prototype.paso = function (dt) {
   this.tResto += dt;
   var ent = Math.floor(this.tResto);
   if (ent) { this.t.epoch += ent; this.tResto -= ent; }
+  this.averiasPaso(dt);
   var i;
   for (i = 0; i < this.hsus.length; i++) this.hsus[i].paso(dt);
   this.ncu.paso();
@@ -1555,6 +1561,67 @@ Planta.prototype.fechaSim = function () {
            hora: Math.floor(h), min: Math.floor((h % 1) * 60), seg: Math.floor((h * 3600) % 60) };
 };
 
+
+
+/* ═══════════════════ AVERÍAS POR TASA ═══════════════════
+   Pulsar averías una a una contesta «¿qué pasa si se cala este eje?». La pregunta de
+   operación es otra: «¿qué aspecto tiene el SCADA en un día malo?». Y eso no se
+   monta a mano, porque lo que lo hace difícil de leer es que las cosas pasan a la
+   vez, en equipos distintos y sin avisar.
+
+   Se declara con tiempos MEDIOS entre fallos, que es como se habla de esto:
+
+     comsMtbfH    horas de media entre caídas de Zigbee de UN equipo
+     comsMin      cuánto dura la caída
+     duroMtbfD    días de media hasta que un eje se pone duro
+     caladoMtbfD  ídem hasta que se cala
+     reparaH      horas hasta que alguien va y lo arregla
+     desajusteSig desviación típica del desajuste de montaje del inclinómetro (°),
+                  que NO es una avería que aparece: está desde el día uno, y es lo que
+                  hace que la flota no publique todos el mismo ángulo
+
+   Todo sale de un Rnd propio con semilla: dos corridas del mismo escenario con las
+   mismas tasas dan las mismas averías, en los mismos equipos y a la misma hora. Sin
+   eso no serviría para comparar nada. */
+Planta.prototype.averiasPaso = function (dt) {
+  var A = this.cfg.averias;
+  if (!A || !A.activo) return;
+  var r = this.rndAv, dtH = dt / 3600;
+  /* p = 1 − e^(−dt/MTBF): con dt pequeño es dt/MTBF, pero así no se rompe con pasos
+     grandes (a ×1800 un paso son 30 minutos simulados) */
+  var p = function (mtbfH) { return mtbfH > 0 ? 1 - Math.exp(-dtH / mtbfH) : 0; };
+  var pCom = p(A.comsMtbfH || 0), pDuro = p((A.duroMtbfD || 0) * 24),
+      pCal = p((A.caladoMtbfD || 0) * 24), pRep = p(A.reparaH || 0);
+  for (var i = 0; i < this.tcus.length; i++) {
+    var t = this.tcus[i];
+    /* comunicación: cae y vuelve sola pasado su tiempo */
+    if (t.online) {
+      if (pCom && r.next() < pCom) { t.online = false; t.tCaido = (A.comsMin || 10) * 60; }
+    } else if (t.tCaido != null) {
+      t.tCaido -= dt;
+      if (t.tCaido <= 0) { t.online = true; t.tCaido = null; }
+    }
+    /* el eje: se estropea solo, y solo se arregla si alguien va */
+    if (!t.ejeDuro && !t.ejeAtascado) {
+      if (pDuro && r.next() < pDuro) t.ejeDuro = true;
+      else if (pCal && r.next() < pCal) t.ejeAtascado = true;
+    } else if (pRep && r.next() < pRep) {
+      t.ejeDuro = false; t.ejeAtascado = false; t.limpiaAlarmas();
+    }
+  }
+};
+
+/* El desajuste de montaje se reparte al construir la planta, no en marcha: un sensor
+   torcido lo está desde que lo atornillaron. Reparto normal centrado en cero — hay
+   tantos torcidos a un lado como al otro, y la mayoría casi rectos. */
+Planta.prototype.repartaDesajustes = function (sigma) {
+  if (!sigma) return;
+  var r = new Rnd(4242);
+  for (var i = 0; i < this.tcus.length; i++) {
+    var g = (r.next() + r.next() + r.next() - 1.5) * 1.63;   /* ~N(0,1) barato */
+    this.tcus[i].sensor.desajuste = g * sigma;
+  }
+};
 
 /* ═══════════════════ ESCRITURA DEL MAPA ═══════════════════
    Hasta aquí el gemelo se mandaba las órdenes por dentro: `limpiaAlarmas()`,

@@ -336,6 +336,27 @@
       </div>
 
       <div class="grp">
+        <h3>Un día malo · averías por tasa</h3>
+        <div class="note" style="margin-top:0">Pulsar averías una a una contesta «¿qué pasa si se cala este eje?». La pregunta de operación es otra: <b>«¿qué aspecto tiene el SCADA en un día malo?»</b>, y eso no se monta a mano porque lo difícil es que pasen a la vez, en equipos distintos y sin avisar. Con semilla fija: dos corridas iguales dan las mismas averías.</div>
+        <label class="sw"><input type="checkbox" id="avOn"><span>Averías por tasa</span></label>
+        <div id="avBox" style="display:none">
+          <div class="fld"><label>Zigbee: horas entre caídas <span class="rv" id="avComsV">40 h</span></label>
+            <input type="range" id="avComs" min="2" max="200" step="2" value="40"></div>
+          <div class="fld"><label>…y cuánto dura <span class="rv" id="avComsMV">15 min</span></label>
+            <input type="range" id="avComsM" min="1" max="120" value="15"></div>
+          <div class="fld"><label>Eje duro: días entre fallos <span class="rv" id="avDuroV">20 d</span></label>
+            <input type="range" id="avDuro2" min="1" max="365" value="20"></div>
+          <div class="fld"><label>Eje calado: días entre fallos <span class="rv" id="avCalV">60 d</span></label>
+            <input type="range" id="avCal" min="1" max="365" value="60"></div>
+          <div class="fld"><label>Reparación: horas hasta que van <span class="rv" id="avRepV">8 h</span></label>
+            <input type="range" id="avRep" min="1" max="72" value="8"></div>
+          <div class="fld"><label>Inclinómetros torcidos (σ) <span class="rv" id="avDesV">0,0°</span></label>
+            <input type="range" id="avDes" min="0" max="30" value="0"></div>
+          <div class="note">El desajuste de montaje no es una avería que aparece: está desde que lo atornillaron, y es lo que hace que la flota no publique todos el mismo ángulo. Se reparte al construir la planta.</div>
+        </div>
+      </div>
+
+      <div class="grp">
         <h3>Averías del TCU seleccionado</h3>
         <div class="note" style="margin-top:0">Actúan sobre <b id="selNota">TCU 1</b>.</div>
         <label class="sw"><input type="checkbox" id="avAtasco"><span>Eje calado (rotor bloqueado)</span></label>
@@ -555,6 +576,12 @@ function construye() {
     perfil: $('perfil').value,
     motorModel: $('motorModel').value === 'factiun' ? 'factiun' : +$('motorModel').value,
     estrategiaViento: $('estrViento').value,
+    averias: {
+      activo: $('avOn').checked,
+      comsMtbfH: +$('avComs').value, comsMin: +$('avComsM').value,
+      duroMtbfD: +$('avDuro2').value, caladoMtbfD: +$('avCal').value,
+      reparaH: +$('avRep').value, desajusteSig: +$('avDes').value / 10
+    },
     politicaDifusa: $('polDifusa').value,
     estrategia: {
       activa: $('estrOn').checked, socCrit: +$('socCrit').value, winter: $('winter').checked,
@@ -1762,6 +1789,29 @@ $('hCsv').onclick = function () {
   a.download = 'traza-tcu' + sel + '.csv'; a.click();
 };
 $('hLimpia').onclick = function () { HIST.limpia(); pintaHistoria(); };
+$('avOn').onchange = function () {
+  $('avBox').style.display = this.checked ? '' : 'none';
+  if (P) { P.cfg.averias.activo = this.checked; toca(); }
+};
+['avComs', 'avComsM', 'avDuro2', 'avCal', 'avRep', 'avDes'].forEach(function (id) {
+  $(id).oninput = function () {
+    $('avComsV').textContent = $('avComs').value + ' h';
+    $('avComsMV').textContent = $('avComsM').value + ' min';
+    $('avDuroV').textContent = $('avDuro2').value + ' d';
+    $('avCalV').textContent = $('avCal').value + ' d';
+    $('avRepV').textContent = $('avRep').value + ' h';
+    $('avDesV').textContent = num(+$('avDes').value / 10, 1) + '°';
+    if (!P) return;
+    var A = P.cfg.averias;
+    A.comsMtbfH = +$('avComs').value; A.comsMin = +$('avComsM').value;
+    A.duroMtbfD = +$('avDuro2').value; A.caladoMtbfD = +$('avCal').value;
+    A.reparaH = +$('avRep').value;
+    /* el desajuste se reparte al construir: cambiarlo en marcha se aplica ya, porque
+       si no habría que rehacer la planta para ver el efecto de mover un mando */
+    if (id === 'avDes') { A.desajusteSig = +$('avDes').value / 10; P.repartaDesajustes(A.desajusteSig); }
+    toca();
+  };
+});
 $('escLista').onchange = function () { cargaEscenario(this.value); };
 $('escPlay').onclick = reproduce;
 $('escNuevo').onclick = function () { ESC = new Escenario({ n: 'el mío' }); ESC._mio = true; $('escLista').value = 'mio'; pintaEscenario(); };

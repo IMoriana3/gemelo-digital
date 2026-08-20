@@ -798,5 +798,37 @@ eo.añade(11, { t: 'meteo', k: 'viento', v: 70 });
 ok(eo.eventos.map(e => e.h).join(',') === '9,11,14',
    'el guion se ordena por hora aunque se grabe a saltos');
 
+/* ───────── averías por tasa ─────────
+   Lo que se le pide a esto no es que rompa cosas: es que las rompa de forma REPETIBLE.
+   Si dos corridas del mismo día malo no dan lo mismo, no se puede comparar nada. */
+function diaMalo() {
+  const P = new SIM.Planta({ nTcu: 200, nHsu: 4, perfil: 'SP_45W_6Ah', hora: 6, dia: 172,
+    lat: 42.82, lon: -1.60, tz: 1,
+    averias: { activo: true, comsMtbfH: 40, comsMin: 15, duroMtbfD: 20,
+               caladoMtbfD: 60, reparaH: 6, desajusteSig: 0.8 } });
+  let maxOff = 0, maxAv = 0;
+  for (let i = 0; i < 16 * 60; i++) {
+    P.paso(60);
+    maxOff = Math.max(maxOff, P.tcus.filter(t => !t.online).length);
+    maxAv = Math.max(maxAv, P.tcus.filter(t => t.ejeDuro || t.ejeAtascado).length);
+  }
+  const r = P.resumen();
+  return { maxOff, maxAv, r, peor: Math.max.apply(null, P.tcus.map(t => Math.abs(t.sensor.desajuste))) };
+}
+const d1 = diaMalo(), d2 = diaMalo();
+ok(d1.maxOff > 0 && d1.maxAv > 0, 'un día malo produce caídas de radio Y ejes averiados',
+   d1.maxOff + ' sin comms · ' + d1.maxAv + ' ejes');
+ok(d1.maxOff === d2.maxOff && d1.maxAv === d2.maxAv && d1.r.alarma === d2.r.alarma,
+   'y dos corridas iguales dan exactamente lo mismo: se puede comparar');
+ok(d1.peor > 1 && d1.peor < 4, 'los inclinómetros salen torcidos, unos más que otros',
+   'el peor a ' + d1.peor.toFixed(2) + '°');
+
+/* apagadas, no pasa nada: no se rompe solo el que no lo pide */
+const Ptr = new SIM.Planta({ nTcu: 50, nHsu: 1, perfil: 'SP_45W_6Ah', hora: 6, dia: 172,
+                             lat: 42.82, lon: -1.60, tz: 1 });
+for (let i = 0; i < 12 * 60; i++) Ptr.paso(60);
+ok(Ptr.tcus.every(t => t.online && !t.ejeDuro && !t.ejeAtascado),
+   'con las averías apagadas la planta no se rompe sola');
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);
