@@ -310,8 +310,15 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `modbus-map.js` | **generado**, no se toca a mano: 515 direcciones del mapa canónico |
 | `fisica.js` | **generado**, no se toca a mano: perfiles, constantes medidas, políticas y curvas de carga |
 | `viento.js` | **compartido con cobertura-zigbee**: la estrategia B2 de abanderamiento, una sola implementación |
+| `cielo.js` · `difusa.js` | descomposición de Erbs y políticas de cielo cubierto (respaldo del navegador cuando no está el motor de SolarGPT) |
+| `canon.js` | cliente del motor local de SolarGPT: trayectoria y balance de batería llamados, no copiados |
+| `historia.js` | la traza de lo que ha pasado: objetivo, real, medido, SoC, viento y los eventos que lo explican |
+| `escenario.js` | situaciones grabables y reproducibles, compartibles por URL |
+| `careo.js` | superpone una captura de la TCU Toolbox a la traza simulada: de «creemos que» a «±X» |
+| `campo3d.js` | el campo en 3D, con la geometría de `seguidor.js` |
+| `servidor.mjs` | publica el motor por HTTP para que `scada/tools/ncu_simulada.py` lo sirva por **Modbus TCP de verdad** |
 | `impacto.mjs` | informe de impacto de las divergencias entre los dos cálculos de batería |
-| `prueba.mjs` | prueba de humo: 129 comprobaciones sobre un día de planta |
+| `prueba.mjs` | prueba de humo: 196 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
 | `../tools/extrae_fisica.mjs` | regenera `fisica.js` desde SolarGPT y `bateria.html`, contrastando las fuentes |
@@ -356,7 +363,14 @@ El contraste que decide es directo: **Wh de motor por día y por TCU**, que es l
 
 ## Lo que hay que saber antes de fiarse
 
-- **No habla Modbus por la red.** Genera la *imagen* de registros que el equipo serviría. Para ejercitar el transporte de verdad (troceado a 110 registros, orden de palabra, direccionamiento) está `scada/tools/ncu_simulada.py`, que es un esclavo Modbus TCP real.
+- **En el navegador no habla Modbus por la red** — ahí no puede haber un esclavo TCP. Genera la *imagen* de registros que el equipo serviría. Para sacarla por el cable está `sim/servidor.mjs`, que corre el mismo motor en Node y lo publica por HTTP, y `scada/tools/ncu_simulada.py --gemelo`, que es un esclavo Modbus TCP real y lo sirve:
+
+  ```bash
+  node sim/servidor.mjs --tcus 200 --puerto 8787
+  python3 tools/ncu_simulada.py --gemelo http://127.0.0.1:8787   # en el repo scada
+  ```
+
+  Con eso el colector y la toolbox reales hablan con la planta simulada, con su jerarquía, su inclinómetro que miente y su seta enclavada. Y **la escritura vuelve por el mismo sitio**: un FC06/FC16 contra esa NCU entra por `P.escribe()`, la misma puerta que usa la interfaz. No hay un camino «de la web» y otro «de Modbus». `python3 tools/ncu_simulada.py --gemelo … --autotest` recorre el camino entero y lo comprueba.
 - **Dos registros llevan codificación inventada.** 30113 (criterio del ángulo objetivo) y 30114 (fuente de la posición segura) los nombra el documento pero no transcribe su enumerado; lo mismo con los valores del campo *TCU type* de 30000. Lo que sale ahí es del simulador, y el visor lo pinta en violeta para que no se confunda con lo documentado.
 - **Las filas atenuadas del visor no están simuladas.** Se listan igual para que el mapa esté entero: es preferible un hueco visible a un cero que parece un dato.
 - **No es un modelo bancable de producción.** Es un banco de pruebas de control y de lectura de mapas, no un PVsyst.
