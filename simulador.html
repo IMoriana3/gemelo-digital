@@ -53,6 +53,9 @@
   .escfila select{flex:1;min-width:260px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}
   .escfila input{background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;font-family:var(--mono)}
   .eco-ok{color:var(--ok)} .eco-no{color:var(--danger)}
+  .fijados{border-color:var(--accent)}
+  .pin{cursor:pointer;opacity:.28;font-size:10px;margin-right:5px;user-select:none}
+  .pin:hover{opacity:.8} .pin.on{opacity:1}
   .flotaAgr{display:flex;flex-direction:column;gap:6px}
   .flotaAgr .flota{margin:2px 0 8px}
   .grupoF{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--line2);
@@ -756,6 +759,47 @@ function ve(que) {
 function toca() { if (P) { P.paso(0.001); HIST.paso(P, sel); } pintaTodo(); }
 
 
+
+/* ═══════════════════ registros clavados ═══════════════════
+   El visor ya filtra, pero filtrar es excluyente: en cuanto quieres vigilar cuatro
+   registros de secciones distintas mientras trasteas, el filtro no sirve. Clavarlos
+   los saca arriba y los deja ahí, con su valor en vivo, sin tocar el filtro.
+   Se guardan en el navegador, porque los que uno vigila son casi siempre los mismos. */
+var LLAVE_PIN = 'gemelo.sim.fijados';
+var FIJADOS = (function () {
+  try { return JSON.parse(localStorage.getItem(LLAVE_PIN) || '[]'); } catch (e) { return []; }
+})();
+function guardaFijados() { try { localStorage.setItem(LLAVE_PIN, JSON.stringify(FIJADOS)); } catch (e) {} }
+function fijado(dev, dir) { return FIJADOS.indexOf(dev + ':' + dir) >= 0; }
+
+var IMG_PIN = null;
+function pintaFijados(dev) {
+  var mios = FIJADOS.filter(function (k) { return k.indexOf(dev + ':') === 0; });
+  if (!mios.length) return '';
+  var filas = '';
+  mios.forEach(function (k) {
+    var dir = +k.split(':')[1], r = buscaDef(dev, dir);
+    if (!r) return;
+    var d = decodifica(r, dir, IMG_PIN, dev === 'ncu');
+    filas += '<tr><td class="dir"><span class="pin on" data-pin="' + k + '" title="Soltar">📌</span>' + dir + '</td>' +
+      '<td class="nom">' + (r ? r[1] : '—') + '</td>' +
+      '<td class="cru">' + (d ? d.crudo.map(function (x) { return '0x' + x.toString(16).toUpperCase().padStart(4, '0'); }).join(' ') : '—') + '</td>' +
+      '<td class="val">' + (d && r ? legible(d, r, dev, dir) : '—') + '</td></tr>';
+  });
+  return '<div class="card secmb fijados"><h3>Clavados<span class="rw">' + mios.length + '</span></h3>' +
+    '<table class="mb"><thead><tr><th>Dirección</th><th>Registro</th><th>Crudo</th><th>Valor</th></tr></thead>' +
+    '<tbody>' + filas + '</tbody></table></div>';
+}
+/* busca la definición de un registro en el mapa, mire uno la sección que mire */
+function buscaDef(dev, dir) {
+  var M = MODBUS_MAP[dev]; if (!M) return null;
+  for (var i = 0; i < M.secs.length; i++) {
+    var f = M.secs[i].f;
+    for (var j = 0; j < f.length; j++) if (f[j][0] === dir) return f[j];
+  }
+  return null;
+}
+
 /* ═══════════════════ escenarios ═══════════════════
    Grabar es interceptar: cada acción del operador —meteo, escritura, avería— se
    apunta con la hora SIMULADA en la que ocurrió, no con la del reloj de pared.
@@ -1376,7 +1420,8 @@ function pintaModbus() {
         valor = '<span class="aprox">' + (dir === 30113 ? SIM.CRIT_TXT[d.val] : SIM.FUENTE_TXT[d.val]) + '</span>';
       }
       filas += '<tr class="' + (d ? '' : 'nosim') + (cambia ? ' cambia' : '') + '">' +
-        '<td class="dir">' + dir + '</td>' +
+        '<td class="dir"><span class="pin' + (fijado(dev, dir) ? ' on' : '') +
+          '" data-pin="' + dev + ':' + dir + '" title="Clavar arriba">📌</span>' + dir + '</td>' +
         '<td class="nom" title="' + (r[7] || '').replace(/"/g, '') + '">' + r[1] + '</td>' +
         '<td class="tip">' + r[2] + '</td>' +
         '<td class="cru">' + (d ? d.crudo.map(function (x) { return '0x' + x.toString(16).toUpperCase().padStart(4, '0'); }).join(' ') : '—') + '</td>' +
@@ -1391,7 +1436,17 @@ function pintaModbus() {
       '<table class="mb"><thead><tr><th>Dirección</th><th>Registro</th><th>Tipo</th><th>Crudo</th><th>Valor</th><th>Bits</th></tr></thead>' +
       '<tbody>' + filas + '</tbody></table></div>';
   }
-  $('mbCuerpo').innerHTML = html || '<div class="card" style="text-align:center;color:var(--tx3)">Nada casa con el filtro.</div>';
+  IMG_PIN = img;
+  $('mbCuerpo').innerHTML = pintaFijados(dev) + (html || '<div class="card" style="text-align:center;color:var(--tx3)">Nada casa con el filtro.</div>');
+  Array.prototype.forEach.call($('mbCuerpo').querySelectorAll('.pin'), function (el) {
+    el.onclick = function (e) {
+      e.stopPropagation();
+      var k = el.getAttribute('data-pin');
+      var i = FIJADOS.indexOf(k);
+      if (i >= 0) FIJADOS.splice(i, 1); else FIJADOS.push(k);
+      guardaFijados(); previos = {}; pintaModbus();
+    };
+  });
   $('mbCuenta').textContent = sim + ' simulados de ' + total + ' del documento';
 }
 function exportaCsv() {
