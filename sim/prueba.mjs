@@ -741,5 +741,62 @@ Pw.tcu(1).alarmaMotorEnclavada = true;
 Pw.escribe('tcu', 1, 40007, [1 << 13]);
 ok(!Pw.tcu(1).alarmaMotorEnclavada, '40007 bit 13 limpia las alarmas enclavadas');
 
+/* ───────── escenarios ─────────
+   Una situación escrita una vez tiene que dar lo mismo cada vez que se corre. Si no,
+   no sirve ni para reproducir un incidente ni como prueba de regresión. */
+const Escenario = (await import('./escenario.js')).default;
+
+function corre(esc, horas) {
+  const P = new SIM.Planta({ nTCU: 4, nHSU: 1, perfil: 'SP_45W_6Ah',
+                             hora: esc.hora, dia: esc.dia, lat: 42.82, lon: -1.60, tz: 1 });
+  esc.rebobina();
+  const disparos = [];
+  for (let i = 0; i < horas * 60; i++) {
+    P.paso(60);
+    esc.paso(P, P.t.hora).forEach(x => disparos.push(x));
+  }
+  return { P: P, disparos: disparos };
+}
+
+const eTemporal = new Escenario(Escenario.EJEMPLOS[1]);
+const r1 = corre(eTemporal, 9);
+ok(r1.disparos.length === 4 && r1.disparos.every(d => d.r.ok),
+   'el escenario del temporal dispara sus cuatro eventos y todos se aplican');
+
+/* ídem, otra vez: mismo resultado. Es lo que lo hace una prueba y no una anécdota */
+const r2 = corre(new Escenario(Escenario.EJEMPLOS[1]), 9);
+ok(Math.abs(r1.P.tcu(1).anguloReal - r2.P.tcu(1).anguloReal) < 1e-9,
+   'y correrlo dos veces da exactamente lo mismo',
+   r1.P.tcu(1).anguloReal.toFixed(4) + '°');
+
+/* el de la seta: el motor se corta en toda la planta y soltarla NO rearma */
+const eSeta = new Escenario(Escenario.EJEMPLOS[2]);
+const P3 = new SIM.Planta({ nTCU: 4, nHSU: 1, perfil: 'SP_45W_6Ah',
+                            hora: eSeta.hora, dia: eSeta.dia, lat: 42.82, lon: -1.60, tz: 1 });
+eSeta.rebobina();
+let conSeta = 0, trasSoltar = null;
+for (let i = 0; i < 5 * 60; i++) {
+  P3.paso(60); eSeta.paso(P3, P3.t.hora);
+  if (P3.tcu(1).seta) conSeta++;
+  if (P3.t.hora > 12.6 && P3.t.hora < 12.9 && trasSoltar === null) trasSoltar = P3.tcu(1).alarmaMotorEnclavada;
+}
+ok(conSeta > 60, 'el escenario de la seta la mantiene pulsada hora y media', conSeta + ' min');
+ok(trasSoltar === true, 'y al soltarla la alarma sigue ENCLAVADA, como el equipo real');
+
+/* ida y vuelta por URL: el enlace ES el escenario */
+const u = eTemporal.aURL('http://x/simulador.html');
+const vuelto = Escenario.deURL(u);
+ok(vuelto && vuelto.eventos.length === eTemporal.eventos.length && vuelto.n === eTemporal.n,
+   'un escenario va y vuelve por la URL sin perder nada', u.length + ' caracteres');
+ok(u.indexOf('#esc=') > 0, 'y viaja en el hash, así que no hace falta servidor');
+
+/* los eventos se ordenan por hora, se graben en el orden que se graben */
+const eo = new Escenario({ n: 'orden' });
+eo.añade(14, { t: 'meteo', k: 'viento', v: 10 });
+eo.añade(9, { t: 'meteo', k: 'viento', v: 40 });
+eo.añade(11, { t: 'meteo', k: 'viento', v: 70 });
+ok(eo.eventos.map(e => e.h).join(',') === '9,11,14',
+   'el guion se ordena por hora aunque se grabe a saltos');
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);

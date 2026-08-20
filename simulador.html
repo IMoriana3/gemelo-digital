@@ -349,9 +349,32 @@
     <section class="content">
       <div class="tabs">
         <button class="tab on" data-v="planta">Planta</button>
+        <button class="tab" data-v="esc">Escenarios</button>
         <button class="tab" data-v="campo">Campo 3D</button>
         <button class="tab" data-v="modbus">Mapa Modbus en vivo</button>
         <button class="tab" data-v="tcu">Detalle del equipo</button>
+      </div>
+
+      <!-- ═══ vista ESCENARIOS ═══ -->
+      <div id="vesc" style="display:none">
+        <div class="card">
+          <h2>Escenarios <span class="badge" id="escEstado">—</span></h2>
+          <div class="sub">Una situación escrita una vez: se graba mientras trasteas, se reproduce igual y se comparte por enlace. Los ensayos del Anexo 4 dejan de ser un PDF y pasan a ser algo que se ejecuta.</div>
+          <div class="escfila">
+            <select id="escLista"></select>
+            <button class="btn" id="escPlay" style="width:auto;padding:7px 16px">▶ Reproducir</button>
+            <button class="btn sec" id="escRec" style="width:auto;padding:7px 14px">⏺ Grabar</button>
+            <button class="btn sec" id="escLink" style="width:auto;padding:7px 14px">🔗 Enlace</button>
+            <button class="btn sec" id="escNuevo" style="width:auto;padding:7px 14px">Vaciar</button>
+          </div>
+          <div class="note" id="escDesc"></div>
+          <div class="note" id="escLinkOut"></div>
+        </div>
+        <div class="card">
+          <h2>Guion <span class="badge" id="escN">0 eventos</span></h2>
+          <div class="sub">En orden de hora. Mientras grabas, todo lo que toques —meteo, escrituras, averías— entra aquí con la hora simulada en la que lo hiciste.</div>
+          <div id="escGuion" class="kv"></div>
+        </div>
       </div>
 
       <!-- ═══ vista CAMPO 3D ═══ -->
@@ -469,6 +492,7 @@
 <script src="seguidor.js?v=13"></script><!-- FUENTE ÚNICA del modelo del seguidor -->
 <script src="sim/campo3d.js"></script>
 <script src="sim/historia.js"></script>
+<script src="sim/escenario.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/planta.js"></script>
 <script>
@@ -720,6 +744,68 @@ function ve(que) {
    visible hasta darle a Simular. */
 function toca() { if (P) { P.paso(0.001); HIST.paso(P, sel); } pintaTodo(); }
 
+
+/* ═══════════════════ escenarios ═══════════════════
+   Grabar es interceptar: cada acción del operador —meteo, escritura, avería— se
+   apunta con la hora SIMULADA en la que ocurrió, no con la del reloj de pared.
+   Reproducir es lo contrario: la simulación avanza y el escenario va soltando lo
+   que le toca. Por eso un escenario grabado a ×600 se reproduce igual a ×1. */
+var ESC = null, GRABANDO = false;
+
+function pintaEscenario() {
+  if (!$('escLista')) return;
+  var sel0 = $('escLista').value;
+  if (!$('escLista').dataset.hecho) {
+    Escenario.EJEMPLOS.forEach(function (e, i) { $('escLista').add(new Option(e.n, String(i))); });
+    $('escLista').add(new Option('— el mío —', 'mio'));
+    $('escLista').dataset.hecho = '1';
+    if (sel0) $('escLista').value = sel0;
+  }
+  $('escEstado').textContent = GRABANDO ? 'grabando' : (ESC && ESC.i < ESC.eventos.length ? 'reproduciendo' : 'parado');
+  $('escEstado').style.color = GRABANDO ? 'var(--danger)' : (ESC && ESC.i < ESC.eventos.length ? 'var(--ok)' : 'var(--tx3)');
+  var evs = ESC ? ESC.eventos : [];
+  $('escN').textContent = evs.length + (evs.length === 1 ? ' evento' : ' eventos');
+  $('escDesc').textContent = (ESC && ESC.desc) || '';
+  $('escGuion').innerHTML = evs.length
+    ? evs.map(function (e, i) {
+        var hecho = ESC && i < ESC.i;
+        return '<div><span>' + (hecho ? '✓ ' : '· ') + Escenario.textoDe(e) + '</span><b>' +
+               (hecho ? 'hecho' : 'pendiente') + '</b></div>';
+      }).join('')
+    : '<div><span>Vacío. Elige uno de la lista o dale a ⏺ Grabar y trastea.</span><b>—</b></div>';
+}
+
+/* lo que se apunta cuando estás grabando */
+function graba(ev) {
+  if (!GRABANDO || !ESC || !P) return;
+  ESC.añade(P.t.hora, ev);
+  ESC.i = ESC.eventos.length;          /* lo grabado ya está hecho: no se re-dispara */
+  pintaEscenario();
+}
+
+function cargaEscenario(clave) {
+  if (clave === 'mio') { ESC = ESC && ESC._mio ? ESC : new Escenario({ n: 'el mío' }); ESC._mio = true; }
+  else ESC = new Escenario(Escenario.EJEMPLOS[+clave] || {});
+  ESC.rebobina();
+  pintaEscenario();
+}
+
+function reproduce() {
+  if (!ESC) return;
+  GRABANDO = false;
+  ESC.rebobina();
+  /* se arranca donde dice el escenario: si no, los eventos de las 10:00 ya han
+     pasado y no se dispara ninguno */
+  if (ESC.loc != null) { $('loc').value = String(ESC.loc); }
+  if (ESC.dia != null) $('dia').value = ESC.dia;
+  if (ESC.hora != null) $('hora').value = ESC.hora;
+  construye();
+  if (CAMPO) CAMPO.construye(P);
+  HIST.limpia();
+  corriendo = true; $('btnPlay').textContent = '⏸ Pausa';
+  pintaEscenario();
+}
+
 /* ═══════════════════ traza ═══════════════════ */
 var HIST = new Historia({ cadaS: 60 });
 function pintaHistoria() {
@@ -778,6 +864,7 @@ function haceEscritura() {
   } else vals = [Math.round(v) & 0xFFFF];
   var id = (dev === 'ncu') ? 0 : (+$('mbUnidad').value || 1);
   var r = P.escribe(dev, id, d, vals);
+  if (r.ok) graba({ t: 'w', dev: dev, id: id, dir: d, vals: vals });
   eco(r.ok, r.ok ? ('Aplicado: ' + r.aplicados.join(' · ')) : ('Rechazado: ' + r.avisos.join(' · ')));
   previos = {};
   toca();
@@ -909,7 +996,17 @@ function bucle(ahora) {
   tPrev = ahora;
   if (corriendo && P) {
     var dtSim = dtReal * (+$('vel').value || 1), resto = dtSim;
-    while (resto > 0) { var p = Math.min(60, resto); P.paso(p); HIST.paso(P, sel); resto -= p; }
+    while (resto > 0) {
+      var p = Math.min(60, resto); P.paso(p); HIST.paso(P, sel);
+      if (ESC && !GRABANDO) {
+        var hechos = ESC.paso(P, P.t.hora);
+        for (var q = 0; q < hechos.length; q++) {
+          HIST.evento(P.t.epoch, 'escenario: ' + Escenario.textoDe(hechos[q].ev).replace(/^\S+ · /, ''), 'esc', P.t.hora);
+        }
+        if (hechos.length) { sincronizaAverias(); pintaEscenario(); }
+      }
+      resto -= p;
+    }
     $('dia').value = P.t.dia; $('hora').value = P.t.hora;
     etiquetaTiempo();
     apunta();
@@ -934,6 +1031,7 @@ function pintaTodo() {
   if (vista === 'planta') { pintaChips(); pintaFlota(); pintaNcu(); pintaHsu(); }
   else if (vista === 'campo') { if (CAMPO) { CAMPO.redimensiona(); CAMPO.paso(P); CAMPO.selecciona(indiceDe(sel)); } }
   else if (vista === 'modbus') pintaModbus();
+  else if (vista === 'esc') pintaEscenario();
   else { pintaDetalle(); pintaHistoria(); }
 }
 function cabecera() {
@@ -1443,9 +1541,15 @@ $('btnRehacer').onclick = function () { construye(); if (CAMPO) CAMPO.construye(
 });
 $('vel').oninput = etiquetaTiempo;
 $('nGrup').oninput = function () { $('nGrupV').textContent = this.value; };
+var METEO_EV = { viento: ['viento', 3.6], racha: ['rachas', 1], dirViento: ['dir', 1],
+                 nubes: ['nubes', 1], nieve: ['nieve', 1], temp: ['temp', 1] };
 ['viento', 'racha', 'dirViento', 'nubes', 'nieve', 'temp'].forEach(function (id) {
   $(id).oninput = function () {
     aplicaMeteo();
+    /* si se está grabando, el mando queda apuntado con la hora simulada en la que se
+       tocó: eso es lo que hace que un escenario grabado a ×600 se reproduzca a ×1 */
+    var me = METEO_EV[id];
+    if (me) graba({ t: 'meteo', k: me[0], v: +(+this.value * me[1]).toFixed(2) });
     $('vientoV').textContent = num(+$('viento').value, 1) + ' m/s · ' + num(+$('viento').value * 3.6, 0) + ' km/h';
     $('rachaV').textContent = $('racha').value + ' %';
     var d = +$('dirViento').value;
@@ -1470,11 +1574,15 @@ function sincronizaAverias() {
   $('socSet').value = Math.round(t.soc); $('socV').textContent = num(t.soc, 0) + ' %';
   $('manSet').value = Math.round(t.manual); $('manV').textContent = num(t.manual, 0) + '°';
 }
-$('avAtasco').onchange = function () { tcuSel().ejeAtascado = this.checked; toca(); };
-$('avDuro').onchange = function () { tcuSel().ejeDuro = this.checked; toca(); };
-$('avCable').onchange = function () { tcuSel().cableSetaCortado = this.checked; toca(); };
+$('avAtasco').onchange = function () { tcuSel().ejeAtascado = this.checked; graba({ t: 'av', k: 'atasco', id: sel, on: this.checked }); toca(); };
+$('avDuro').onchange = function () { tcuSel().ejeDuro = this.checked; graba({ t: 'av', k: 'duro', id: sel, on: this.checked }); toca(); };
+$('avCable').onchange = function () { tcuSel().cableSetaCortado = this.checked; graba({ t: 'av', k: 'cable', id: sel, on: this.checked }); toca(); };
 $('avAccel').onchange = function () { tcuSel().sensor.ok = !this.checked; toca(); };
-$('btnLimpiar').onclick = function () { P.tcus.forEach(function (t) { t.limpiaAlarmas(); }); toca(); };
+$('btnLimpiar').onclick = function () {
+  P.tcus.forEach(function (t) { t.limpiaAlarmas(); });
+  graba({ t: 'w', dev: 'tcu', id: sel, dir: 40007, vals: [8192] });
+  toca();
+};
 ['desaj', 'offset', 'ruido'].forEach(function (id) {
   $(id).oninput = function () {
     var s = tcuSel().sensor;
@@ -1486,8 +1594,8 @@ $('btnLimpiar').onclick = function () { P.tcus.forEach(function (t) { t.limpiaAl
     toca();
   };
 });
-$('avOff').onchange = function () { tcuSel().online = !this.checked; toca(); };
-$('avSeta').onchange = function () { tcuSel().setaLocal = this.checked; toca(); };
+$('avOff').onchange = function () { tcuSel().online = !this.checked; graba({ t: 'av', k: 'off', id: sel, on: this.checked }); toca(); };
+$('avSeta').onchange = function () { tcuSel().setaLocal = this.checked; graba({ t: 'av', k: 'seta', id: sel, on: this.checked }); toca(); };
 $('socSet').oninput = function () { tcuSel().soc = +this.value; $('socV').textContent = this.value + ' %'; toca(); };
 $('manSet').oninput = function () {
   var t = tcuSel(); t.manual = +this.value; t.modo = SIM.MODO.MANUAL;
@@ -1501,6 +1609,7 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
     vista = b.getAttribute('data-v');
     $('vplanta').style.display = vista === 'planta' ? '' : 'none';
     $('vcampo').style.display = vista === 'campo' ? '' : 'none';
+    $('vesc').style.display = vista === 'esc' ? '' : 'none';
     if (vista === 'campo') montaCampo();
     $('vmodbus').style.display = vista === 'modbus' ? '' : 'none';
     $('vtcu').style.display = vista === 'tcu' ? '' : 'none';
@@ -1521,6 +1630,24 @@ $('hCsv').onclick = function () {
   a.download = 'traza-tcu' + sel + '.csv'; a.click();
 };
 $('hLimpia').onclick = function () { HIST.limpia(); pintaHistoria(); };
+$('escLista').onchange = function () { cargaEscenario(this.value); };
+$('escPlay').onclick = reproduce;
+$('escNuevo').onclick = function () { ESC = new Escenario({ n: 'el mío' }); ESC._mio = true; $('escLista').value = 'mio'; pintaEscenario(); };
+$('escRec').onclick = function () {
+  if (!ESC || !ESC._mio) { ESC = new Escenario({ n: 'el mío' }); ESC._mio = true; $('escLista').value = 'mio'; }
+  GRABANDO = !GRABANDO;
+  if (GRABANDO) { ESC.loc = +$('loc').value; ESC.dia = +$('dia').value; ESC.hora = +$('hora').value; }
+  this.textContent = GRABANDO ? '⏹ Parar' : '⏺ Grabar';
+  pintaEscenario();
+};
+$('escLink').onclick = function () {
+  if (!ESC) return;
+  var u = ESC.aURL(location.href);
+  $('escLinkOut').innerHTML = '<input type="text" readonly value="' + u.replace(/"/g, '&quot;') +
+    '" style="width:100%;font-family:var(--mono);font-size:11px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:6px;padding:6px">';
+  var i = $('escLinkOut').querySelector('input'); i.select();
+  try { navigator.clipboard.writeText(u); } catch (e) {}
+};
 $('mbUnidad').onchange = function () {
   var v = +this.value;
   if ($('mbDev').value !== 'hsu') { sel = v; sincronizaAverias(); }
@@ -1557,6 +1684,11 @@ construye();
 aplicaEstrategia();
 aplicaPoliticaDifusa();
 pintaEscritura();
+(function () {
+  var dU = Escenario.deURL(location.href);
+  if (dU) { ESC = dU; $('escLista').dataset.hecho = ''; pintaEscenario(); $('escLista').value = 'mio'; ESC._mio = true; reproduce(); }
+  else cargaEscenario('0');
+})();
 conectaCanon();          /* si el motor está, manda él; si no, se dice */
 sincronizaAverias();
 etiquetaTiempo();
