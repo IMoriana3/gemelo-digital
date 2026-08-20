@@ -98,12 +98,12 @@
      hasta la otra. `parts()` describe UNA viga, así que este eje no cabe ahí: va ENTRE
      las dos, y lo coloca la app, igual que el cable motor↔TCU y los amortiguadores.
 
-     Las cotas NO se inventan aquí: son las que ya usa `overcast.html`, que lo dibuja
-     desde antes — Ø 60 mm, a 22 cm por debajo del eje del tubo, y de punta a punta
-     dejando 25 cm a cada lado para los cardanes. Subirlas al modelo es lo que evita que
-     cada página tenga su propio eje: en el propio overcast conviven hoy un Ø 60 en la
-     vista instanciada y un Ø 100 en la de detalle. */
-  D.ejeTransD = 0.06;        // Ø 60 mm (overcast.html, vista instanciada)
+     Las medidas NO se inventan aquí: salen de `overcast.html`, que lo dibuja desde
+     antes, y están CONFIRMADAS (Ignacio, ago-2026). Ojo con eso, porque dentro del
+     propio overcast conviven dos ejes distintos: Ø 60 en la vista instanciada y Ø 100
+     en la de detalle. El bueno es el Ø 60 — que esté aquí es lo que evita que la
+     próxima página elija el otro. */
+  D.ejeTransD = 0.06;        // Ø 60 mm — confirmado
   D.ejeTransY = -0.22;       // por debajo del eje del tubo
   D.cardanD = 0.18;          // acoplamientos de los extremos (Ø 180 mm)
   D.cardanL = 0.30;
