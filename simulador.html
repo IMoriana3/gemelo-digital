@@ -53,6 +53,17 @@
   .escfila select{flex:1;min-width:260px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}
   .escfila input{background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;font-family:var(--mono)}
   .eco-ok{color:var(--ok)} .eco-no{color:var(--danger)}
+  .flotaAgr{display:flex;flex-direction:column;gap:6px}
+  .flotaAgr .flota{margin:2px 0 8px}
+  .grupoF{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--line2);
+          border-radius:9px;background:var(--card2);cursor:pointer;font-size:13.5px;color:var(--tx2)}
+  .grupoF:hover{border-color:var(--tx3)}
+  .grupoF b{color:var(--tx);font-family:var(--mono);font-size:15px;min-width:2.2em;text-align:right}
+  .grupoF i{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--tx3)}
+  .grupoF .pip{width:9px;height:9px;border-radius:3px;background:var(--ok);flex:0 0 auto}
+  .grupoF.aviso .pip{background:var(--warn)} .grupoF.alarma .pip{background:var(--danger)}
+  .grupoF.offline .pip{background:var(--tx3)}
+  .grupoF.abierto{border-color:var(--accent)}
   .sent{color:var(--tx3);font-size:10.5px;font-family:var(--sans);margin-left:6px}
   .pgrp{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--tx3);margin:10px 0 5px;padding-top:7px;border-top:1px solid var(--line)}
   .pgrp:first-child{margin-top:2px;padding-top:0;border-top:0}
@@ -1071,17 +1082,83 @@ function pintaChips() {
     chip('Seta', n.seta ? 'PULSADA' : 'libre', n.seta ? 'bad' : 'ok', '30100.13') +
     chip('Sol', P.tcus[0].solar.dia ? num(90 - P.tcus[0].solar.zen, 0) + '° elev.' : 'noche', P.tcus[0].solar.dia ? 'warn' : '', 'azimut ' + num(P.tcus[0].solar.az, 0) + '°');
 }
+/* ── flota ──
+   Un recuadro por equipo se lee con 25. Con los 2.289 de San José es un muro donde
+   no se distingue nada: la única forma de ver una planta grande es AGREGAR y abrir
+   solo lo interesante. Por encima del umbral se pinta un resumen por estado, y los
+   equipos se listan solo si su grupo está desplegado o si no están en verde —que es
+   justo lo que uno va a mirar. */
+var FLOTA_UMBRAL = 60, flotaAbierto = {}, flotaTodo = false;
+
+function claveEstado(t) {
+  var s = t.salud();
+  if (s !== 'ok') return s;                              /* offline · alarma · aviso */
+  if (t.repetidor) return 'repetidor';
+  if (t.sp) return 'sp' + t.sp;
+  if (t.parked) return 'defensa';
+  if (t.modo === SIM.MODO.MANUAL) return 'manual';
+  if (t.modo === SIM.MODO.OFF) return 'off';
+  return t.bt ? 'backtracking' : 'seguimiento';
+}
+var ESTADO_ETI = {
+  offline: ['sin comunicación', 'offline'], alarma: ['en alarma', 'alarma'],
+  aviso: ['con aviso', 'aviso'], repetidor: ['repetidores', 'ok'],
+  defensa: ['en defensa por batería', 'aviso'], manual: ['en manual', 'ok'],
+  off: ['parados (OFF)', 'aviso'], backtracking: ['en backtracking', 'ok'],
+  seguimiento: ['siguiendo al sol', 'ok'],
+  sp1: ['abanderados (SP1 viento)', 'aviso'], sp2: ['en SP2', 'aviso'],
+  sp3: ['en SP3 nieve', 'aviso'], sp4: ['en SP4 limpieza', 'ok'],
+  sp5: ['en SP5', 'aviso'], sp6: ['en SP6', 'aviso'], sp7: ['en SP7', 'aviso']
+};
+
+function tarjeta(t) {
+  var s = t.salud();
+  return '<div class="mesa ' + s + (t.id === sel ? ' sel' : '') + '" data-id="' + t.id + '">' +
+    '<div class="id">' + (t.repetidor ? 'R' : '#') + t.id + '<span class="pip"></span></div>' +
+    '<div class="g">G' + t.grupo + ' · ' + t.modoTxt() + ' · ' + num(t.soc, 0) + '%</div>' +
+    '<div class="ang"><em></em><i style="transform:rotate(' + (-t.anguloReal).toFixed(1) + 'deg)"></i></div>' +
+    '<div class="st">' + t.estadoTxt() + '</div></div>';
+}
+
 function pintaFlota() {
-  var h = '', T = P.tcus;
-  for (var i = 0; i < T.length; i++) {
-    var t = T[i], s = t.salud();
-    h += '<div class="mesa ' + s + (t.id === sel ? ' sel' : '') + '" data-id="' + t.id + '">' +
-      '<div class="id">' + (t.repetidor ? 'R' : '#') + t.id + '<span class="pip"></span></div>' +
-      '<div class="g">G' + t.grupo + ' · ' + t.modoTxt() + ' · ' + num(t.soc, 0) + '%</div>' +
-      '<div class="ang"><em></em><i style="transform:rotate(' + (-t.anguloReal).toFixed(1) + 'deg)"></i></div>' +
-      '<div class="st">' + t.estadoTxt() + '</div></div>';
+  var T = P.tcus;
+  if (T.length <= FLOTA_UMBRAL || flotaTodo) {
+    $('flota').innerHTML = T.map(tarjeta).join('');
+    $('subFlota').innerHTML = 'Un recuadro por equipo. La barra es su inclinación real; el color, su salud (el mismo criterio del SCADA).' +
+      (T.length > FLOTA_UMBRAL ? ' <a href="#" id="flotaMenos">Agrupar por estado</a>' : '');
+    var fm = $('flotaMenos'); if (fm) fm.onclick = function (e) { e.preventDefault(); flotaTodo = false; pintaFlota(); };
+    return;
   }
+  /* agrupado */
+  var por = {}, orden = [];
+  for (var i = 0; i < T.length; i++) {
+    var k = claveEstado(T[i]);
+    if (!por[k]) { por[k] = []; orden.push(k); }
+    por[k].push(T[i]);
+  }
+  /* primero lo que pide atención: lo que no está en verde va arriba */
+  var peso = { offline: 0, alarma: 1, aviso: 2, defensa: 3, off: 4 };
+  orden.sort(function (a, b) {
+    var pa = peso[a] != null ? peso[a] : 9, pb = peso[b] != null ? peso[b] : 9;
+    return pa !== pb ? pa - pb : por[b].length - por[a].length;
+  });
+  var h = '';
+  orden.forEach(function (k) {
+    var g = por[k], eti = ESTADO_ETI[k] || [k, 'ok'], abierto = !!flotaAbierto[k];
+    var raro = eti[1] !== 'ok';
+    h += '<div class="grupoF ' + eti[1] + (abierto ? ' abierto' : '') + '" data-k="' + k + '">' +
+      '<span class="pip"></span><b>' + g.length + '</b> ' + eti[0] +
+      '<i>' + (abierto ? 'ocultar' : (raro ? 'ver cuáles' : 'ver')) + '</i></div>';
+    if (abierto || (raro && g.length <= 12)) h += '<div class="flota">' + g.map(tarjeta).join('') + '</div>';
+  });
   $('flota').innerHTML = h;
+  $('flota').className = 'flotaAgr';
+  $('subFlota').innerHTML = '<b>' + T.length + ' equipos</b>, agrupados por estado — con esta cantidad un recuadro por equipo no se lee. ' +
+    'Lo que no está en verde se despliega solo. <a href="#" id="flotaTodos">Ver todos igualmente</a>';
+  $('flotaTodos').onclick = function (e) { e.preventDefault(); flotaTodo = true; $('flota').className = 'flota'; pintaFlota(); };
+  Array.prototype.forEach.call($('flota').querySelectorAll('.grupoF'), function (el) {
+    el.onclick = function () { var k = el.getAttribute('data-k'); flotaAbierto[k] = !flotaAbierto[k]; pintaFlota(); };
+  });
 }
 $('flota').addEventListener('click', function (e) {
   var m = e.target.closest ? e.target.closest('.mesa') : null;
