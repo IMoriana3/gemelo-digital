@@ -344,8 +344,19 @@
     <section class="content">
       <div class="tabs">
         <button class="tab on" data-v="planta">Planta</button>
+        <button class="tab" data-v="campo">Campo 3D</button>
         <button class="tab" data-v="modbus">Mapa Modbus en vivo</button>
         <button class="tab" data-v="tcu">Detalle del equipo</button>
+      </div>
+
+      <!-- ═══ vista CAMPO 3D ═══ -->
+      <div id="vcampo" style="display:none">
+        <div class="card" style="padding:0;overflow:hidden">
+          <div id="campo3d" style="width:100%;height:min(72vh,760px);position:relative;background:#0b1119"></div>
+        </div>
+        <div class="card">
+          <div class="sub" style="margin:0">Cada seguidor gira a su <b>inclinación REAL</b>, no a la que publica. Si el inclinómetro va descalibrado, aquí se ve la mesa torcida mientras el mapa Modbus dice que está clavada en su objetivo. El testigo de encima es la salud, con el criterio del SCADA: <b style="color:var(--ok)">verde</b> · <b style="color:var(--warn)">ámbar</b> · <b style="color:var(--danger)">rojo</b> · <b style="color:var(--tx3)">gris sin comunicación</b>. Clic en un seguidor para seleccionarlo · arrastrar gira · botón derecho desplaza · rueda acerca.</div>
+        </div>
       </div>
 
       <!-- ═══ vista PLANTA ═══ -->
@@ -426,6 +437,9 @@
 <script src="sim/cielo.js"></script>
 <script src="sim/difusa.js"></script>
 <script src="sim/canon.js"></script>
+<script src="lib/three.min.js"></script><!-- LOCAL, sin CDN: el simulador sigue abriendo sin red -->
+<script src="seguidor.js?v=13"></script><!-- FUENTE ÚNICA del modelo del seguidor -->
+<script src="sim/campo3d.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/planta.js"></script>
 <script>
@@ -677,6 +691,37 @@ function ve(que) {
    visible hasta darle a Simular. */
 function toca() { if (P) P.paso(0.001); pintaTodo(); }
 
+/* ═══════════════════ campo 3D ═══════════════════
+   La geometría sale de seguidor.js —la fuente única del modelo, compartida con el
+   gemelo 3D y Cobertura 3D— y el movimiento, de la propia simulación. Se monta la
+   primera vez que se abre la pestaña: quien no la use no paga el WebGL. */
+var CAMPO = null;
+function indiceDe(id) {
+  if (!P) return null;
+  for (var i = 0; i < P.tcus.length; i++) if (P.tcus[i].id === id) return i;
+  return null;
+}
+function montaCampo() {
+  if (CAMPO || !P) { if (CAMPO) { CAMPO.redimensiona(); CAMPO.paso(P); CAMPO.selecciona(indiceDe(sel)); } return; }
+  try {
+    CAMPO = new Campo3D($('campo3d'), {
+      alSeleccionar: function (i) {
+        var t = P.tcus[i]; if (!t) return;
+        sel = t.id; sincronizaAverias();
+        $('mbUnidad').value = String(sel);
+        pintaTodo();
+      }
+    });
+    CAMPO.construye(P);
+    CAMPO.paso(P);
+  } catch (e) {
+    CAMPO = null;
+    $('campo3d').innerHTML = '<div style="padding:24px;color:var(--tx2);font-size:13.5px">' +
+      'No se ha podido abrir el 3D: <b>' + String(e.message || e) + '</b>.<br>' +
+      'El resto del simulador funciona igual — esta vista es solo otra forma de mirar lo mismo.</div>';
+  }
+}
+
 /* ═══════════════════ parámetros, todos ═══════════════════
    El panel no lleva escrito ni un control: se pinta del catálogo SIM.PARAMS, así que
    una constante nueva en el motor aparece aquí sola. Se guarda lo tocado en el
@@ -790,6 +835,7 @@ function pintaTodo() {
   if (!P) return;
   cabecera();
   if (vista === 'planta') { pintaChips(); pintaFlota(); pintaNcu(); pintaHsu(); }
+  else if (vista === 'campo') { if (CAMPO) { CAMPO.redimensiona(); CAMPO.paso(P); CAMPO.selecciona(indiceDe(sel)); } }
   else if (vista === 'modbus') pintaModbus();
   else pintaDetalle();
 }
@@ -1265,7 +1311,7 @@ $('btnPlay').onclick = function () {
   this.className = 'btn' + (corriendo ? ' sec' : '');
 };
 $('btnPaso').onclick = function () { for (var i = 0; i < 60; i++) P.paso(1); apunta(); $('hora').value = P.t.hora; etiquetaTiempo(); pintaTodo(); };
-$('btnRehacer').onclick = function () { construye(); };
+$('btnRehacer').onclick = function () { construye(); if (CAMPO) CAMPO.construye(P); };
 
 ['dia', 'hora'].forEach(function (id) {
   $(id).oninput = function () {
@@ -1332,6 +1378,8 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
     b.classList.add('on');
     vista = b.getAttribute('data-v');
     $('vplanta').style.display = vista === 'planta' ? '' : 'none';
+    $('vcampo').style.display = vista === 'campo' ? '' : 'none';
+    if (vista === 'campo') montaCampo();
     $('vmodbus').style.display = vista === 'modbus' ? '' : 'none';
     $('vtcu').style.display = vista === 'tcu' ? '' : 'none';
     pintaTodo();
