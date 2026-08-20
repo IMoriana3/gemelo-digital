@@ -320,13 +320,13 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `impacto.mjs` | informe de impacto de las divergencias entre los dos cálculos de batería |
 | `prueba.mjs` | prueba de humo: 196 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
-| `../tools/prueba_campo3d.mjs` | banco del 3D: cuenta renders, no fps — que se pinte cuando toca y no cuando no |
+| `../tools/prueba_simulador.mjs` | banco de la interfaz: renders, mandos y reproductor — lo que no se ve en una captura |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
 | `../tools/extrae_fisica.mjs` | regenera `fisica.js` desde SolarGPT y `bateria.html`, contrastando las fuentes |
 
 ```bash
 node sim/prueba.mjs           # física + codificación de registros
-node tools/prueba_campo3d.mjs # el campo 3D (necesita playwright-core y Chromium)
+node tools/prueba_simulador.mjs # la interfaz (necesita playwright-core y Chromium)
 node tools/extrae_mapa.mjs    # si cambia la ficha del mapa
 node tools/extrae_fisica.mjs  # si cambia la gestión de batería en SolarGPT
 ```

@@ -413,6 +413,8 @@
           <div class="escfila">
             <select id="escLista"></select>
             <button class="btn" id="escPlay" style="width:auto;padding:7px 16px">▶ Reproducir</button>
+            <button class="btn sec" id="escPausa" style="width:auto;padding:7px 14px">⏸ Pausa</button>
+            <select id="escVel" style="width:auto"></select>
             <button class="btn sec" id="escRec" style="width:auto;padding:7px 14px">⏺ Grabar</button>
             <button class="btn sec" id="escLink" style="width:auto;padding:7px 14px">🔗 Enlace</button>
             <button class="btn sec" id="escSalta" style="width:auto;padding:7px 14px;display:none">⏩ Al próximo</button>
@@ -872,8 +874,16 @@ function pintaEscenario() {
     $('escLista').dataset.hecho = '1';
     if (sel0) $('escLista').value = sel0;
   }
-  $('escEstado').textContent = GRABANDO ? 'grabando' : (ESC && ESC.i < ESC.eventos.length ? 'reproduciendo' : 'parado');
-  $('escEstado').style.color = GRABANDO ? 'var(--danger)' : (ESC && ESC.i < ESC.eventos.length ? 'var(--ok)' : 'var(--tx3)');
+  /* El estado es el de VERDAD, no «¿quedan eventos?». Decía «reproduciendo» con la
+     simulación parada, que es media explicación de por qué el reproductor costaba. */
+  var quedan = ESC && ESC.i < ESC.eventos.length;
+  var est = GRABANDO ? ['grabando', 'var(--danger)']
+          : !ESC || !ESC.eventos.length ? ['sin guion', 'var(--tx3)']
+          : !quedan ? ['terminado', 'var(--tx3)']
+          : corriendo ? ['reproduciendo', 'var(--ok)']
+          : ['en pausa', 'var(--warn)'];
+  $('escEstado').textContent = est[0];
+  $('escEstado').style.color = est[1];
   var evs = ESC ? ESC.eventos : [];
   $('escN').textContent = evs.length + (evs.length === 1 ? ' evento' : ' eventos');
   $('escDesc').textContent = (ESC && ESC.desc) || '';
@@ -905,6 +915,7 @@ function pintaEscenario() {
       }).join('')
     : '<div><span>Vacío. Elige uno de la lista o dale a ⏺ Grabar y trastea.</span><b>—</b></div>';
   $('escSalta').style.display = falta && falta.h > 0.02 ? '' : 'none';
+  sincroVel();
 }
 function hhmm(h) { return dosD(Math.floor(h)) + ':' + dosD(Math.round((h % 1) * 60)); }
 function minSim(h) {
@@ -930,6 +941,46 @@ function saltaAlEvento() {
   }
   $('dia').value = P.t.dia; $('hora').value = P.t.hora;
   etiquetaTiempo(); pintaTodo();
+}
+
+/* ── velocidad, donde hace falta ────────────────────────────────────────────
+   La velocidad vivía en un deslizador de 1 a 1800 en el panel de la izquierda, o sea
+   lejos del reproductor y con casi todo el recorrido entre ×900 y ×1800. Para seguir un
+   escenario no se piensa en «×300»: se piensa en «cuánto tardo en ver la hora siguiente».
+   Así que aquí va etiquetado en eso, al lado del ▶.
+
+   Es el MISMO estado que el deslizador, no una segunda velocidad: se sincronizan en los
+   dos sentidos, y si alguien pone un valor a mano que no está en la lista, aparece como
+   opción en vez de mentir señalando el más parecido. */
+var VELS = [
+  { v: 1,    t: '×1 · tiempo real' },
+  { v: 10,   t: '×10 · una hora en 6 min' },
+  { v: 60,   t: '×60 · una hora en 1 min' },
+  { v: 300,  t: '×300 · una hora en 12 s' },
+  { v: 900,  t: '×900 · una hora en 4 s' },
+  { v: 1800, t: '×1800 · el día en 48 s' }
+];
+function ponVel(v) {
+  v = Math.max(1, Math.min(1800, Math.round(+v || 60)));
+  $('vel').value = v;
+  etiquetaTiempo();
+  sincroVel();
+}
+function sincroVel() {
+  var s = $('escVel'), v = +$('vel').value || 60;
+  if (!s.dataset.hecho) {
+    VELS.forEach(function (o) { s.add(new Option(o.t, String(o.v))); });
+    s.dataset.hecho = '1';
+  }
+  var suelto = s.querySelector('option[data-suelto]');
+  if (VELS.some(function (o) { return o.v === v; })) {
+    if (suelto) suelto.remove();
+  } else {
+    if (!suelto) { suelto = new Option('', ''); suelto.dataset.suelto = '1'; s.add(suelto); }
+    suelto.text = '×' + v; suelto.value = String(v);
+  }
+  s.value = String(v);
+  $('escPausa').textContent = corriendo ? '⏸ Pausa' : '▶ Seguir';
 }
 
 /* lo que se apunta cuando estás grabando */
@@ -1844,6 +1895,7 @@ $('btnPlay').onclick = function () {
   corriendo = !corriendo;
   this.textContent = corriendo ? '⏸ Pausa' : '▶ Simular';
   this.className = 'btn' + (corriendo ? ' sec' : '');
+  sincroVel();                       /* el reproductor tiene el mismo botón: que no mienta */
 };
 $('btnPaso').onclick = function () { for (var i = 0; i < 60; i++) P.paso(1); apunta(); $('hora').value = P.t.hora; etiquetaTiempo(); pintaTodo(); };
 $('btnRehacer').onclick = function () { construye(); if (CAMPO) CAMPO.construye(P); };
@@ -1854,7 +1906,7 @@ $('btnRehacer').onclick = function () { construye(); if (CAMPO) CAMPO.construye(
     etiquetaTiempo(); P.paso(0.001); pintaTodo();
   };
 });
-$('vel').oninput = etiquetaTiempo;
+$('vel').oninput = function () { etiquetaTiempo(); sincroVel(); };
 $('nGrup').oninput = function () { $('nGrupV').textContent = this.value; };
 var METEO_EV = { viento: ['viento', 3.6], racha: ['rachas', 1], dirViento: ['dir', 1],
                  nubes: ['nubes', 1], nieve: ['nieve', 1], temp: ['temp', 1] };
@@ -1987,6 +2039,13 @@ $('avOn').onchange = function () {
 $('escLista').onchange = function () { cargaEscenario(this.value); };
 $('escPlay').onclick = reproduce;
 $('escSalta').onclick = saltaAlEvento;
+$('escVel').onchange = function () { ponVel(this.value); pintaEscenario(); };
+$('escPausa').onclick = function () {
+  corriendo = !corriendo;
+  $('btnPlay').textContent = corriendo ? '⏸ Pausa' : '▶ Simular';
+  $('btnPlay').className = 'btn' + (corriendo ? ' sec' : '');
+  sincroVel(); pintaEscenario();
+};
 $('escNuevo').onclick = function () { ESC = new Escenario({ n: 'el mío' }); ESC._mio = true; $('escLista').value = 'mio'; pintaEscenario(); };
 $('escRec').onclick = function () {
   if (!ESC || !ESC._mio) { ESC = new Escenario({ n: 'el mío' }); ESC._mio = true; $('escLista').value = 'mio'; }

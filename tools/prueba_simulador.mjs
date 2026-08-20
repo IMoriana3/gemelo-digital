@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 /* ============================================================================
-   prueba_campo3d.mjs — QUE EL 3D NO VUELVA A IR TRABADO.
+   prueba_simulador.mjs — LO QUE NO SE VE EN UNA CAPTURA.
+
+   Antes se llamaba `prueba_campo3d` porque nació del 3D, pero lo que fija ya no es
+   solo eso: cubre lo que solo se nota USANDO la interfaz —cuántas veces se pinta, si
+   un mando escribe el registro que dice su etiqueta, si el reproductor cuenta lo que
+   está haciendo—. Todo eso se rompe sin que ninguna captura lo delate.
+
+   ── de dónde viene ──
 
    El campo se puso lento y raro y nadie se enteró hasta que se miró: no había forma
    de comprobarlo sin abrirlo. Y lo que fallaba no era el coste —30 draw calls y 71k
@@ -13,7 +20,7 @@
    blancos sin células, el suelo cortado contra el cielo, la niebla comiéndose la
    planta y el campo abierto con medio cuadro fuera.
 
-       node tools/prueba_campo3d.mjs            # necesita playwright(-core) y Chromium
+       node tools/prueba_simulador.mjs          # necesita playwright(-core) y Chromium
 
    No mide fps ni pretende hacerlo: un banco headless corre sobre render por software,
    donde la misma escena cuesta cien veces más que en una GPU. Un umbral de fps aquí
@@ -179,6 +186,46 @@ const r = await pg.evaluate(async () => {
   };
   P.escribe = orig2;
 
+  /* ── el reproductor de escenarios ──
+     Costaba de usar por dos motivos, y los dos son comprobables: el badge decia
+     «reproduciendo» con la simulacion parada, y la velocidad estaba en un deslizador
+     del otro panel. */
+  const $$ = (x) => document.getElementById(x);
+  [...document.querySelectorAll('button,[data-vista],.tab')]
+    .filter((x) => /escenario/i.test(x.textContent || ''))[0].click();
+  /* el reloj lo han movido las pruebas de sombras hasta el atardecer; se devuelve a la
+     mañana o los eventos del guion ya habrian pasado y no habria nada que contar */
+  P.t.hora = 9;
+  const lista = $$('escLista');
+  lista.selectedIndex = [...lista.options].findIndex((o) => /temporal/i.test(o.textContent));
+  lista.dispatchEvent(new Event('change', { bubbles: true }));
+  o.repro = { parado: $$('escEstado').textContent, falta: $$('escFalta').textContent };
+
+  $$('escVel').value = '900';
+  $$('escVel').dispatchEvent(new Event('change', { bubbles: true }));
+  o.repro.velDesdeElSelector = $$('vel').value;
+  $$('vel').value = '137';
+  $$('vel').dispatchEvent(new Event('input', { bubbles: true }));
+  o.repro.velSuelta = $$('escVel').value;
+  o.repro.opciones = [...$$('escVel').options].length;
+
+  $$('escVel').value = '900';
+  $$('escVel').dispatchEvent(new Event('change', { bubbles: true }));
+  $$('escPlay').click();
+  o.repro.corriendo = $$('escEstado').textContent;
+  const h0 = P.t.hora, hEv = ESC.eventos[ESC.i].h;
+  $$('escSalta').click();
+  /* el salto deja el reloj un minuto ANTES a proposito, para verlo llegar; ese minuto lo
+     consume el bucle, asi que aqui se le dan los mismos pasos que daria el */
+  const hSalto = P.t.hora;
+  for (let i = 0; i < 3; i++) { P.paso(60); ESC.paso(P, P.t.hora); }
+  o.repro.salto = { de: +h0.toFixed(2), hasta: +hSalto.toFixed(2), evento: hEv,
+                    antesDe: +((hEv - hSalto) * 60).toFixed(1),
+                    iTras: ESC.i, viento: +(P.meteo.viento * 3.6).toFixed(0) };
+  $$('escPausa').click();
+  o.repro.enPausa = $$('escEstado').textContent;
+  o.repro.botonPausa = $$('escPausa').textContent;
+
   /* Rehacer la planta no puede dejar geometrías tiradas en la GPU. Se PINTA después de
      cada reconstrucción: `info.memory` cuenta lo subido a la tarjeta, y sin un render
      por medio las mallas nuevas aún no están subidas — se leería un cero engañoso. */
@@ -246,8 +293,25 @@ ok(r.mandos.off > 1,
 ok(r.mandos.seta.length === 0,
    'la SETA no escribe nada: es una entrada de hardware, no un mando');
 
+console.log('');
+const R = r.repro;
+ok(R.parado === 'en pausa',
+   `el estado dice la verdad con la simulación parada: «${R.parado}» (decía «reproduciendo»)`);
+ok(/faltan/.test(R.falta) && /parada/.test(R.falta),
+   'y dice cuánto falta para el próximo evento, y que hay que darle a ▶');
+ok(R.velDesdeElSelector === '900',
+   `el selector de velocidad del reproductor mueve el de verdad (${R.velDesdeElSelector})`);
+ok(R.velSuelta === '137' && R.opciones === 7,
+   `una velocidad fuera de la lista sale como opción, no se disimula (×${R.velSuelta})`);
+ok(R.corriendo === 'reproduciendo' && R.enPausa === 'en pausa' && R.botonPausa === '▶ Seguir',
+   `reproduciendo → ${R.enPausa} con el botón del propio reproductor`);
+ok(R.salto.antesDe > 0 && R.salto.antesDe <= 2,
+   `⏩ deja el reloj justo antes del evento, para verlo llegar: ${R.salto.de} → ${R.salto.hasta} h (${R.salto.antesDe} min antes de las ${R.salto.evento}:00)`);
+ok(R.salto.iTras > 0 && R.salto.viento === 45,
+   `y el evento entra al seguir: viento ${R.salto.viento} km/h, ${R.salto.iTras} evento(s) hechos`);
+
 ok(rotos.length === 0, 'sin errores de JavaScript' + (rotos.length ? ': ' + rotos[0] : ''));
 
 await nav.close();
-console.log('\n' + (fallos ? `✗ ${fallos} FALLOS` : '✓ el campo 3D se pinta cuando toca y se ve como debe'));
+console.log('\n' + (fallos ? `✗ ${fallos} FALLOS` : '✓ el simulador se pinta cuando toca, manda lo que dice y se ve como debe'));
 process.exit(fallos ? 1 : 0);
