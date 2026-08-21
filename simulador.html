@@ -71,17 +71,21 @@
       cursor:pointer;padding:2px 7px;font-size:12px}
   .ev .quita:hover{color:var(--danger);border-color:var(--danger)}
   #mb3d table.mb{width:100%}
-  /* el HUD del campo: los números que la escena no puede decir por sí sola */
-  #hud3d{position:absolute;top:10px;left:10px;z-index:3;pointer-events:none;
-      display:flex;flex-direction:column;gap:6px;font-size:12px;max-width:46%}
-  #hud3d .bl{background:rgba(11,17,25,.82);border:1px solid var(--bd);border-radius:9px;
-      padding:7px 10px;backdrop-filter:blur(3px)}
-  #hud3d .bl h4{margin:0 0 3px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
-      color:var(--tx3);font-weight:700}
-  #hud3d .l{display:flex;gap:8px;justify-content:space-between;line-height:1.5;white-space:nowrap}
-  #hud3d .l b{font-family:ui-monospace,monospace;font-weight:600;color:var(--tx)}
-  #hud3d .k{color:var(--tx3)}
-  #hud3d .al{color:var(--warn)} #hud3d .no{color:var(--danger)} #hud3d .si{color:var(--ok)}
+  /* La barra de tiempo y el HUD, con la estética de overcast.html: mismo reparto y
+     mismos tamaños, para que las páginas de la casa se lean igual. */
+  .timerow{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+  .timerow input[type=range]{flex:1;min-width:170px;accent-color:var(--accent);margin:0}
+  .timerow .t{font-family:var(--mono);font-size:.95rem;color:var(--accent);min-width:56px;text-align:right}
+  .timerow .lbl{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;
+      text-transform:uppercase;color:var(--tx3)}
+  .timerow .btn,.timerow select{width:auto;padding:5px 11px;font-size:.8rem}
+  .hud{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));gap:8px;margin-top:10px}
+  .ro{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 10px}
+  .ro .k{font-family:var(--mono);font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;
+      color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ro .v{font-size:1.02rem;font-weight:600;margin-top:2px;font-family:var(--mono)}
+  .ro .v small{font-size:.72rem;color:var(--tx2);font-weight:400;font-family:var(--sans)}
+  .ro.al .v{color:var(--warn)} .ro.no .v{color:var(--danger)} .ro.si .v{color:var(--ok)}
   .pin{cursor:pointer;opacity:.28;font-size:10px;margin-right:5px;user-select:none}
   .pin:hover{opacity:.8} .pin.on{opacity:1}
   .flotaAgr{display:flex;flex-direction:column;gap:6px}
@@ -325,8 +329,8 @@
       <div class="grp">
         <h3>Entradas de hardware de la NCU</h3>
         <div class="note" style="margin-top:0">Esto <b>no se manda</b>: son contactos del armario que la NCU <b>lee</b>. Viven en 30100, que es de solo lectura — escribirla por Modbus se rechaza con excepción 02. El botón simula que alguien va y la pulsa.</div>
-        <button class="btn dang" id="btnSeta">⏹ SETA de emergencia</button>
-        <div class="note" style="margin-bottom:8px">Inhibe el motor de toda la planta. Entrada digital <b>30100.13</b>. Va <b>enclavada</b>: soltarla no rearma.</div>
+        <button class="btn dang" id="btnSeta">⏹ Pulsador de parada</button>
+        <div class="note" style="margin-bottom:8px">Entrada digital <b>30100.13</b>. El R7 lo llama <i>Stop button</i> y dice solo esto: «<i>True if the stop button was pressed</i>» — <b>no es una seta y la NCU no la tiene</b>; la seta de emergencia es la del TCU (30002.4, <i>emergency push button</i>). <span class="aprox">Que además inhiba el motor de toda la planta, y enclavado, es cosa del simulador: el documento no dice qué efecto tiene.</span></div>
         <div class="fld"><label>Limpieza por grupo (30100 bits 12:3)</label>
           <div class="chipsg" id="limpieza"></div></div>
         <label class="sw"><input type="checkbox" id="upsFallo"><span>Fallo de red en el SAI</span></label>
@@ -444,8 +448,6 @@
           <div class="escfila">
             <select id="escLista"></select>
             <button class="btn" id="escPlay" style="width:auto;padding:7px 16px">▶ Reproducir</button>
-            <button class="btn sec" id="escPausa" style="width:auto;padding:7px 14px">⏸ Pausa</button>
-            <select id="escVel" style="width:auto"></select>
             <button class="btn sec" id="escRec" style="width:auto;padding:7px 14px">⏺ Grabar</button>
             <button class="btn sec" id="escLink" style="width:auto;padding:7px 14px">🔗 Enlace</button>
             <button class="btn sec" id="escSalta" style="width:auto;padding:7px 14px;display:none">⏩ Al próximo</button>
@@ -460,9 +462,19 @@
           <div class="note" id="escAdd"></div>
         </div>
         <div class="card" style="padding:0;overflow:hidden">
-          <div id="campo3d" style="width:100%;height:min(52vh,560px);position:relative;background:#0b1119">
-            <div id="hud3d"></div>
+          <div id="campo3d" style="width:100%;height:min(52vh,560px);position:relative;background:#0b1119"></div>
+        </div>
+        <div class="card" style="padding-top:10px">
+          <div class="timerow">
+            <button class="btn sec" id="t3dPlay">▶</button>
+            <select id="t3dVel" title="Velocidad de la simulación"></select>
+            <input type="range" id="t3dHora" min="0" max="1439" step="1" value="540">
+            <span class="t" id="t3dLbl">09:00</span>
+            <span class="lbl">día</span>
+            <input type="range" id="t3dDia" min="1" max="365" step="1" value="172" style="max-width:140px;flex:0 1 140px">
+            <span class="t" id="t3dDiaLbl" style="min-width:64px">21 jun</span>
           </div>
+          <div class="hud" id="hud3d"></div>
         </div>
         <!-- Los registros del equipo que estás mirando, debajo del campo. Es lo que hace
              que el gemelo sirva: la mesa torcida ARRIBA y el registro diciendo que está
@@ -958,6 +970,23 @@ function pintaEscenario() {
 function pintaGuion(evs, falta) {
   var cont = $('escGuion');
   if (!ESC) { cont.innerHTML = ''; return; }
+
+  /* NO se rehace el HTML mientras se está usando. `pintaTodo()` pasa cada 0,22 s, y
+     rehacer las filas con un desplegable abierto lo cierra en la cara —«le doy a
+     Aparece y en medio segundo se pliega»— y borra lo que estuvieras tecleando.
+
+     Así que solo se reconstruye cuando el guion CAMBIA de verdad, y nunca con el foco
+     dentro. Lo que sí se mueve solo —la marca y el «en 30 min»— se actualiza por texto,
+     que no destruye ningún control. */
+  var firma = JSON.stringify(evs) + '|' + ESC.i;
+  var tocando = cont.contains(document.activeElement);
+  if (firma === cont.dataset.firma) {
+    if (!tocando) refrescaEstados(cont, evs, falta);
+    return;
+  }
+  if (tocando) return;                       /* ha cambiado, pero espera a que suelte */
+  cont.dataset.firma = firma;
+
   if (!evs.length) {
     cont.innerHTML = '<div class="ev vacio">Guion vacío. Añade un evento aquí abajo, ' +
                      'elige uno de la lista o dale a ⏺ Grabar y trastea.</div>';
@@ -1000,6 +1029,19 @@ function pintaGuion(evs, falta) {
   cont.innerHTML = html;
   pintaAñadir();
   ataGuion();
+}
+
+/* lo único que se mueve solo en una fila: si ya está hecha y cuánto falta */
+function refrescaEstados(cont, evs, falta) {
+  var filas = cont.querySelectorAll('.ev');
+  for (var i = 0; i < filas.length && i < evs.length; i++) {
+    var hecho = ESC.i > i, prox = falta && falta.ev === evs[i];
+    var f = filas[i], marca = f.querySelector('.marca'), est = f.querySelector('.est');
+    f.classList.toggle('hecho', hecho);
+    f.classList.toggle('prox', !!prox);
+    if (marca) marca.textContent = hecho ? '✓' : (prox ? '▸' : '·');
+    if (est) est.textContent = hecho ? 'hecho' : (prox ? 'en ' + minSim(falta.h) : 'pendiente');
+  }
 }
 
 function pintaAñadir() {
@@ -1112,7 +1154,7 @@ function ponVel(v) {
   sincroVel();
 }
 function sincroVel() {
-  var s = $('escVel'), v = +$('vel').value || 60;
+  var s = $('t3dVel'), v = +$('vel').value || 60;
   if (!s.dataset.hecho) {
     VELS.forEach(function (o) { s.add(new Option(o.t, String(o.v))); });
     s.dataset.hecho = '1';
@@ -1125,7 +1167,24 @@ function sincroVel() {
     suelto.text = '×' + v; suelto.value = String(v);
   }
   s.value = String(v);
-  $('escPausa').textContent = corriendo ? '⏸ Pausa' : '▶ Seguir';
+  $('t3dPlay').textContent = corriendo ? '⏸' : '▶';
+  $('t3dPlay').className = 'btn' + (corriendo ? ' sec' : '');
+  /* el deslizador sigue al reloj mientras no lo estés arrastrando tú */
+  if (P && document.activeElement !== $('t3dHora')) {
+    $('t3dHora').value = String(Math.round(P.t.hora * 60) % 1440);
+    $('t3dLbl').textContent = hhmm(P.t.hora);
+  }
+  if (P && document.activeElement !== $('t3dDia')) {
+    $('t3dDia').value = String(P.t.dia);
+    $('t3dDiaLbl').textContent = fechaCorta(P.t.dia);
+  }
+}
+function fechaCorta(dia) {
+  var md = [31,28,31,30,31,30,31,31,30,31,30,31];
+  var ms = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  var n = dia, i = 0;
+  while (i < 11 && n > md[i]) { n -= md[i]; i++; }
+  return n + ' ' + ms[i];
 }
 
 /* lo que se apunta cuando estás grabando */
@@ -1305,30 +1364,24 @@ function pintaHud3D() {
     if (P.tcus[i].moviendo) mov++;
   }
   var ban = n.nivelVientoGlobal, bTxt = t.stow === 2 ? 'TOTAL' : (t.stow ? 'parcial' : '—');
-  var l = function (k, v, c) { return '<div class="l"><span class="k">' + k + '</span><b' +
-    (c ? ' class="' + c + '"' : '') + '>' + v + '</b></div>'; };
-
+  var ro = function (k, v, u, c) {
+    return '<div class="ro' + (c ? ' ' + c : '') + '"><div class="k">' + k + '</div>' +
+           '<div class="v">' + v + (u ? ' <small>' + u + '</small>' : '') + '</div></div>';
+  };
   $('hud3d').innerHTML =
-    '<div class="bl"><h4>Viento</h4>' +
-      l('velocidad', vk.toFixed(1) + ' km/h', vk >= 60 ? 'no' : (vk >= 40 ? 'al' : '')) +
-      l('rachas', rk.toFixed(0) + ' km/h') +
-      l('viene del', rumbo(m.dirViento) + ' · ' + Math.round(m.dirViento) + '°') +
-      l('nivel NCU · bandera', ban + ' · ' + bTxt, t.stow ? 'al' : '') +
-    '</div>' +
-    '<div class="bl"><h4>Sol</h4>' +
-      (s.dia ? l('altura', el.toFixed(1) + '°') +
-               l('azimut', (s.az >= 0 ? '+' : '') + s.az.toFixed(1) + '° · ' + rumbo(180 + s.az)) +
-               l('pide seguir a', s.real.toFixed(1) + '°') +
-               (Math.abs(s.bt - s.real) > 0.2 ? l('con backtracking', s.bt.toFixed(1) + '°', 'si') : '')
-             : l('', 'de noche', 'k')) +
-    '</div>' +
-    '<div class="bl"><h4>Mesas · TCU ' + t.id + '</h4>' +
-      l('objetivo', t.objetivo.toFixed(1) + '°') +
-      l('real', t.anguloReal.toFixed(1) + '°') +
-      l('mide el TCU', t.angulo.toFixed(1) + '°',
-        Math.abs(t.angulo - t.anguloReal) > 0.5 ? 'no' : '') +
-      l('flota', mn.toFixed(0) + '° … ' + mx.toFixed(0) + '°' + (mov ? ' · ' + mov + ' en marcha' : '')) +
-    '</div>';
+    ro('Viento', vk.toFixed(1), 'km/h · ' + rumbo(m.dirViento),
+       vk >= 60 ? 'no' : (vk >= 40 ? 'al' : '')) +
+    ro('Rachas', rk.toFixed(0), 'km/h') +
+    ro('Nivel · bandera', ban + ' · ' + bTxt, '', t.stow ? 'al' : '') +
+    (s.dia ? ro('Sol · altura', el.toFixed(1) + '°', rumbo(180 + s.az)) +
+             ro('Sol · azimut', (s.az >= 0 ? '+' : '') + s.az.toFixed(1) + '°',
+                Math.abs(s.bt - s.real) > 0.2 ? 'bt ' + s.bt.toFixed(0) + '°' : 'sigue ' + s.real.toFixed(0) + '°')
+           : ro('Sol', 'noche', '')) +
+    ro('Objetivo', t.objetivo.toFixed(1) + '°', 'TCU ' + t.id) +
+    ro('Real', t.anguloReal.toFixed(1) + '°', 'la mesa') +
+    ro('Mide el TCU', t.angulo.toFixed(1) + '°', '30111',
+       Math.abs(t.angulo - t.anguloReal) > 0.5 ? 'no' : '') +
+    ro('Flota', mn.toFixed(0) + '…' + mx.toFixed(0) + '°', mov ? mov + ' en marcha' : 'quietas');
 }
 
 /* ═══════════════════ registros bajo el campo ═══════════════════
@@ -1573,7 +1626,7 @@ function pintaChips() {
     chip('Nieve', num(P.meteo.nieve * 100, 1) + ' cm', n.alarmaNieve ? 'bad' : '', n.alarmaNieve ? 'alarma de nieve' : 'sin alarma') +
     chip('Alimentación', TIPO_TXT[P.tcus[0].perfil.tipo], n.acFallo && P.tcus[0].perfil.tipo === 'ac' ? 'bad' : '',
       P.tcus[0].perfil.n.replace(/^(SP|STRING|AC) · /, '')) +
-    chip('Seta', n.seta ? 'PULSADA' : 'libre', n.seta ? 'bad' : 'ok', '30100.13') +
+    chip('Paro', n.paro ? 'PULSADO' : 'libre', n.paro ? 'bad' : 'ok', '30100.13') +
     chip('Sol', P.tcus[0].solar.dia ? num(90 - P.tcus[0].solar.zen, 0) + '° elev.' : 'noche', P.tcus[0].solar.dia ? 'warn' : '', 'azimut ' + num(P.tcus[0].solar.az, 0) + '°');
 }
 /* ── flota ──
@@ -1671,7 +1724,7 @@ function pintaNcu() {
     kv('Alarma de viento', n.alarmaViento ? 'sí' : 'no') +
     kv('Alarma de nieve', n.alarmaNieve ? 'sí' : 'no') +
     kv('Viento del este (invertido)', n.vientoInvertido ? 'sí' : 'no') +
-    kv('Seta (30100.13)', n.seta ? 'PULSADA' : 'libre') +
+    kv('Pulsador de parada (30100.13)', n.paro ? 'PULSADO' : 'libre') +
     kv('SAI', n.upsFallo ? 'fallo de red' : 'normal') +
     kv('Limpieza activa', lim.length ? lim.join(' ') : '—') +
     kv('Forzados', fz.length ? fz.join(' ') : '—') +
@@ -2147,9 +2200,9 @@ $('filas').onchange = function () {
   if (CAMPO) { CAMPO.ponBifila(this.value !== 'monofila', P); CAMPO.selecciona(indiceDe(sel)); }
 };
 $('btnSeta').onclick = function () {
-  P.ncu.seta = !P.ncu.seta;
-  this.textContent = P.ncu.seta ? '⏹ SETA PULSADA — soltar' : '⏹ SETA de emergencia';
-  this.className = 'btn ' + (P.ncu.seta ? 'on' : 'dang');
+  P.ncu.paro = !P.ncu.paro;
+  this.textContent = P.ncu.paro ? '⏹ PARADA PULSADA — soltar' : '⏹ Pulsador de parada';
+  this.className = 'btn ' + (P.ncu.paro ? 'on' : 'dang');
   toca();
 };
 $('upsFallo').onchange = function () { P.ncu.upsFallo = this.checked; toca(); };
@@ -2300,8 +2353,49 @@ $('avOn').onchange = function () {
 $('escLista').onchange = function () { cargaEscenario(this.value); };
 $('escPlay').onclick = reproduce;
 $('escSalta').onclick = saltaAlEvento;
-$('escVel').onchange = function () { ponVel(this.value); pintaEscenario(); };
-$('escPausa').onclick = function () {
+$('t3dVel').onchange = function () { ponVel(this.value); pintaEscenario(); };
+/* EL DESLIZADOR DE TIEMPO, como en overcast: se arrastra y la planta va a esa hora.
+   Mueve el mismo `#hora` del panel, que es quien manda; no hay dos relojes. */
+$('t3dHora').oninput = function () { ponHora(+this.value / 60, false); };
+$('t3dHora').onchange = function () { ponHora(+this.value / 60, true); };
+$('t3dDia').oninput = function () {
+  if (!P) return;
+  P.t.dia = +this.value; $('dia').value = this.value;
+  $('t3dDiaLbl').textContent = fechaCorta(P.t.dia);
+  traza = []; etiquetaTiempo(); ponHora(P.t.hora, false);
+};
+$('t3dDia').onchange = function () { ponHora(P.t.hora, true); };
+
+/* Mover el reloj a mano no basta: el motor calcula el sol y el objetivo en su `paso`,
+   así que sin darle uno el campo se queda con el ángulo de antes -- se arrastraba a
+   mediodía y las mesas seguían a −55°.
+
+   Y hay una segunda parte. Un actuador tarda cinco minutos en cruzar los 110°, o sea
+   que colocar el reloj y soltar deja la planta persiguiendo su objetivo un buen rato.
+   Al SOLTAR el deslizador se le deja converger con el propio motor —mismos pasos, misma
+   velocidad— pero con el reloj CLAVADO: es «colócate como estarías a esta hora», no
+   «simula el camino hasta aquí». Mientras se arrastra solo se mueve el reloj, que es
+   barato y deja ver el sol girar. */
+function ponHora(h, asienta) {
+  if (!P) return;
+  P.t.hora = h;
+  $('hora').value = String(h);
+  $('t3dLbl').textContent = hhmm(h);
+  traza = [];
+  P.paso(0.001);
+  if (asienta) {
+    for (var k = 0; k < 80; k++) {
+      P.t.hora = h;
+      P.paso(15);
+      var t = P.tcus[0];
+      if (t && Math.abs(t.anguloReal - t.objetivo) < 0.3) break;
+    }
+    P.t.hora = h;
+    P.paso(0.001);
+  }
+  etiquetaTiempo(); pintaTodo();
+}
+$('t3dPlay').onclick = function () {
   corriendo = !corriendo;
   $('btnPlay').textContent = corriendo ? '⏸ Pausa' : '▶ Simular';
   $('btnPlay').className = 'btn' + (corriendo ? ' sec' : '');

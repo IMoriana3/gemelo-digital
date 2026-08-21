@@ -199,16 +199,16 @@ const r = await pg.evaluate(async () => {
   lista.dispatchEvent(new Event('change', { bubbles: true }));
   o.repro = { parado: $$('escEstado').textContent, falta: $$('escFalta').textContent };
 
-  $$('escVel').value = '900';
-  $$('escVel').dispatchEvent(new Event('change', { bubbles: true }));
+  $$('t3dVel').value = '900';
+  $$('t3dVel').dispatchEvent(new Event('change', { bubbles: true }));
   o.repro.velDesdeElSelector = $$('vel').value;
   $$('vel').value = '137';
   $$('vel').dispatchEvent(new Event('input', { bubbles: true }));
-  o.repro.velSuelta = $$('escVel').value;
-  o.repro.opciones = [...$$('escVel').options].length;
+  o.repro.velSuelta = $$('t3dVel').value;
+  o.repro.opciones = [...$$('t3dVel').options].length;
 
-  $$('escVel').value = '900';
-  $$('escVel').dispatchEvent(new Event('change', { bubbles: true }));
+  $$('t3dVel').value = '900';
+  $$('t3dVel').dispatchEvent(new Event('change', { bubbles: true }));
   $$('escPlay').click();
   o.repro.corriendo = $$('escEstado').textContent;
   const h0 = P.t.hora, hEv = ESC.eventos[ESC.i].h;
@@ -220,9 +220,9 @@ const r = await pg.evaluate(async () => {
   o.repro.salto = { de: +h0.toFixed(2), hasta: +hSalto.toFixed(2), evento: hEv,
                     antesDe: +((hEv - hSalto) * 60).toFixed(1),
                     iTras: ESC.i, viento: +(P.meteo.viento * 3.6).toFixed(0) };
-  $$('escPausa').click();
+  $$('t3dPlay').click();
   o.repro.enPausa = $$('escEstado').textContent;
-  o.repro.botonPausa = $$('escPausa').textContent;
+  o.repro.botonPausa = $$('t3dPlay').textContent;
 
   /* LA VELETA apunta ADONDE SOPLA, no de donde viene. Se comprueba en las cuatro
      cardinales porque el signo de ese giro es facil de poner al reves -- y estuvo al
@@ -240,9 +240,37 @@ const r = await pg.evaluate(async () => {
   P.meteo.dirViento = 200; P.meteo.viento = 12; P.t.hora = 10.5;
   for (let i = 0; i < 120; i++) P.paso(20);
   pintaTodo();
-  o.hud = { txt: $$('hud3d').innerText.replace(/\s+/g, ' '),
-            bloques: [...$$('hud3d').querySelectorAll('h4')].map((h) => h.textContent),
-            solVisible: C.solMesh.visible };
+  /* el HUD se lee CON SOL: a las 19:00 del 21 de diciembre pone «noche», y entonces no
+     hay altura ni azimut que comprobar */
+  P.t.dia = 172; P.t.hora = 12; P.paso(0.001); pintaTodo();
+  o.hud = { txt: $$('hud3d').innerText.replace(/\s+/g, ' '), solVisible: C.solMesh.visible,
+            dia: P.tcus[0].solar.dia };
+
+  /* EL DESLIZADOR DE TIEMPO, como en las demas paginas de la casa. Mover el reloj a
+     mano no basta: sin un paso del motor el campo se queda con el angulo de antes. */
+  /* condiciones limpias: las pruebas de antes dejaron viento de temporal y un forzado
+     de posicion segura puestos, y con eso el objetivo se queda clavado en el sector de
+     abanderamiento a cualquier hora -- no es la hora lo que fallaria, seria la prueba */
+  P.meteo.viento = 0; P.meteo.rachas = 0; P.meteo.nieve = 0;
+  for (let sp = 1; sp <= 7; sp++) P.escribe('ncu', 0, 40000 + sp, [0]);
+  P.escribe('ncu', 0, 40070, [(1 << P.cfg.grupos) - 1]);
+  P.t.dia = 172;
+  for (let i = 0; i < 60; i++) P.paso(30);
+
+  const desliza = (min, suelta) => {
+    const r = $$('t3dHora');
+    r.value = String(min);
+    r.dispatchEvent(new Event('input', { bubbles: true }));
+    if (suelta) r.dispatchEvent(new Event('change', { bubbles: true }));
+    return { h: +P.t.hora.toFixed(2), lbl: $$('t3dLbl').textContent,
+             obj: +P.tcus[0].objetivo.toFixed(1), real: +P.tcus[0].anguloReal.toFixed(1) };
+  };
+  o.tiempo = { mañana: desliza(420, true), mediodia: desliza(780, true), tarde: desliza(1140, true) };
+  o.tiempo.panel = +$$('hora').value;
+  $$('t3dDia').value = '355'; $$('t3dDia').dispatchEvent(new Event('input', { bubbles: true }));
+  o.tiempo.dia = { n: P.t.dia, lbl: $$('t3dDiaLbl').textContent };
+  $$('t3dDia').value = '172'; $$('t3dDia').dispatchEvent(new Event('input', { bubbles: true }));
+  o.tiempo.tarjetas = [...document.querySelectorAll('#hud3d .ro')].length;
 
   /* UNA SOLA vista: el guion arriba, el campo en medio y los registros abajo. Si vuelve
      a haber una pestana de escenarios aparte, se sigue un guion sin ver la planta. */
@@ -347,11 +375,11 @@ ok(R.parado === 'en pausa',
 ok(/faltan/.test(R.falta) && /parada/.test(R.falta),
    'y dice cuánto falta para el próximo evento, y que hay que darle a ▶');
 ok(R.velDesdeElSelector === '900',
-   `el selector de velocidad del reproductor mueve el de verdad (${R.velDesdeElSelector})`);
+   `el selector de velocidad de la barra mueve el de verdad (${R.velDesdeElSelector})`);
 ok(R.velSuelta === '137' && R.opciones === 7,
    `una velocidad fuera de la lista sale como opción, no se disimula (×${R.velSuelta})`);
-ok(R.corriendo === 'reproduciendo' && R.enPausa === 'en pausa' && R.botonPausa === '▶ Seguir',
-   `reproduciendo → ${R.enPausa} con el botón del propio reproductor`);
+ok(R.corriendo === 'reproduciendo' && R.enPausa === 'en pausa' && R.botonPausa === '▶',
+   `reproduciendo → ${R.enPausa} con el botón de la barra de tiempo`);
 ok(R.salto.antesDe > 0 && R.salto.antesDe <= 2,
    `⏩ deja el reloj justo antes del evento, para verlo llegar: ${R.salto.de} → ${R.salto.hasta} h (${R.salto.antesDe} min antes de las ${R.salto.evento}:00)`);
 ok(R.salto.iTras > 0 && R.salto.viento === 45,
@@ -364,14 +392,26 @@ ok(r.vista.regs >= 6,
    `los registros del equipo salen bajo el campo (${r.vista.regs} · ${r.vista.fuente})`);
 
 console.log('');
+const TT = r.tiempo;
+ok(TT.mañana.lbl === '07:00' && TT.mediodia.lbl === '13:00' && TT.tarde.lbl === '19:00',
+   `el deslizador mueve el reloj: ${TT.mañana.lbl} · ${TT.mediodia.lbl} · ${TT.tarde.lbl}`);
+ok(TT.mañana.obj < 0 && TT.tarde.obj > 0 &&
+   new Set([TT.mañana.obj, TT.mediodia.obj, TT.tarde.obj]).size === 3,
+   `y la planta SE COLOCA a esa hora — al este por la mañana, al oeste por la tarde: ` +
+   `${TT.mañana.obj}° · ${TT.mediodia.obj}° · ${TT.tarde.obj}°`);
+ok(Math.abs(TT.tarde.real - TT.tarde.obj) < 1,
+   `al soltar, la mesa ha llegado a su objetivo (${TT.tarde.real}° vs ${TT.tarde.obj}°)`);
+ok(TT.panel === 19, `y mueve el mismo reloj del panel, no un segundo (${TT.panel})`);
+ok(TT.dia.n === 355 && /dic/.test(TT.dia.lbl), `el deslizador de día también (${TT.dia.lbl})`);
+ok(TT.tarjetas >= 8, `el HUD va en tarjetas bajo el campo, como overcast (${TT.tarjetas})`);
+
 const V = r.veleta;
 ok(V.delN === 'S' && V.delE === 'O' && V.delS === 'N' && V.delO === 'E',
    `la veleta apunta ADONDE SOPLA: del N→${V.delN} · del E→${V.delE} · del S→${V.delS} · del O→${V.delO}`);
-ok(r.hud.bloques.join('·') === 'Viento·Sol·Mesas · TCU 1',
-   `el HUD trae los tres bloques: ${r.hud.bloques.join(' · ')}`);
-ok(/km\/h/.test(r.hud.txt) && /viene del/.test(r.hud.txt) && /altura/.test(r.hud.txt) &&
-   /azimut/.test(r.hud.txt) && /objetivo/.test(r.hud.txt) && /mide el TCU/.test(r.hud.txt),
-   'con viento y rumbo, altura y azimut del sol, y el ángulo objetivo / real / medido');
+ok(['viento', 'rachas', 'altura', 'azimut', 'objetivo', 'real', 'mide el tcu', 'flota']
+     .every((k) => r.hud.txt.toLowerCase().includes(k)),
+   'el HUD trae viento y rumbo, altura y azimut del sol, y objetivo / real / medido' +
+   (r.hud.dia ? '' : ' [OJO: leído de noche]'));
 
 console.log('');
 const E = r.editor;

@@ -151,7 +151,7 @@ ok(t.sp === SIM.SP.NINGUNA, 'pasado el hold, desabanderado', t.estadoTxt());
 t.modo = SIM.MODO.AUTO;
 
 console.log('\n── seta: entrada BINARIA, no una decisión ──');
-P.ncu.seta = true;
+P.ncu.paro = true;
 P.paso(0.02);
 ok(!t.seta, 'antirrebote: un pulso de 20 ms no la dispara');
 for (let i = 0; i < 15 * 60; i += 5) P.paso(5);
@@ -172,25 +172,25 @@ ok(bitde(P.regsNCU()[30100], 13, 13) === 1, 'seta también en la entrada digital
 ok(t.salud() === 'alarma', 'salud del TCU = alarma');
 
 console.log('\n── … y va ENCLAVADA ──');
-P.ncu.seta = false;
+P.ncu.paro = false;
 for (let i = 0; i < 5 * 60; i += 5) P.paso(5);
 ok(!t.motorHabilitado, 'soltar la seta NO rearma el motor: la alarma sigue enclavada');
 ok(t.alarmaMotorEnclavada, 'y se ve en el estado del equipo', t.estadoTxt());
 t.limpiaAlarmas();                                  /* 40007 bit 13, como la toolbox */
 P.paso(5);
 ok(t.motorHabilitado, 'solo lo rearma limpiar alarmas (40007 bit 13)');
-P.ncu.seta = true; for (let i = 0; i < 60; i += 5) P.paso(5);
+P.ncu.paro = true; for (let i = 0; i < 60; i += 5) P.paso(5);
 t.limpiaAlarmas(); P.paso(5);
 ok(!t.motorHabilitado, 'y limpiar con la seta AÚN pulsada no sirve de nada');
-P.ncu.seta = false; for (let i = 0; i < 60; i += 5) P.paso(5);
+P.ncu.paro = false; for (let i = 0; i < 60; i += 5) P.paso(5);
 t.limpiaAlarmas();
 for (let i = 0; i < 30 * 60; i += 5) P.paso(5);
 ok(t.motorHabilitado && Math.abs(t.objetivo - t.anguloReal) < 3, 'rearmado, recupera su posición');
 
-/* la seta del armario enclava la flota ENTERA, no solo el equipo que se mira: por
+/* el pulsador de parada de la NCU enclava la flota ENTERA, no solo el equipo que se mira: por
    eso la toolbox limpia alarmas por rango y no de una en una */
 ok(P.seguidores().filter(x => x.alarmaMotorEnclavada).length === P.seguidores().length - 1,
-   'la seta del armario dejó enclavada a toda la flota, no solo a la TCU 1');
+   'el pulsador de parada dejó enclavada a toda la flota, no solo a la TCU 1');
 P.tcus.forEach(x => x.limpiaAlarmas());
 for (let i = 0; i < 20 * 60; i += 10) P.paso(10);
 

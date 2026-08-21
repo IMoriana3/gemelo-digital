@@ -87,7 +87,7 @@ function aplica(P, e) {
     else if (e.k === 'off') tc.online = !on;
     else if (e.k === 'seta') tc.setaLocal = on;
     else if (e.k === 'cable') tc.cableSetaCortado = on;
-    else if (e.k === 'setancu') P.ncu.seta = on;
+    else if (e.k === 'setancu') P.ncu.paro = on;
     else if (e.k === 'accel') tc.avAccel = on;
     else return { ok: false, avisos: ['avería desconocida: ' + e.k] };
     return { ok: true, aplicados: [e.k + (on ? ' ON' : ' OFF') + ' en TCU ' + tc.id] };
@@ -121,7 +121,7 @@ var TIPOS = {
           { k: 'off',     n: 'sin comunicación' },
           { k: 'seta',    n: 'seta local pulsada' },
           { k: 'cable',   n: 'cable de seta cortado' },
-          { k: 'setancu', n: 'seta del armario de la NCU' },
+          { k: 'setancu', n: 'pulsador de parada de la NCU' },
           { k: 'accel',   n: 'inclinómetro averiado' } ]
   }
 };
@@ -224,8 +224,8 @@ var EJEMPLOS = [
       { h: 13, t: 'meteo', k: 'viento', v: 10 },
       { h: 15, t: 'meteo', k: 'viento', v: 0 }
     ] },
-  { n: 'Seta del armario y rearme', dia: 172, hora: 10,
-    desc: 'Alguien pulsa la seta del armario de la NCU. El motor se corta en toda la planta, el algoritmo sigue calculando por debajo y 30110 se va abriendo. Soltarla no rearma: hay que limpiar con 40007.13.',
+  { n: 'Pulsador de parada y rearme', dia: 172, hora: 10,
+    desc: 'Alguien pulsa la pulsador de parada de la NCU. El motor se corta en toda la planta, el algoritmo sigue calculando por debajo y 30110 se va abriendo. Soltarla no rearma: hay que limpiar con 40007.13.',
     eventos: [
       { h: 11, t: 'av', k: 'setancu', on: true },
       { h: 12.5, t: 'av', k: 'setancu', on: false },

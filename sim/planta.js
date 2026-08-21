@@ -498,7 +498,7 @@ function TCU(id, planta, opts) {
   /* --- seta: entrada binaria --- */
   this.setaLocal = false;            /* el pulsador de la propia TCU */
   this.cableSetaCortado = false;     /* lazo NC abierto: se lee como pulsada */
-  this.setaBruta = false; this.setaDeb = 0; this.seta = false;
+  this.setaBruta = false; this.setaDeb = 0; this.paro = false;        /* 30100.13 «Stop button» — NO es una seta: ver nota */
   this.alarmaMotorEnclavada = false; /* solo la limpia 40007 bit 13 */
   this.motorHabilitado = true;
   /* --- eje: la avería es FÍSICA; el bit de alarma lo DEDUCE el firmware. Y hay dos
@@ -582,12 +582,22 @@ TCU.prototype.mide = function (dt) {
 };
 
 /* ---- ENTRADA BINARIA: la seta ----
-   Línea de contacto en normalmente cerrado: pulsador local, seta del armario de la
+   OJO CON LOS NOMBRES, que no son lo mismo y yo los mezclé:
+     · la SETA de emergencia es del TCU — 30002.4, que el R7 llama `AlarmStopButton`:
+       «Set if the emergency push button is pressed». Esa sí es una seta, con su lazo
+       normalmente cerrado.
+     · la NCU NO tiene seta. Lo que tiene es una entrada digital, 30100.13 `Stop button`,
+       y el documento solo dice «True if the stop button was pressed». Ni dónde está el
+       pulsador ni qué efecto tiene.
+   Que ese pulsador inhiba el motor de la planta entera, y enclavado, es SUPOSICIÓN de
+   este simulador. Está marcado como tal en pantalla y pendiente de confirmar.
+
+   Línea de contacto en normalmente cerrado: pulsador local de la seta, pulsador de parada de la
    NCU o cable cortado, las tres la activan. Con antirrebote —una línea que rebota no
    debe disparar— y ENCLAVADA: al soltarla la alarma sigue puesta hasta que alguien
    la limpia con 40007 bit 13. */
 TCU.prototype.leeSeta = function (dt) {
-  var bruta = this.setaLocal || this.cableSetaCortado || this.p.ncu.seta;
+  var bruta = this.setaLocal || this.cableSetaCortado || this.p.ncu.paro;
   if (bruta !== this.setaBruta) { this.setaBruta = bruta; this.setaDeb = 0; }
   else if (this.setaDeb < K.ANTIRREBOTE_S) {
     this.setaDeb += dt;
@@ -1056,7 +1066,7 @@ TCU.prototype.estadoTxt = function () {
 /* ═══════════════════ NCU — controlador de red ═══════════════════ */
 function NCU(planta) {
   this.p = planta;
-  this.seta = false;                       /* seta de emergencia del armario */
+  this.paro = false;        /* 30100.13 «Stop button» — NO es una seta: ver nota */                       /* seta de emergencia del armario */
   this.limpieza = [];                      /* 10 interruptores, uno por grupo */
   for (var i = 0; i < 10; i++) this.limpieza.push(false);
   this.forzados = {};                      /* {sp: máscara de 10 bits por grupo} */
@@ -1437,7 +1447,7 @@ Planta.prototype.regsNCU = function () {
                   { viento: n.alarmaViento ? 1 : 0, nivel: n.nivelVientoGlobal,
                     nieve: n.alarmaNieve ? 1 : 0, racha: n.alarmaRacha ? 1 : 0,
                     ws: n.falloWs ? 1 : 0, ss: n.falloSs ? 1 : 0 });
-  var di = { BATTERY_LOW: n.upsBateriaBaja ? 1 : 0, UPS_POWER_FAULT: n.upsFallo ? 1 : 0, seta: n.seta ? 1 : 0 };
+  var di = { BATTERY_LOW: n.upsBateriaBaja ? 1 : 0, UPS_POWER_FAULT: n.upsFallo ? 1 : 0, seta: n.paro ? 1 : 0 };
   var wDi = (di.BATTERY_LOW << 0) | (di.UPS_POWER_FAULT << 1) | (di.seta << 13);
   for (i = 0; i < 10; i++) if (n.limpieza[i]) wDi |= 1 << (3 + i);
   R[30100] = wDi & 0xFFFF;

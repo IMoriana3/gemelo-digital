@@ -16,7 +16,7 @@ De más a menos prioritaria. La regla que gana es la que fija el ángulo objetiv
 
 | # | Regla | Qué la dispara | Dónde se ve |
 |---|---|---|---|
-| — | **Seta de emergencia** | pulsador local, seta del armario o cable cortado | no decide el objetivo: **corta el motor**. 30002.4 · NCU 30100.13 · 30006.11 |
+| — | **Seta de emergencia (TCU)** | pulsador local, cable NC cortado — o el **pulsador de parada** de la NCU | no decide el objetivo: **corta el motor**. 30002.4 `AlarmStopButton` · 30006.11. El de la NCU es 30100.13 `Stop button`, que **no es una seta**: ver nota abajo |
 | 1 | **SP1 viento** | nivel de viento de cualquier HSU o `force_sp_1` al grupo | 30001 bits 15:13 = 1 |
 | 2 | **SP3 nieve** | alarma de nieve o `force_sp_3` | 30001 bits 15:13 = 3 |
 | 3 | **SP4 limpieza** | interruptor de limpieza del grupo (NCU 30100 bits 12:3) o `force_sp_4` | 30001 bits 15:13 = 4 |
@@ -162,7 +162,7 @@ No es una regla de la jerarquía: es una **línea de contacto que corta la alime
 
 - **Antirrebote**: un pulso de 20 ms no dispara nada.
 - **Normalmente cerrado**: un cable cortado se lee como pulsada. Un lazo de seguridad que fallara al revés no sería un lazo de seguridad.
-- **Enclavada**: soltarla **no** rearma el motor. Hay que limpiar la alarma con `40007` bit 13 — el botón «LIMPIAR ALARMAS» de la toolbox. Y como la seta del armario alcanza a toda la planta, hay que limpiar la flota entera, no el equipo que estés mirando.
+- **Enclavada**: soltarla **no** rearma el motor. Hay que limpiar la alarma con `40007` bit 13 — el botón «LIMPIAR ALARMAS» de la toolbox. Y como la pulsador de parada alcanza a toda la planta, hay que limpiar la flota entera, no el equipo que estés mirando.
 - **El algoritmo sigue calculando por debajo**: la consigna se mueve con el sol y `30110` (objetivo − real) se va abriendo. Eso es lo que ve el operario, y con la seta modelada como una decisión no pasaba.
 
 ### El eje: la avería es física, la alarma se deduce
@@ -373,6 +373,8 @@ El contraste que decide es directo: **Wh de motor por día y por TCU**, que es l
   ```
 
   Con eso el colector y la toolbox reales hablan con la planta simulada, con su jerarquía, su inclinómetro que miente y su seta enclavada. Y **la escritura vuelve por el mismo sitio**: un FC06/FC16 contra esa NCU entra por `P.escribe()`, la misma puerta que usa la interfaz. No hay un camino «de la web» y otro «de Modbus». `python3 tools/ncu_simulada.py --gemelo … --autotest` recorre el camino entero y lo comprueba.
+- **La NCU no tiene seta, y yo la llamé así.** 30100.13 es `Stop button`, y el R7 dice de él exactamente esto: *«Stop button status. True if the stop button was pressed»*. Ni dónde está el pulsador, ni qué efecto tiene. La **seta** de verdad es la del TCU, 30002.4 `AlarmStopButton`: *«Set if the emergency push button is pressed»*. Que el pulsador de la NCU inhiba el motor de la planta entera, y enclavado, es **suposición de este simulador** — marcada como tal en pantalla y pendiente de confirmar.
+- **La barra de tiempo y el HUD copian a `overcast.html`**: mismo reparto (▶ · velocidad · deslizador de hora · reloj) y mismas tarjetas, para que las páginas de la casa se lean igual. El deslizador **coloca** la planta a esa hora: al soltarlo se la deja converger con el propio motor, a su velocidad de actuador, pero con el reloj clavado. Es «colócate como estarías a esta hora», no «simula el camino hasta aquí».
 - **El campo dice lo que pasa, no solo cómo está.** Sobre el lienzo van tres bloques —viento (velocidad, rachas, de dónde viene, nivel de la NCU y bandera), sol (altura, azimut, ángulo que pide y el de backtracking) y mesas (objetivo · real · lo que mide el TCU, más el rango de la flota)—, y en la escena el disco del sol y una veleta que apunta **adonde sopla**, con la aguja del norte al lado. Sin eso se ve la planta girar pero no a qué apunta ni por qué.
 - **Escenarios y Campo 3D son UNA vista.** El guion editable arriba, el campo en medio y los registros del equipo seleccionado abajo. Había una pestaña «Escenarios» aparte y se quitó: seguir un guion sin ver la planta no sirve, y ver la planta sin el guion tampoco. Los registros de abajo se decodifican con las mismas funciones que el visor grande, así que no hay dos lecturas del mapa.
 - **La seta no es un mando.** Es la entrada digital `30100.13`, y 30100 es de solo lectura: escribirla por Modbus se rechaza con excepción 02. El botón del panel simula que alguien la pulsa en el armario. Los mandos de verdad —forzados `40001…40007`, modo `40070`/`40071`— sí escriben, por `P.escribe()`, la misma puerta que el Modbus. **Un OFF de flota no existe en la NCU**: como en campo, va equipo por equipo con `40000 = 1`.
