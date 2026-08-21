@@ -245,6 +245,16 @@ const r = await pg.evaluate(async () => {
   o.hud = { txt: $$('hud3d').innerText.replace(/\s+/g, ' '), solVisible: C.solMesh.visible,
             dia: P.tcus[0].solar.dia };
 
+  /* LOS REGISTROS COMPUESTOS se leen. `battery_soh_and_soc` salia como 25157 -el crudo en
+     decimal- porque la tabla no tenia columna de bits, y el mapa ademas declara soh y soc
+     SOLAPADOS ([0,7] y [0,15]) tal como los lista el documento. */
+  P.t.hora = 11; P.paso(0.001); pintaTodo();
+  o.regs = {};
+  [...document.querySelectorAll('#mb3dCuerpo tbody tr')].forEach((tr) => {
+    const c = [...tr.querySelectorAll('td')].map((x) => x.textContent.trim());
+    o.regs[c[0]] = { val: c[3], bits: (c[4] || '').slice(0, 40) };
+  });
+
   /* EL DESLIZADOR DE TIEMPO, como en las demas paginas de la casa. Mover el reloj a
      mano no basta: sin un paso del motor el campo se queda con el angulo de antes. */
   /* condiciones limpias: las pruebas de antes dejaron viento de temporal y un forzado
@@ -427,6 +437,13 @@ ok(Math.abs(TT.tarde.real - TT.tarde.obj) < 1,
 ok(TT.panel === 19, `y mueve el mismo reloj del panel, no un segundo (${TT.panel})`);
 ok(TT.dia.n === 355 && /dic/.test(TT.dia.lbl), `el deslizador de día también (${TT.dia.lbl})`);
 ok(TT.tarjetas >= 8, `el HUD va en tarjetas bajo el campo, como overcast (${TT.tarjetas})`);
+
+ok(/SoC \d+ % · SoH \d+ %/.test(r.regs['30096'].val),
+   `30096 se lee por bytes, no como un entero de 16 bits: «${r.regs['30096'].val}»`);
+ok(r.regs['30001'].bits.length > 5 && r.regs['30006'].bits.length > 5 && !r.regs['30001'].val,
+   `los registros de estado enseñan sus bits y se callan el número desnudo (${r.regs['30001'].bits}…)`);
+ok(r.regs['30113'].val.length > 3 && !/^[\d.,\s−-]+$/.test(r.regs['30113'].val),
+   `y el que tiene lectura propia la conserva, no un número: 30113 = «${r.regs['30113'].val}»`);
 
 ok(r.reloj.malos.length === 0,
    `el reloj nunca da las 09:60 (4.000 horas del día · ${JSON.stringify(r.reloj.ejemplos)})`);

@@ -1429,13 +1429,22 @@ function pintaModbus3D() {
     if (d && (dir === 30113 || dir === 30114)) {
       valor = '<span class="aprox">' + (dir === 30113 ? SIM.CRIT_TXT[d.val] : SIM.FUENTE_TXT[d.val]) + '</span>';
     }
+    /* Sin los BITS, un registro compuesto es un número sin sentido: `battery_soh_and_soc`
+       salía como 25157 en vez de «soc=69 · soh=98», y los de estado como 641 y 33792.
+       El desglose lo hace `pintaBits`, la misma del visor grande. */
+    var bits = pintaBits(r, d);
+    /* un registro de puros bits no tiene «valor»: 640 y 32768 no dicen nada al lado de su
+       desglose. Se calla el número DESNUDO, no el que trae unidad o nombre (30113 pone
+       «Seguimiento», que sí es la lectura buena). */
+    if (bits.html && /^[\d.,\s−-]+$/.test(valor)) valor = '';
     filas += '<tr class="' + (d ? '' : 'nosim') + (cambia ? ' cambia' : '') + '">' +
       '<td class="dir">' + dir + '</td><td class="nom">' + r[1] + '</td>' +
       '<td class="cru">' + (d ? d.crudo.map(function (x) { return '0x' + x.toString(16).toUpperCase().padStart(4, '0'); }).join(' ') : '—') + '</td>' +
-      '<td class="val">' + valor + '</td></tr>';
+      '<td class="val">' + valor + '</td>' +
+      '<td class="bit" title="' + bits.titulo.replace(/"/g, '') + '">' + bits.html + '</td></tr>';
   });
   $('mb3dCuerpo').innerHTML =
-    '<table class="mb"><thead><tr><th>Dirección</th><th>Registro</th><th>Crudo</th><th>Valor</th></tr></thead>' +
+    '<table class="mb"><thead><tr><th>Dirección</th><th>Registro</th><th>Crudo</th><th>Valor</th><th>Bits</th></tr></thead>' +
     '<tbody>' + filas + '</tbody></table>';
 }
 
@@ -1836,6 +1845,13 @@ function sentidoDe(nombre, val) {
 function legible(d, r, dev, dir) {
   if (!d) return '—';
   var u = d.uni, v = d.val, n = (r[1] || '').toLowerCase();
+  /* 30096 empaqueta SoH en el byte alto y SoC en el bajo. El mapa declara los dos campos
+     SOLAPADOS —soc [0,7] y soh [0,15]— porque así los lista el documento, y leído al pie
+     de la letra el SoH sale como 24653. La lectura por bytes es la de la casa, la misma
+     que usa el colector (`u8_low`), y por eso va marcada como interpretación. */
+  if (dev === 'tcu' && dir === 30096) {
+    return '<span class="aprox">SoC ' + (v & 0xFF) + ' % · SoH ' + ((v >> 8) & 0xFF) + ' %</span>';
+  }
   var sent = sentidoDe(r[1], v);
   if (sent) return num(v, 0) + ' mA <span class="sent">' + sent + '</span>';
   if (dev === 'tcu' && !u && ESCALAS_TCU[dir]) {
@@ -1913,6 +1929,10 @@ function pintaModbus() {
       var txt = (dir + ' ' + r[1] + ' ' + (r[7] || '')).toLowerCase();
       if (filtro && txt.indexOf(filtro) < 0) continue;
       var bits = pintaBits(r, d);
+    /* un registro de puros bits no tiene «valor»: 640 y 32768 no dicen nada al lado de su
+       desglose. Se calla el número DESNUDO, no el que trae unidad o nombre (30113 pone
+       «Seguimiento», que sí es la lectura buena). */
+    if (bits.html && /^[\d.,\s−-]+$/.test(valor)) valor = '';
       /* «solo activos»: lo que no está a cero, o lo que tiene algún bit puesto */
       if (soloAct && (!d || (!d.val && !bits.activos))) continue;
       var cambia = false, clave = dev + ':' + dir;
