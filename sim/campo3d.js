@@ -77,6 +77,36 @@ function Campo3D(cont, cfg) {
   this.hemi = new T.HemisphereLight(0x9fc3e8, 0x2b2a24, 0.50);
   this.scene.add(this.hemi);
 
+  /* EL SOL, VISIBLE. Estaba solo como luz, así que la escena no decía dónde está: se
+     veía que había sombras pero no de dónde venían, y el seguimiento pierde el sentido
+     si no ves a qué apunta. */
+  this.solMesh = new T.Mesh(new T.SphereGeometry(1, 16, 12),
+                            new T.MeshBasicMaterial({ color: 0xfbbd23, fog: false }));
+  this.solMesh.frustumCulled = false;
+  this.scene.add(this.solMesh);
+
+  /* LA VELETA. El viento decide el abanderamiento y hasta ahora era un número en un
+     panel: en el campo no se veía ni que soplaba ni de dónde. La flecha apunta ADONDE
+     SOPLA y el disco de debajo marca el norte, que es lo que ata la escena al mapa. */
+  this.veleta = new T.Group();
+  var flecha = new T.Group();
+  var palo = new T.Mesh(new T.CylinderGeometry(0.16, 0.16, 5, 8),
+                        new T.MeshBasicMaterial({ color: 0x6fb7ff, fog: false }));
+  palo.rotation.z = -Math.PI / 2;
+  var punta = new T.Mesh(new T.ConeGeometry(0.55, 1.6, 10),
+                         new T.MeshBasicMaterial({ color: 0x6fb7ff, fog: false }));
+  punta.rotation.z = -Math.PI / 2; punta.position.x = 3.3;
+  flecha.add(palo, punta);
+  this.flechaViento = flecha;
+  this.veleta.add(flecha);
+  /* aguja del norte, fija: sin ella una flecha girando no dice nada */
+  var norte = new T.Mesh(new T.ConeGeometry(0.42, 1.5, 8),
+                         new T.MeshBasicMaterial({ color: 0xe7edf3, fog: false }));
+  norte.rotation.z = Math.PI / 2;      /* el norte es −X en este marco */
+  norte.position.set(-2.6, 0, 0);
+  this.veleta.add(norte);
+  this.scene.add(this.veleta);
+
   /* Suelo y niebla. El plano se acababa a 600 m del centro y se veía el CORTE contra el
      cielo, como si la planta flotara en una bandeja. Con niebla del color del horizonte
      el borde se disuelve. Los dos se dimensionan en `construye()` a partir del campo:
@@ -425,6 +455,44 @@ Campo3D.prototype.actualiza = function (P) {
         this._bg = cielo;
       }
     }
+  }
+
+  /* el disco del sol, a media distancia para que se vea sin irse al infinito, y la
+     veleta en una esquina del campo */
+  /* El disco va a una distancia que depende de CUÁNTO SE VE, no del tamaño del campo:
+     puesto a 128 m con la cámara encuadrando la planta se quedaba fuera de cuadro y no
+     servía de nada. Atado al radio de órbita entra casi siempre — y cuando el sol está
+     detrás de la cámara no se ve, que es lo correcto. */
+  if (s && (solMovio || this._solPuesto !== this.orbita.radio())) {
+    this._solPuesto = this.orbita.radio();
+    var dm = Math.max(45, this._solPuesto * 0.8);
+    var el2 = Math.max((90 - s.zen) * D2R, 0.04), az2 = s.az * D2R, ce2 = Math.cos(el2);
+    var tg2 = this.sol.target.position;
+    this.solMesh.position.set(tg2.x + Math.cos(az2) * ce2 * dm, Math.sin(el2) * dm,
+                              tg2.z + Math.sin(az2) * ce2 * dm);
+    this.solMesh.scale.setScalar(Math.max(1.2, dm * 0.035));
+    this.solMesh.visible = !!s.dia;
+    this._sucio = true;
+  }
+  var m = P.meteo;
+  if (m && this.veleta) {
+    /* `dirViento` es METEOROLÓGICA: de DÓNDE viene (0 N · 90 E). En este marco el norte
+       es −X y el este −Z, así que un viento DEL norte sopla hacia +X.
+
+       La flecha nace apuntando a +X, o sea al sur, que es justo adonde sopla el del
+       norte: con dirViento = 0 no hay que girarla nada. Un giro en Y de θ la lleva a
+       (cos θ, 0, −sen θ), así que θ = −dirViento. Tenía un π de más y la flecha
+       señalaba de dónde venía el viento en vez de adónde iba. */
+    var dv = (m.dirViento || 0) * D2R;
+    this.flechaViento.rotation.y = -dv;
+    /* y la veleta se escala con el CAMPO: una flecha de 5 m junto a una planta de 230 m
+       de diagonal es un punto azul que no se ve */
+    var v = m.viento || 0, esc = Math.max(1, Math.hypot(this._ext.x, this._ext.z) / 90);
+    this.veleta.scale.setScalar(esc);
+    this.flechaViento.scale.setScalar(Math.max(0.55, Math.min(2.2, 0.55 + v / 12)));
+    this.flechaViento.visible = v > 0.3;
+    this.veleta.position.set(-this._ext.x / 2 - 8 * esc, 4 * esc, -this._ext.z / 2 - 7 * esc);
+    if (this._dv !== dv || this._vv !== v) { this._dv = dv; this._vv = v; this._sucio = true; }
   }
 
   if (movio || tocaColor || solMovio) {

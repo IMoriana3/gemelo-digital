@@ -224,6 +224,26 @@ const r = await pg.evaluate(async () => {
   o.repro.enPausa = $$('escEstado').textContent;
   o.repro.botonPausa = $$('escPausa').textContent;
 
+  /* LA VELETA apunta ADONDE SOPLA, no de donde viene. Se comprueba en las cuatro
+     cardinales porque el signo de ese giro es facil de poner al reves -- y estuvo al
+     reves. Norte es -X y este -Z en el marco del modelo. */
+  const sopla = (grados) => {
+    P.meteo.dirViento = grados; P.meteo.viento = 15; C.actualiza(P);
+    const v = new T.Vector3(1, 0, 0).applyQuaternion(C.flechaViento.quaternion);
+    const ejes = [['S', v.x], ['N', -v.x], ['O', v.z], ['E', -v.z]];
+    ejes.sort((a, b) => b[1] - a[1]);
+    return ejes[0][0];
+  };
+  o.veleta = { delN: sopla(0), delE: sopla(90), delS: sopla(180), delO: sopla(270) };
+
+  /* EL HUD: los tres numeros que la escena no puede decir sola. */
+  P.meteo.dirViento = 200; P.meteo.viento = 12; P.t.hora = 10.5;
+  for (let i = 0; i < 120; i++) P.paso(20);
+  pintaTodo();
+  o.hud = { txt: $$('hud3d').innerText.replace(/\s+/g, ' '),
+            bloques: [...$$('hud3d').querySelectorAll('h4')].map((h) => h.textContent),
+            solVisible: C.solMesh.visible };
+
   /* UNA SOLA vista: el guion arriba, el campo en medio y los registros abajo. Si vuelve
      a haber una pestana de escenarios aparte, se sigue un guion sin ver la planta. */
   o.vista = {
@@ -342,6 +362,16 @@ ok(!r.vista.pestanas.some((t) => /^escenarios$/i.test(t)),
    `y no hay pestaña de escenarios aparte: ${r.vista.pestanas.join(' · ')}`);
 ok(r.vista.regs >= 6,
    `los registros del equipo salen bajo el campo (${r.vista.regs} · ${r.vista.fuente})`);
+
+console.log('');
+const V = r.veleta;
+ok(V.delN === 'S' && V.delE === 'O' && V.delS === 'N' && V.delO === 'E',
+   `la veleta apunta ADONDE SOPLA: del N→${V.delN} · del E→${V.delE} · del S→${V.delS} · del O→${V.delO}`);
+ok(r.hud.bloques.join('·') === 'Viento·Sol·Mesas · TCU 1',
+   `el HUD trae los tres bloques: ${r.hud.bloques.join(' · ')}`);
+ok(/km\/h/.test(r.hud.txt) && /viene del/.test(r.hud.txt) && /altura/.test(r.hud.txt) &&
+   /azimut/.test(r.hud.txt) && /objetivo/.test(r.hud.txt) && /mide el TCU/.test(r.hud.txt),
+   'con viento y rumbo, altura y azimut del sol, y el ángulo objetivo / real / medido');
 
 console.log('');
 const E = r.editor;

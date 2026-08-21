@@ -71,6 +71,17 @@
       cursor:pointer;padding:2px 7px;font-size:12px}
   .ev .quita:hover{color:var(--danger);border-color:var(--danger)}
   #mb3d table.mb{width:100%}
+  /* el HUD del campo: los números que la escena no puede decir por sí sola */
+  #hud3d{position:absolute;top:10px;left:10px;z-index:3;pointer-events:none;
+      display:flex;flex-direction:column;gap:6px;font-size:12px;max-width:46%}
+  #hud3d .bl{background:rgba(11,17,25,.82);border:1px solid var(--bd);border-radius:9px;
+      padding:7px 10px;backdrop-filter:blur(3px)}
+  #hud3d .bl h4{margin:0 0 3px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+      color:var(--tx3);font-weight:700}
+  #hud3d .l{display:flex;gap:8px;justify-content:space-between;line-height:1.5;white-space:nowrap}
+  #hud3d .l b{font-family:ui-monospace,monospace;font-weight:600;color:var(--tx)}
+  #hud3d .k{color:var(--tx3)}
+  #hud3d .al{color:var(--warn)} #hud3d .no{color:var(--danger)} #hud3d .si{color:var(--ok)}
   .pin{cursor:pointer;opacity:.28;font-size:10px;margin-right:5px;user-select:none}
   .pin:hover{opacity:.8} .pin.on{opacity:1}
   .flotaAgr{display:flex;flex-direction:column;gap:6px}
@@ -449,7 +460,9 @@
           <div class="note" id="escAdd"></div>
         </div>
         <div class="card" style="padding:0;overflow:hidden">
-          <div id="campo3d" style="width:100%;height:min(52vh,560px);position:relative;background:#0b1119"></div>
+          <div id="campo3d" style="width:100%;height:min(52vh,560px);position:relative;background:#0b1119">
+            <div id="hud3d"></div>
+          </div>
         </div>
         <!-- Los registros del equipo que estás mirando, debajo del campo. Es lo que hace
              que el gemelo sirva: la mesa torcida ARRIBA y el registro diciendo que está
@@ -1262,6 +1275,62 @@ function indiceDe(id) {
   for (var i = 0; i < P.tcus.length; i++) if (P.tcus[i].id === id) return i;
   return null;
 }
+/* ═══════════════════ el HUD del campo ═══════════════════
+   Sin esto el 3D es bonito y poco más: se ve la planta girar pero no A QUÉ apunta, ni
+   qué viento hay, ni cuánto se está desviando el equipo que miras. Los tres bloques son
+   las tres preguntas que uno se hace mirando un campo:
+
+     · ¿de dónde sopla y cuánto? — con el nivel de la NCU y la bandera si la hay
+     · ¿dónde está el sol? — altura y azimut, y a qué ángulo pide ir
+     · ¿dónde están las mesas? — la del equipo elegido en sus TRES versiones (objetivo,
+       real y medida), que es de lo que va este simulador, más el rango de la flota
+
+   Va en DOM sobre el lienzo y no en la escena: texto 3D a esta escala es ilegible, se
+   pelea con la niebla y cuesta un render. */
+var ROSA = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
+function rumbo(g) { return ROSA[Math.round((((g % 360) + 360) % 360) / 22.5) % 16]; }
+
+function pintaHud3D() {
+  if (!P || vista !== 'campo') return;
+  var t = tcuSel(); if (!t) return;
+  var m = P.meteo, n = P.ncu, s = t.solar;
+  var vk = n.vientoMax * 3.6, rk = vk * (1 + m.rachas * 0.45);
+  var el = 90 - s.zen;
+
+  /* rango de la flota: si están todas donde deben, min y max se tocan */
+  var mn = 1e9, mx = -1e9, mov = 0;
+  for (var i = 0; i < P.tcus.length; i++) {
+    var a = P.tcus[i].anguloReal;
+    if (a < mn) mn = a; if (a > mx) mx = a;
+    if (P.tcus[i].moviendo) mov++;
+  }
+  var ban = n.nivelVientoGlobal, bTxt = t.stow === 2 ? 'TOTAL' : (t.stow ? 'parcial' : '—');
+  var l = function (k, v, c) { return '<div class="l"><span class="k">' + k + '</span><b' +
+    (c ? ' class="' + c + '"' : '') + '>' + v + '</b></div>'; };
+
+  $('hud3d').innerHTML =
+    '<div class="bl"><h4>Viento</h4>' +
+      l('velocidad', vk.toFixed(1) + ' km/h', vk >= 60 ? 'no' : (vk >= 40 ? 'al' : '')) +
+      l('rachas', rk.toFixed(0) + ' km/h') +
+      l('viene del', rumbo(m.dirViento) + ' · ' + Math.round(m.dirViento) + '°') +
+      l('nivel NCU · bandera', ban + ' · ' + bTxt, t.stow ? 'al' : '') +
+    '</div>' +
+    '<div class="bl"><h4>Sol</h4>' +
+      (s.dia ? l('altura', el.toFixed(1) + '°') +
+               l('azimut', (s.az >= 0 ? '+' : '') + s.az.toFixed(1) + '° · ' + rumbo(180 + s.az)) +
+               l('pide seguir a', s.real.toFixed(1) + '°') +
+               (Math.abs(s.bt - s.real) > 0.2 ? l('con backtracking', s.bt.toFixed(1) + '°', 'si') : '')
+             : l('', 'de noche', 'k')) +
+    '</div>' +
+    '<div class="bl"><h4>Mesas · TCU ' + t.id + '</h4>' +
+      l('objetivo', t.objetivo.toFixed(1) + '°') +
+      l('real', t.anguloReal.toFixed(1) + '°') +
+      l('mide el TCU', t.angulo.toFixed(1) + '°',
+        Math.abs(t.angulo - t.anguloReal) > 0.5 ? 'no' : '') +
+      l('flota', mn.toFixed(0) + '° … ' + mx.toFixed(0) + '°' + (mov ? ' · ' + mov + ' en marcha' : '')) +
+    '</div>';
+}
+
 /* ═══════════════════ registros bajo el campo ═══════════════════
    La gracia del gemelo es que la mesa y lo que el equipo PUBLICA no son lo mismo. Verlo
    obligaba a saltar de pestaña, y saltando no se ve: el inclinómetro descalibrado se
@@ -1464,6 +1533,7 @@ function pintaTodo() {
   else if (vista === 'campo') {
     if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); }
     pintaEscenario();          /* los mandos del escenario están aquí: que no se congelen */
+    pintaHud3D();
     pintaModbus3D();
   }
   else if (vista === 'modbus') pintaModbus();
