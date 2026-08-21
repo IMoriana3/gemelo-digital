@@ -234,7 +234,7 @@
           <select id="loc"></select>
         </div>
         <div class="row3">
-          <div class="fld"><label>TCU</label><input type="number" id="nTcu" value="24" min="1" max="200"></div>
+          <div class="fld"><label>TCU</label><input type="number" id="nTcu" value="24" min="1" max="6000"></div>
           <div class="fld"><label>HSU</label><input type="number" id="nHsu" value="2" min="1" max="10"></div>
           <div class="fld"><label>Repet.</label><input type="number" id="nRep" value="1" min="0" max="10"></div>
         </div>
@@ -484,7 +484,7 @@
           <div id="mb3dCuerpo"></div>
         </div>
         <div class="card">
-          <div class="sub" style="margin:0">Cada seguidor gira a su <b>inclinación REAL</b>, no a la que publica. Si el inclinómetro va descalibrado, aquí se ve la mesa torcida mientras el mapa Modbus dice que está clavada en su objetivo. El testigo de encima es la salud, con el criterio del SCADA: <b style="color:var(--ok)">verde</b> · <b style="color:var(--warn)">ámbar</b> · <b style="color:var(--danger)">rojo</b> · <b style="color:var(--tx3)">gris sin comunicación</b>. Clic en un seguidor para seleccionarlo · arrastrar gira · botón derecho desplaza · rueda acerca.</div>
+          <div class="sub" id="nota3d" style="margin:0">Cada seguidor gira a su <b>inclinación REAL</b>, no a la que publica. Si el inclinómetro va descalibrado, aquí se ve la mesa torcida mientras el mapa Modbus dice que está clavada en su objetivo. El testigo de encima es la salud, con el criterio del SCADA: <b style="color:var(--ok)">verde</b> · <b style="color:var(--warn)">ámbar</b> · <b style="color:var(--danger)">rojo</b> · <b style="color:var(--tx3)">gris sin comunicación</b>. Clic en un seguidor para seleccionarlo · arrastrar gira · botón derecho desplaza · rueda acerca.</div>
         </div>
       </div>
 
@@ -607,21 +607,30 @@
 <script src="sim/escenario.js"></script>
 <script src="sim/careo.js"></script>
 <script src="sim/modbus-map.js"></script>
+<script src="sim/plantas.js"></script>
 <script src="sim/planta.js"></script>
 <script>
 /* ═══════════════════ arranque ═══════════════════ */
 var $ = function (id) { return document.getElementById(id); };
-var PLANTAS = [
-  {n:"Gorraiz · Navarra (ES)",lat:42.81,lon:-1.58,tz:1,dst:true},
-  {n:"23003 · El Burgo I (Zaragoza, ES)",lat:41.5763,lon:-0.7981,tz:1,dst:true},
-  {n:"24007 · Fayón (Zaragoza, ES)",lat:41.2269,lon:0.3242,tz:1,dst:true},
-  {n:"24019 · San José (Arequipa, PE)",lat:-16.5958,lon:-71.8064,tz:-5,dst:false},
-  {n:"24021 · Túnez (Gabès, TN)",lat:33.8792,lon:9.8736,tz:1,dst:false},
-  {n:"24025 · Ayora (Valencia, ES)",lat:39.1182,lon:-1.1599,tz:1,dst:true},
-  {n:"24030 · Bagnarelli (Apulia, IT)",lat:41.5156,lon:15.2676,tz:1,dst:true},
-  {n:"25019 · Páramo (León, ES)",lat:42.3206,lon:-5.5998,tz:1,dst:true},
-  {n:"Jodhpur · Rajastán (IN)",lat:26.264,lon:73.008,tz:5,dst:false}
+/* ── EMPLAZAMIENTOS ──
+   Las plantas de la casa NO se escriben aquí: salen de `sim/plantas.js`, que genera
+   `tools/extrae_plantas.mjs` desde los layouts del DWG y contrasta con overcast. Antes
+   estaban a mano con su latitud y poco más, y el inventario —cuántos seguidores, de qué
+   tipo, cuántas NCU y HSU, bífila o monofila— lo ponía a ojo quien montara la simulación.
+
+   Las dos de laboratorio se quedan a mano y marcadas como tales: no son plantas, son
+   sitios para probar una latitud. */
+var LAB = [
+  { n: 'Gorraiz · Navarra (ES)', lat: 42.81, lon: -1.58, tz: 1, dst: true, lab: true },
+  { n: 'Jodhpur · Rajastán (IN)', lat: 26.264, lon: 73.008, tz: 5, dst: false, lab: true }
 ];
+var REALES = (typeof PLANTAS_REALES !== 'undefined' ? PLANTAS_REALES : []).map(function (p) {
+  return Object.assign({}, p, {
+    n: (p.cod ? p.cod + ' · ' : '') + p.n +
+       ' (' + p.tcu + (p.medios ? ' uds, ' + p.medios + ' medias' : ' uds') + ')'
+  });
+});
+var PLANTAS = REALES.concat(LAB);
 PLANTAS.forEach(function (p, i) { $('loc').add(new Option(p.n, String(i))); });
 SIM.PERFILES.forEach(function (p) { $('perfil').add(new Option(p.n, p.id)); });
 /* Las cuatro estrategias canónicas de wind_stow_strategies.py, igual que el selector
@@ -1448,11 +1457,18 @@ function pintaModbus3D() {
     '<tbody>' + filas + '</tbody></table>';
 }
 
+/* el plano de la planta elegida, si la tiene: las de laboratorio van con rejilla */
+function planoActual() {
+  var L = PLANTAS[+$('loc').value];
+  return (L && !L.lab && L.pos && L.pos.length) ? L : null;
+}
+
 function montaCampo() {
   if (CAMPO || !P) { if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); } return; }
   try {
     CAMPO = new Campo3D($('campo3d'), {
       bifila: $('filas').value !== 'monofila',
+      plano: planoActual(),
       alSeleccionar: function (i) {
         var t = P.tcus[i]; if (!t) return;
         sel = t.id; sincronizaAverias();
@@ -1602,6 +1618,18 @@ function pintaTodo() {
     pintaEscenario();          /* los mandos del escenario están aquí: que no se congelen */
     pintaHud3D();
     pintaModbus3D();
+    if (CAMPO && $('nota3d')) {
+      var n3 = $('nota3d');
+      if (CAMPO.detalleReducido && !n3.dataset.red) {
+        n3.dataset.red = '1';
+        n3.insertAdjacentHTML('afterbegin', '<b style="color:var(--warn)">Detalle reducido: ' +
+          CAMPO.n + ' seguidores.</b> Se dibuja la estructura —tubo, mesa, corona y poste— y no ' +
+          'la TCU, el seccionador ni las cajas: a esta escala no se ven y multiplicados por ' +
+          'miles no los mueve ninguna tarjeta. ');
+      } else if (!CAMPO.detalleReducido && n3.dataset.red) {
+        n3.dataset.red = ''; n3.querySelector('b').remove();
+      }
+    }
   }
   else if (vista === 'modbus') pintaModbus();
   else { pintaDetalle(); pintaHistoria(); }
@@ -2444,7 +2472,33 @@ $('mbFiltro').oninput = pintaModbus;
 $('mbSoloSim').onchange = pintaModbus;
 $('mbSoloAct').onchange = pintaModbus;
 $('mbCsv').onclick = exportaCsv;
-$('loc').onchange = construye;
+/* ── ELEGIR PLANTA CONFIGURA LA PLANTA ──
+   Antes el emplazamiento solo movía la latitud: elegías El Burgo y seguías simulando
+   24 seguidores con 2 HSU porque era lo que había en las casillas. Ahora el inventario
+   lo pone el layout — cuántos seguidores, cuántas estaciones, cuántos TCU sin mesa
+   (que son los repetidores) y si el seguidor es bífilo.
+
+   Y el HUSO. Estaba clavado en el de la casilla, así que Túnez, San José y Dicayagua
+   corrían con hora de Madrid: San José con siete horas de desfase es un día solar que
+   no se parece en nada al suyo. */
+$('loc').onchange = function () {
+  var L = PLANTAS[+this.value];
+  if (L && !L.lab) {
+    $('nTcu').value = L.tcu;
+    $('nHsu').value = Math.max(1, L.hsu);
+    $('nRep').value = L.rep;
+    $('filas').value = L.bifila ? 'bifila' : 'monofila';
+    $('nGrup').value = Math.max(1, Math.min(10, L.ncu || 1));
+    $('nGrupV').textContent = $('nGrup').value;
+  }
+  construye();
+  if (CAMPO) {
+    CAMPO.bifila = $('filas').value !== 'monofila';
+    CAMPO.ponPlano(planoActual(), P);
+    CAMPO.encuadra();
+  }
+  pintaTodo();
+};
 ['nTcu', 'nHsu', 'nRep'].forEach(function (id) { $(id).onchange = construye; });
 $('nGrup').onchange = construye;
 $('perfil').onchange = construye;

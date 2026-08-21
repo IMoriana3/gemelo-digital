@@ -40,6 +40,7 @@ function Campo3D(cont, cfg) {
   cfg = cfg || {};
   this.cont = cont;
   this.bifila = cfg.bifila !== false;      /* el seguidor de la casa; monofila se pide */
+  this.plano = cfg.plano || null;          /* el layout del DWG, si la planta lo tiene */
   this.alSeleccionar = cfg.alSeleccionar || function () {};
   this.THREE = global.THREE;
   if (!this.THREE) throw new Error('falta lib/three.min.js');
@@ -122,7 +123,7 @@ function Campo3D(cont, cfg) {
 
   this.blancoOrbita = new T.Vector3(0, 2, 0);
   this._sucio = true;                       /* hay algo que pintar */
-  this.orbita = orbita(this.renderer.domElement, this.camera, this.blancoOrbita, 120, 12, 3000, T,
+  this.orbita = orbita(this.renderer.domElement, this.camera, this.blancoOrbita, 120, 12, 20000, T,
                        function () { yo._sucio = true; yo.ajustaSombra(); });
   this.picar();
   this.redimensiona();
@@ -183,6 +184,13 @@ Campo3D.prototype.ajustaSombra = function () {
 
 /* Cambiar de bífila a monofila rehace el campo entero: cambian las piezas de cada
    equipo y el paso entre filas. */
+/* El plano de la planta: `{pos:[[norte,este,rot,medio,ncu]...], filaZ, pitch}`. Sin él
+   se cae a la rejilla de siempre, que es lo que hay para los sitios de laboratorio. */
+Campo3D.prototype.ponPlano = function (pl, P) {
+  this.plano = pl || null;
+  if (P) { this.construye(P); this.actualiza(P); }
+};
+
 Campo3D.prototype.ponBifila = function (b, P) {
   b = !!b;
   if (b === this.bifila) return;
@@ -229,27 +237,59 @@ Campo3D.prototype.construye = function (P) {
      electrónica. `monofila` existe para las plantas que sí lo son; el modelo canónico
      es la bífila y es lo que sale por defecto. */
   var bifila = this.bifila !== false;
-  var pitch = 6.0;                       /* CANONICAL_PITCH_M: entre vigas contiguas */
-  var pasoFila = bifila ? pitch * 2 : pitch;   /* de un seguidor al siguiente */
-  var largo = D.span || 34;              /* la fila entera, con su vano de motor */
-  var porLinea = Math.max(1, Math.round(Math.sqrt(this.n * pasoFila / largo * 2.2)));
-  var lineas = Math.ceil(this.n / porLinea);
-  /* El eje del tubo va a la ALTURA DEL POSTE. Estaba a y = 0, o sea con 1,10 m de poste
-     bajo tierra y las mesas rozando el suelo: por eso no se veían los postes y la sombra
-     salía pegada al panel y aserrada — un receptor a centímetros del proyector es acné de
-     shadow map garantizado. La cota es del modelo (postH), la misma que usa index.html. */
+  var pitch = (this.plano && this.plano.filaZ ? this.plano.filaZ * 2
+            : (this.plano && this.plano.pitch) || 6.0);   /* entre las dos vigas del bífilo */
+  var pasoFila = bifila ? pitch * 2 : pitch;             /* de un seguidor al siguiente */
+  var largo = D.span || 34;                              /* la fila entera, con su vano */
   var hEje = D.postH || 2.0;
   this.bases = [];
-  this.pos = [];                          /* {x,z} sin desempaquetar matrices en el bucle */
-  for (var i = 0; i < this.n; i++) {
-    var c = i % porLinea, f = Math.floor(i / porLinea);
-    var x = (c - (porLinea - 1) / 2) * (largo + 6);
-    var z = (f - (lineas - 1) / 2) * pasoFila;
-    this.bases.push(new T.Matrix4().makeTranslation(x, hEje, z));
-    this.pos.push({ x: x, z: z });
+  this.pos = [];
+  var i, x, z, rot = 0;
+
+  if (this.plano && this.plano.pos && this.plano.pos.length) {
+    /* ── EL PLANO DE VERDAD ──────────────────────────────────────────────────
+       Cada seguidor donde está en el layout del DWG, no en una rejilla inventada. El
+       punto del layout es el EJE DE UNIDAD —el centro del bífilo, no el motor—, y viene
+       en [norte, este]. Aquí el norte es −X y el este −Z, así que se le da la vuelta a
+       los dos; equivocar ese signo pone la planta en espejo y no canta hasta que alguien
+       compara con el plano. El `rot` es el azimut del eje, grados al este del norte. */
+    /* si el motor lleva más o menos equipos que el plano se dibuja lo que hay en los
+       dos: el plano manda dónde, el motor manda cuántos se simulan */
+    var L = this.plano.pos;
+    this.n = Math.min(this.n, L.length);
+    var mnN = 1e9, mxN = -1e9, mnE = 1e9, mxE = -1e9;
+    for (i = 0; i < L.length; i++) {
+      mnN = Math.min(mnN, L[i][0]); mxN = Math.max(mxN, L[i][0]);
+      mnE = Math.min(mnE, L[i][1]); mxE = Math.max(mxE, L[i][1]);
+    }
+    var cN = (mnN + mxN) / 2, cE = (mnE + mxE) / 2;
+    this.rots = new Float32Array(this.n);
+    this.medios = new Uint8Array(this.n);
+    for (i = 0; i < L.length; i++) {
+      x = -(L[i][0] - cN);                     /* norte → −X */
+      z = -(L[i][1] - cE);                     /* este  → −Z */
+      rot = (L[i][2] || 0) * D2R;
+      this.rots[i] = rot;
+      this.medios[i] = L[i][3] ? 1 : 0;
+      this.bases.push(new T.Matrix4().makeRotationY(-rot).setPosition(x, hEje, z));
+      this.pos.push({ x: x, z: z });
+    }
+    this._ext = { x: (mxN - mnN) + largo, z: (mxE - mnE) + pitch + 4 };
+  } else {
+    /* ── sin plano: la rejilla de siempre, para las plantas de laboratorio ── */
+    var porLinea = Math.max(1, Math.round(Math.sqrt(this.n * pasoFila / largo * 2.2)));
+    var lineas = Math.ceil(this.n / porLinea);
+    this.rots = null; this.medios = null;
+    for (i = 0; i < this.n; i++) {
+      var c = i % porLinea, f = Math.floor(i / porLinea);
+      x = (c - (porLinea - 1) / 2) * (largo + 6);
+      z = (f - (lineas - 1) / 2) * pasoFila;
+      this.bases.push(new T.Matrix4().makeTranslation(x, hEje, z));
+      this.pos.push({ x: x, z: z });
+    }
+    this._ext = { x: (porLinea - 1) * (largo + 6) + largo,
+                  z: (lineas - 1) * pasoFila + (bifila ? pitch : 0) + 4 };
   }
-  this._ext = { x: (porLinea - 1) * (largo + 6) + largo,
-                z: (lineas - 1) * pasoFila + (bifila ? pitch : 0) + 4 };
 
   /* el modelo compartido, en instancias. `vistePaneles` le pone las células al vidrio:
      sin ellas `glass` es blanco liso y el campo sale a trozos cegado o negro según le
@@ -278,33 +318,85 @@ Campo3D.prototype.construye = function (P) {
       return n;
     });
   }
-  function monta(plan, dz) {
+  function monta(plan, dz, idxs) {
+    if (!idxs.length) return;
     plan.forEach(function (p) {
       var geom = (typeof p.geom === 'function') ? p.geom(T) : p.geom;
       var mat = (typeof p.mat === 'string') ? (SG[p.mat] || SG.steel) : p.mat;
       if (!geom || !geom.isBufferGeometry) return;
       if (p.terrainScaled) p = { key: p.key, mat: p.mat, spin: p.spin, cast: p.cast,
                                  locals: alSuelo(geom, p.locals) };
-      var im = new T.InstancedMesh(geom, mat, yo.n * p.locals.length);
+      var im = new T.InstancedMesh(geom, mat, idxs.length * p.locals.length);
       im.castShadow = !!p.cast; im.receiveShadow = true;
       im.frustumCulled = false;
       yo.grupoPlanta.add(im);
       /* la traslación a SU viga va antes del giro: cada tubo bascula sobre su propio
          eje, no sobre el del vecino */
-      yo.piezas.push({ im: im, locals: p.locals, spin: !!p.spin,
-                       mT: dz ? new T.Matrix4().makeTranslation(0, 0, dz) : null });
+      var pz = { im: im, locals: p.locals, spin: !!p.spin, idxs: idxs,
+                 mT: dz ? new T.Matrix4().makeTranslation(0, 0, dz) : null };
+      yo.piezas.push(pz);
+      /* Las que NO basculan —corona, bracket, poste— están donde están: se escriben aquí
+         una vez y no vuelven a tocarse. Rehacerlas en cada frame costaba un tercio del
+         trabajo, y en Dicayagua (104.000 instancias) eso es lo que separa un campo fluido
+         de uno a tirones. El patrón es el de overcast: «estáticas, UNA vez». */
+      if (!pz.spin) {
+        var mm = new T.Matrix4(), kk = 0;
+        for (var z2 = 0; z2 < idxs.length; z2++) {
+          for (var l2 = 0; l2 < p.locals.length; l2++) {
+            mm.copy(yo.bases[idxs[z2]]);
+            if (pz.mT) mm.multiply(pz.mT);
+            mm.multiply(p.locals[l2]);
+            im.setMatrixAt(kk++, mm);
+          }
+        }
+        im.instanceMatrix.needsUpdate = true;
+      }
     });
   }
-  monta(S.instancePlan(T, { materials: SG, detail: 'mass', west: true }),
-        bifila ? -pitch / 2 : 0);
+  /* Los MEDIOS son mesas de media longitud, y en Ayora son 154 de 754: dibujarlos todos
+     largos deja un campo que no se parece al plano. Se montan dos juegos de instancias,
+     uno por tamaño, y cada equipo va en el suyo. */
+  var todos = [], cortos = [], largos = [];
+  for (var q = 0; q < this.n; q++) {
+    todos.push(q);
+    (this.medios && this.medios[q] ? cortos : largos).push(q);
+  }
+  /* ── CUÁNTO DETALLE CABE ────────────────────────────────────────────────
+     Un seguidor bífila completo son 92 instancias y 3.150 triángulos. Multiplicado por
+     las plantas de verdad:
+
+         El Burgo    215 uds →  19.800 instancias ·  0,7 M triángulos
+         San José  2.289 uds → 210.000            ·  7,2 M
+         Dicayagua 5.493 uds → 505.000            · 17,0 M
+
+     Los dos últimos no los mueve nadie, y además a esa distancia no se ve ni una caja de
+     conexiones. Pasado el umbral se dibuja solo la ESTRUCTURA —tubo, mesa, corona,
+     bracket y poste—, que son 9 instancias y 192 triángulos por viga: Dicayagua baja a
+     99.000 y 2,1 M. Se dice en la interfaz, porque si no parece que a esa planta le
+     faltan las TCU. */
+  var GORDO = { tube: 1, tubecap: 1, mesa: 1, corona: 1, bracket: 1, soporte: 1 };
+  this.detalleReducido = this.n > (this.maxDetalle || 600);
+  var reduce = this.detalleReducido;
+  var planes = {};
+  var planDe = function (size, west) {
+    var c = size + (west ? 'W' : 'E');
+    if (!planes[c]) {
+      var pl = S.instancePlan(T, { materials: SG, detail: 'mass', size: size, west: west });
+      planes[c] = reduce ? pl.filter(function (p) { return GORDO[p.key]; }) : pl;
+    }
+    return planes[c];
+  };
+  monta(planDe('largo', true), bifila ? -pitch / 2 : 0, largos);
+  monta(planDe('medio', true), bifila ? -pitch / 2 : 0, cortos);
   if (bifila) {
-    monta(S.instancePlan(T, { materials: SG, detail: 'mass', west: false }), pitch / 2);
+    monta(planDe('largo', false), pitch / 2, largos);
+    monta(planDe('medio', false), pitch / 2, cortos);
 
     /* El EJE DE TRANSMISIÓN: lo que hace que la gemela se mueva sin motor propio. Sin él
        la bífila son dos vigas girando a la vez porque sí. No es una pieza de `parts()`
        —eso describe UNA viga— sino algo que va entre las dos, así que lo coloca la app
        con la cota del modelo. No bascula: sale de la reductora, que es fija. */
-    if (S.ejeTransGeom) {
+    if (S.ejeTransGeom && !reduce) {
       var yo2 = this;
       var ponFijo = function (geom, dz) {
         var im = new T.InstancedMesh(geom, SG.steel, yo2.n);
@@ -365,6 +457,10 @@ Campo3D.prototype.construye = function (P) {
      estira más allá de donde la niebla ya lo ha borrado, así no se ve dónde acaba. */
   this.scene.fog.near = diag * 2.0;
   this.scene.fog.far = diag * 9;
+  /* el plano lejano estaba fijo en 6 km y San José mide 3: con la cámara a 4 km para
+     encuadrarla, la planta se quedaba detrás del horizonte de la propia cámara */
+  this.camera.far = Math.max(6000, diag * 30);
+  this.camera.updateProjectionMatrix();
   this.suelo.geometry.dispose();
   this.suelo.geometry = new T.PlaneGeometry(diag * 24, diag * 24);
 
@@ -394,8 +490,10 @@ Campo3D.prototype.actualiza = function (P) {
 
   if (movio) {
     for (var pi = 0; pi < this.piezas.length; pi++) {
-      var pz = this.piezas[pi], k = 0;
-      for (i = 0; i < this.n; i++) {
+      var pz = this.piezas[pi], k = 0, lista = pz.idxs;
+      if (!pz.spin) continue;                 /* ya están puestas: no se mueven */
+      for (var ii = 0; ii < lista.length; ii++) {
+        i = lista[ii];
         /* la MESA, no lo que el TCU mide: si el sensor miente, aquí se ve torcida.
            El signo es el MISMO que usa el gemelo 3D sobre este modelo
            (`rotation.x = angulo·D2R`): negarlo dejaría el campo en espejo, que es un

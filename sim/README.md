@@ -315,11 +315,13 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `historia.js` | la traza de lo que ha pasado: objetivo, real, medido, SoC, viento y los eventos que lo explican |
 | `escenario.js` | situaciones grabables, **editables** y reproducibles, compartibles por URL. El catálogo de tipos de evento vive aquí, con `aplica()`, para que el editor no pueda ofrecer nada que el motor no sepa ejecutar |
 | `careo.js` | superpone una captura de la TCU Toolbox a la traza simulada: de «creemos que» a «±X» |
+| `plantas.js` | **generado**, no se toca a mano: las once plantas de la casa con su inventario y su plano, de los layouts del DWG |
 | `campo3d.js` | el campo en 3D, con la geometría de `seguidor.js`: el seguidor **bífila** de la casa —dos vigas, un motor— o monofila si la planta lo es |
 | `servidor.mjs` | publica el motor por HTTP para que `scada/tools/ncu_simulada.py` lo sirva por **Modbus TCP de verdad** |
 | `impacto.mjs` | informe de impacto de las divergencias entre los dos cálculos de batería |
 | `prueba.mjs` | prueba de humo: 196 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
+| `../tools/extrae_plantas.mjs` | regenera `plantas.js` desde `cobertura-zigbee/<planta>_layout.json`, contrastando con overcast |
 | `../tools/prueba_simulador.mjs` | banco de la interfaz: renders, mandos y reproductor — lo que no se ve en una captura |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
 | `../tools/extrae_fisica.mjs` | regenera `fisica.js` desde SolarGPT y `bateria.html`, contrastando las fuentes |
@@ -327,6 +329,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 ```bash
 node sim/prueba.mjs           # física + codificación de registros
 node tools/prueba_simulador.mjs # la interfaz (necesita playwright-core y Chromium)
+node tools/extrae_plantas.mjs   # si cambia un layout del DWG
 node tools/extrae_mapa.mjs    # si cambia la ficha del mapa
 node tools/extrae_fisica.mjs  # si cambia la gestión de batería en SolarGPT
 ```
@@ -375,6 +378,8 @@ El contraste que decide es directo: **Wh de motor por día y por TCU**, que es l
   Con eso el colector y la toolbox reales hablan con la planta simulada, con su jerarquía, su inclinómetro que miente y su seta enclavada. Y **la escritura vuelve por el mismo sitio**: un FC06/FC16 contra esa NCU entra por `P.escribe()`, la misma puerta que usa la interfaz. No hay un camino «de la web» y otro «de Modbus». `python3 tools/ncu_simulada.py --gemelo … --autotest` recorre el camino entero y lo comprueba.
 - **La NCU no tiene seta ni pulsador de parada; la seta es del TCU.** Yo simulaba una «seta del armario de la NCU» que cortaba el motor de la planta entera. No existe ese pulsador y el documento tampoco dice que tuviera ese efecto. `30100.13` es una entrada libre del módulo digital de la NCU (30100 es literalmente *«Raw data from digital input module read»*), sin nada cableado en estas plantas, y se publica **a 0**. La seta de verdad es `30002.4` `AlarmStopButton` — *«Set if the emergency push button is pressed»*—, va con lazo normalmente cerrado y **enclava su equipo, no la flota**.
 - **La barra de tiempo y el HUD copian a `overcast.html`**: mismo reparto (▶ · velocidad · deslizador de hora · reloj) y mismas tarjetas, para que las páginas de la casa se lean igual. El deslizador **coloca** la planta a esa hora: al soltarlo se la deja converger con el propio motor, a su velocidad de actuador, pero con el reloj clavado. Es «colócate como estarías a esta hora», no «simula el camino hasta aquí».
+- **Elegir un emplazamiento configura la planta.** Los seguidores, las estaciones, los repetidores (los `tcuSinMesa` del layout), los grupos y el huso salen del layout del DWG, no de lo que hubiera en las casillas. Y el campo 3D coloca **cada seguidor donde está en el plano**, con su tipo (completo o medio) y el azimut de su eje. El punto del layout es el eje de unidad —el centro del bífilo, no el motor—, y llega en [norte, este]: aquí el norte es −X y el este −Z, así que se le da la vuelta a los dos. Equivocar ese signo pone la planta en espejo y no canta hasta que alguien la compara con el plano.
+- **Con muchas unidades se baja el detalle, y se dice.** Un seguidor bífila completo son 92 instancias y 3.150 triángulos: Dicayagua (5.493 uds) serían 505.000 y 17 M. Pasado el umbral se dibuja solo la estructura —tubo, mesa, corona, bracket y poste—, 9 instancias y 192 triángulos por viga, y baja a 104.000 y 2,9 M. La interfaz avisa, porque si no parece que a esa planta le faltan las TCU.
 - **El campo dice lo que pasa, no solo cómo está.** Sobre el lienzo van tres bloques —viento (velocidad, rachas, de dónde viene, nivel de la NCU y bandera), sol (altura, azimut, ángulo que pide y el de backtracking) y mesas (objetivo · real · lo que mide el TCU, más el rango de la flota)—, y en la escena el disco del sol y una veleta que apunta **adonde sopla**, con la aguja del norte al lado. Sin eso se ve la planta girar pero no a qué apunta ni por qué.
 - **Escenarios y Campo 3D son UNA vista.** El guion editable arriba, el campo en medio y los registros del equipo seleccionado abajo. Había una pestaña «Escenarios» aparte y se quitó: seguir un guion sin ver la planta no sirve, y ver la planta sin el guion tampoco. Los registros de abajo se decodifican con las mismas funciones que el visor grande, así que no hay dos lecturas del mapa.
 - **La seta no es un mando.** Es la entrada digital `30100.13`, y 30100 es de solo lectura: escribirla por Modbus se rechaza con excepción 02. El botón del panel simula que alguien la pulsa en el armario. Los mandos de verdad —forzados `40001…40007`, modo `40070`/`40071`— sí escriben, por `P.escribe()`, la misma puerta que el Modbus. **Un OFF de flota no existe en la NCU**: como en campo, va equipo por equipo con `40000 = 1`.

@@ -245,6 +245,34 @@ const r = await pg.evaluate(async () => {
   o.hud = { txt: $$('hud3d').innerText.replace(/\s+/g, ' '), solVisible: C.solMesh.visible,
             dia: P.tcus[0].solar.dia };
 
+  /* ELEGIR PLANTA CONFIGURA LA PLANTA. Antes el emplazamiento solo movia la latitud:
+     elegias El Burgo y seguias con 24 seguidores porque era lo que habia en la casilla. */
+  const loc = $$('loc');
+  const vaA = (n) => {
+    const i = [...loc.options].findIndex((o) => o.textContent.includes(n));
+    if (i < 0) return null;
+    loc.selectedIndex = i; loc.dispatchEvent(new Event('change', { bubbles: true }));
+    return { tcu: +$$('nTcu').value, hsu: +$$('nHsu').value, rep: +$$('nRep').value,
+             filas: $$('filas').value, grupos: +$$('nGrup').value,
+             lat: +P.loc.lat.toFixed(2), tz: P.loc.tz,
+             campoN: C.n, plano: !!C.plano, reducido: !!C.detalleReducido,
+             enRejilla: !C.plano };
+  };
+  o.plantas = { burgo: vaA('El Burgo'), tunez: vaA('Túnez'), gorraiz: vaA('Gorraiz') };
+  /* las posiciones son las del layout, no una rejilla: en una rejilla todas las filas
+     estan a la misma distancia y en un plano de verdad no */
+  vaA('El Burgo');
+  /* que NO es una rejilla se ve en la silueta: en una rejilla todas las columnas tienen
+     los mismos seguidores; en un plano de verdad, no. Y las posiciones tienen que ser
+     LAS DEL LAYOUT, no unas parecidas. */
+  const porCol = {};
+  C.pos.forEach((p) => { const k = p.z.toFixed(0); porCol[k] = (porCol[k] || 0) + 1; });
+  o.plantas.columnas = [...new Set(Object.values(porCol))].length;
+  const lay = PLANTAS_REALES.find((x) => x.k === 'elburgo');
+  const mnN = Math.min(...lay.pos.map((q) => q[0])), mxN = Math.max(...lay.pos.map((q) => q[0]));
+  const cN = (mnN + mxN) / 2;
+  o.plantas.casaConLayout = Math.abs(-(lay.pos[0][0] - cN) - C.pos[0].x) < 0.2;
+
   /* LOS REGISTROS COMPUESTOS se leen. `battery_soh_and_soc` salia como 25157 -el crudo en
      decimal- porque la tabla no tenia columna de bits, y el mapa ademas declara soh y soc
      SOLAPADOS ([0,7] y [0,15]) tal como los lista el documento. */
@@ -423,6 +451,17 @@ ok(!r.vista.pestanas.some((t) => /^escenarios$/i.test(t)),
    `y no hay pestaña de escenarios aparte: ${r.vista.pestanas.join(' · ')}`);
 ok(r.vista.regs >= 6,
    `los registros del equipo salen bajo el campo (${r.vista.regs} · ${r.vista.fuente})`);
+
+console.log('');
+const PL = r.plantas;
+ok(PL.burgo && PL.burgo.tcu === 215 && PL.burgo.hsu === 4 && PL.burgo.rep === 4,
+   `elegir El Burgo configura sus equipos: ${PL.burgo.tcu} TCU · ${PL.burgo.hsu} HSU · ${PL.burgo.rep} repetidores`);
+ok(PL.burgo.plano && PL.burgo.campoN === 215,
+   `y el campo usa su plano, no una rejilla (${PL.burgo.campoN} seguidores colocados)`);
+ok(PL.columnas > 3 && PL.casaConLayout,
+   `y son LAS del layout, con su silueta: ${PL.columnas} tamaños de columna distintos (una rejilla tiene 1)`);
+ok(PL.tunez && PL.tunez.tz === 1 && PL.gorraiz && PL.gorraiz.enRejilla,
+   `el huso lo fija el layout (Túnez UTC+${PL.tunez.tz}) y los sitios de laboratorio van con rejilla`);
 
 console.log('');
 const TT = r.tiempo;
