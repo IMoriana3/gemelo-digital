@@ -55,11 +55,11 @@ var D2R = Math.PI / 180, R2D = 180 / Math.PI;
    NO se copia aquí: se lee de sim/fisica.js, que un generador saca de sus fuentes
    (solargpt_core/tcu.py, tfm_constants.py y el bloque canónico de bateria.html) y
    se niega a escribir si las tres no dicen lo mismo. Si mañana se toca la gestión
-   de batería en SolarGPT, aquí llega con `node tools/extrae_fisica.mjs`, sin que
+   de batería en SolarGPT, aquí se refleja a mano y lo vigila `node tools/carea_fisica.mjs`, sin que
    nadie tenga que acordarse de actualizar una constante a mano. */
 var F = (typeof window !== 'undefined' && window.FISICA) ||
         (typeof require === 'function' ? require('./fisica.js') : null);
-if (!F) throw new Error('falta sim/fisica.js — genéralo con: node tools/extrae_fisica.mjs');
+if (!F) throw new Error('falta sim/fisica.js — es el espejo del core; carealo con: node tools/carea_fisica.mjs');
 
 var K = {
   /* ---- del canon (fisica.js) ---- */

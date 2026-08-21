@@ -1,15 +1,25 @@
-/* GENERADO por tools/extrae_fisica.mjs — NO editar a mano.
+/* ESPEJO del core Python. Se mantiene A MANO, y un arnés comprueba que no derive.
 
-   Física canónica del TCU, leída de sus fuentes en vez de copiada:
-     · SolarGPTfull/solargpt/solargpt_core/tcu.py  — perfiles de hardware, motor medido
-       (campaña «Consumos motor_02 @24V») y políticas de verano/invierno.
-     · SolarGPTfull/solargpt/scripts/tfm_constants.py — constantes del TFM.
-     · bateria.html — curvas y umbrales de la estrategia (C-rate, JEITA, calefactor,
-       transposición isotrópica, abanderamiento).
+   La FUENTE DE AUTORIDAD es SolarGPT:
+     · solargpt_core/tcu.py         — perfiles de hardware, motor medido
+                                      (campaña «Consumos motor_02 @24V»), políticas.
+     · solargpt_core/tcu_compare.py — curva del motor, calefactor, balance.
+     · solargpt_core/tracker.py     — canónicos de control (slew, banda muerta, stow).
 
-   El generador contrasta lo que aparece en más de una fuente y se niega a escribir
-   si divergen, así que si este fichero existe es que las tres dicen lo mismo.
-   Para regenerarlo:  node tools/extrae_fisica.mjs
+   Hasta B4 este fichero lo GENERABA tools/extrae_fisica.mjs leyendo el Python. Eso
+   era transpilación: herramienta propia, frágil, atada a que el extractor supiera
+   parsear cada cambio del core — y sobre todo, garantizaba la copia el día que
+   corría y ni un minuto más. Ahora el reparto es explícito y comprobable:
+
+       node tools/carea_fisica.mjs
+
+   carea este fichero contra los goldens que genera el core (sim/goldens-fisica.json)
+   a 1e-9. Si difieren, se corrige AQUÍ: el Python manda. Si el core cambió a
+   propósito, se regeneran los goldens y el cambio se ve en el diff.
+
+   COBERTURA HOY: 3 de las 6 funciones (motorW, heaterW, consumoTCU). Las otras tres
+   —cRateSafeLFP, hotDerate, poaAt— esperan a que el core publique su contraparte, y
+   el arnés lo imprime en cada ejecución en vez de dejarlo implícito.
 */
 var FISICA = {
  /* ── constantes medidas (tcu.py) ── */

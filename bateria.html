@@ -283,9 +283,10 @@ var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
 var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=0.5;
 
 /* ═══════════ CONSUMO DEL TCU — canónico, un solo sitio ═══════════
-   Lo que gasta un TCU en un paso: electrónica, motor y calefactor. Vive AQUÍ y lo copia
-   entero tools/extrae_fisica.mjs a sim/fisica.js, así que ni el simulador de planta ni el
-   informe de impacto lo recalculan: llaman a esta misma función.
+   Lo que gasta un TCU en un paso: electrónica, motor y calefactor. La FUENTE DE AUTORIDAD
+   es el core Python (solargpt_core/tcu_compare.py); sim/fisica.js es su espejo vigilado por
+   tools/carea_fisica.mjs, y esta copia se retira cuando la ficha pase a consumir
+   /tcubalance (B4.3). Hasta entonces las tres tienen que decir lo mismo.
 
    Los tres modelos de motor son los de este fichero y NO se recortan con ningún tope: el
    «peak limit» de 50 W de las constantes canónicas es un envolvente de diseño y la curva
@@ -1004,7 +1005,7 @@ function applyStep(meteo){
    Se leen y escriben por `window`, que es donde viven al declararse con `var` en el
    ámbito del script — así el catálogo es UNA tabla y no hay que escribir un getter y
    un setter por constante. Las declaraciones literales de arriba no se tocan nunca:
-   son las que lee tools/extrae_fisica.mjs para cotejarlas contra el canon de SolarGPT. */
+   son las que se carean contra el canon de SolarGPT (tools/carea_fisica.mjs). */
 var PARAMS_FIS=[
  {k:'AXIS_MAX',        n:'Tope mecánico del eje',        u:'°',     d:1, g:'Geometría y movimiento'},
  {k:'NIGHT_POS',       n:'Posición nocturna',            u:'°',     d:1, g:'Geometría y movimiento'},
@@ -1066,7 +1067,7 @@ function pintaParams(){
   });
   $('paramsNota').innerHTML=n
     ? '<b>'+n+'</b> '+(n===1?'parámetro apartado':'parámetros apartados')+' del canon. Vuelve a <b>▶ Simular</b> para verlo, y ten presente que estos números ya <b>no</b> son comparables con SolarGPT.'
-    : 'Todo en su valor canónico, generado de SolarGPT (<code>tcu.py</code>, <code>tracker.py</code>) y cotejado por <code>tools/extrae_fisica.mjs</code>.';
+    : 'Todo en su valor canónico de SolarGPT (<code>tcu.py</code>, <code>tracker.py</code>), careado por <code>tools/carea_fisica.mjs</code>';
 }
 $('btnCanon').onclick=function(){
   PARAMS_FIS.forEach(function(p){window[p.k]=CANON_FIS[p.k];});

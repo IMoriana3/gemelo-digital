@@ -178,7 +178,7 @@ Ninguna de las dos se declara: el firmware simulado las **deduce** comparando lo
 
 ## Alimentación y gestión de batería
 
-No es una copia del modelo canónico: **se lee de él**. `sim/fisica.js` lo genera `tools/extrae_fisica.mjs` a partir de sus fuentes, igual que el mapa Modbus:
+No es una copia a la deriva: es un **espejo vigilado**. `sim/fisica.js` se mantiene a mano declarando que el Python manda, y `tools/carea_fisica.mjs` lo carea a 1e-9 contra los goldens que genera el core (`sim/goldens-fisica.json`). Hasta B4 lo generaba `tools/extrae_fisica.mjs`, que era transpilación y solo garantizaba la copia el día que corría:
 
 | Fuente | Qué aporta |
 |---|---|
@@ -240,7 +240,7 @@ Lo que se aparta del canon se marca en ámbar con su valor original al lado, se 
 Del lado de Python la regla es la misma y ya estaba: `run_tcu_sim` toma **todo** de `df_meta`/`config` y solo cae al canónico cuando no se lo configuras. Guard: `tests/test_tcu_compare_defaults_canonical.py` — comprueba las dos mitades, que el default apunte al canon **y** que el override siga existiendo.
 
 ```bash
-node tools/extrae_fisica.mjs   # tras tocar la gestión de batería en SolarGPT
+node tools/carea_fisica.mjs   # tras tocar la gestión de batería en SolarGPT
 ```
 
 Conectarlo ya encontró dos divergencias con lo que había aquí escrito a mano: el **winter mode** no era solo mover menos (sube el techo a 90 % y calibra cada 3 días), y el perfil de **alterna canónico va sin batería** (`AC_grid`, 0 Ah).
@@ -317,18 +317,17 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `careo.js` | superpone una captura de la TCU Toolbox a la traza simulada: de «creemos que» a «±X» |
 | `campo3d.js` | el campo en 3D, con la geometría de `seguidor.js`: el seguidor **bífila** de la casa —dos vigas, un motor— o monofila si la planta lo es |
 | `servidor.mjs` | publica el motor por HTTP para que `scada/tools/ncu_simulada.py` lo sirva por **Modbus TCP de verdad** |
-| `impacto.mjs` | informe de impacto de las divergencias entre los dos cálculos de batería |
 | `prueba.mjs` | prueba de humo: 196 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/prueba_simulador.mjs` | banco de la interfaz: renders, mandos y reproductor — lo que no se ve en una captura |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
-| `../tools/extrae_fisica.mjs` | regenera `fisica.js` desde SolarGPT y `bateria.html`, contrastando las fuentes |
+| `../tools/carea_fisica.mjs` | **arnés**: carea `fisica.js` contra los goldens del core (3/6 funciones hoy, y lo imprime) |
 
 ```bash
 node sim/prueba.mjs           # física + codificación de registros
 node tools/prueba_simulador.mjs # la interfaz (necesita playwright-core y Chromium)
 node tools/extrae_mapa.mjs    # si cambia la ficha del mapa
-node tools/extrae_fisica.mjs  # si cambia la gestión de batería en SolarGPT
+node tools/carea_fisica.mjs  # si cambia la gestión de batería en SolarGPT
 ```
 
 La prueba decodifica **al revés** que el motor —como lo haría el colector del SCADA, no como lo escribió quien lo codificó—, así que un cambio de orden de palabra o de escala se cae en el sitio.
@@ -346,7 +345,7 @@ La prueba decodifica **al revés** que el motor —como lo haría el colector de
 
 El gemelo y `bateria.html` gastan `Wh/° = K0 + K1·|θ|`, un ajuste **lineal** de la campaña *Consumos motor_02 @24V*. El port del cuaderno (`tcu_compare.py`) interpola en cambio la **tabla medida** de corriente: de 1.500 mA a 0° hasta 2.800 mA a 55°. La tabla es convexa y el lineal se queda corto en los extremos, que es donde el seguidor pasa buena parte del día.
 
-Medido sobre 365 días con la misma velocidad de actuador en los dos lados (`node sim/impacto.mjs`):
+Medido sobre 365 días con la misma velocidad de actuador en los dos lados (informe retirado en B4: `impacto.mjs` era huérfano, de un solo uso, y su premisa —«bateria.html va con constantes planas»— había caducado; las cifras se conservan aquí):
 
 | | motor/día | SoC mín |
 |---|---|---|
