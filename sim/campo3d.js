@@ -162,6 +162,11 @@ function Campo3D(cont, cfg) {
    Esa segunda parte es la que me faltaba, y es justo la que se nota a las horas en que
    se miran las sombras. */
 Campo3D.prototype.ajustaSombra = function () {
+  /* Mientras se busca el encuadre NO se toca la sombra. `encuadra()` mueve la cámara un
+     centenar de veces probando distancias, y cada movimiento entraba aquí y marcaba el
+     mapa de 4096² para rehacer: 1.368 llamadas y 228 recálculos en dos segundos y medio,
+     con seis frames pintados. La sombra se ajusta UNA vez, al final. */
+  if (this._encuadrando) return;
   if (!this._radioCampo) return;
   var r = Math.max(22, Math.min(this._radioCampo, this.orbita.radio() * 0.75));
   var b = this.blancoOrbita, el = this._el == null ? 0.6 : this._el;
@@ -171,7 +176,12 @@ Campo3D.prototype.ajustaSombra = function () {
   this._rSombra = r; this._sx = b.x; this._sz = b.z; this._elSombra = el;
   this.sol.target.position.set(b.x, 0, b.z);
   this.sol.target.updateMatrixWorld();
-  this._zen = null;                     /* el sol se recoloca sobre el nuevo objetivo */
+  /* El sol se recoloca sobre el objetivo nuevo AQUÍ MISMO. Antes esto ponía `_zen = null`
+     para que lo hiciera `actualiza`, y eso montaba un ciclo: actualiza veía el sol sin
+     colocar, lo colocaba, marcaba la sombra y volvía a llamar aquí, que anulaba `_zen`
+     otra vez. El mapa de 4096² se rehacía en CADA frame — dos fotogramas por segundo con
+     veinticuatro seguidores. */
+  this.colocaSol();
   var sc = this.sol.shadow.camera;
   var vy = Math.max(20, r * Math.sin(el) + 15 * Math.cos(el));   /* 15 m: lo que levanta la planta */
   sc.left = -r; sc.right = r; sc.top = vy; sc.bottom = -vy;
@@ -179,6 +189,19 @@ Campo3D.prototype.ajustaSombra = function () {
   sc.near = Math.max(1, dLT - 450); sc.far = dLT + 450;
   sc.updateProjectionMatrix();
   this.renderer.shadowMap.needsUpdate = true;
+  this._sucio = true;
+};
+
+/* Coloca el disco y la luz según el último sol conocido, relativos al objetivo de la
+   sombra. Se llama al mover ese objetivo y al cambiar la posición solar. */
+Campo3D.prototype.colocaSol = function () {
+  if (this._zen == null) return;
+  var el = Math.max((90 - this._zen) * D2R, 0.04), az = this._az * D2R, ce = Math.cos(el);
+  var d = Math.max(320, Math.hypot(this._ext.x, this._ext.z));
+  var tg = this.sol.target.position;
+  this.sol.position.set(tg.x + Math.cos(az) * ce * d, tg.y + Math.sin(el) * d,
+                        tg.z + Math.sin(az) * ce * d);
+  this._solPuesto = null;                /* el disco se recoloca en el siguiente paso */
   this._sucio = true;
 };
 
@@ -223,6 +246,7 @@ Campo3D.prototype.construye = function (P) {
 
   var tcus = P.tcus;
   this.n = tcus.length;
+  this._nMotor = tcus.length;      /* lo que trae la planta, antes de recortar al plano */
   this.orden = tcus;
 
   var D = S.DIMS;
@@ -257,6 +281,7 @@ Campo3D.prototype.construye = function (P) {
        dos: el plano manda dónde, el motor manda cuántos se simulan */
     var L = this.plano.pos;
     this.n = Math.min(this.n, L.length);
+    L = L.slice(0, this.n);        /* y la extensión se mide de lo que SE DIBUJA */
     var mnN = 1e9, mxN = -1e9, mnE = 1e9, mxE = -1e9;
     for (i = 0; i < L.length; i++) {
       mnN = Math.min(mnN, L[i][0]); mxN = Math.max(mxN, L[i][0]);
@@ -476,7 +501,12 @@ var COL_SALUD = { ok: 0x37b87c, aviso: 0xe0a52b, alarma: 0xe2574c, offline: 0x5e
 
 Campo3D.prototype.actualiza = function (P) {
   if (!P || !P.tcus.length) return;
-  if (!this.piezas || P.tcus.length !== this.n) this.construye(P);
+  /* Se reconstruye cuando cambia la FLOTA, no cuando `n` no cuadra con ella: con un
+     plano, `n` se recorta a los seguidores que trae el layout y la planta lleva además
+     los repetidores, así que nunca coincidían y esto reconstruía el campo entero EN CADA
+     FRAME — dos fotogramas por segundo con veinticuatro seguidores, y toda la cascada de
+     encuadres y mapas de sombra que colgaba de ahí. */
+  if (!this.piezas || P.tcus.length !== this._nMotor) this.construye(P);
   var tcus = P.tcus, i, j;
 
   /* ¿se ha movido alguna mesa? Rehacer 1.500 matrices para dejarlas donde estaban es
@@ -533,16 +563,12 @@ Campo3D.prototype.actualiza = function (P) {
        seguimiento deja de tener sentido, sin que nada falle. */
     if (this._zen == null || Math.abs(s.zen - this._zen) > 0.05 || Math.abs(s.az - this._az) > 0.05) {
       this._zen = s.zen; this._az = s.az; solMovio = true;
-      var el = Math.max((90 - s.zen) * D2R, 0.04), az = s.az * D2R, ce = Math.cos(el);
-      var d = Math.max(320, Math.hypot(this._ext.x, this._ext.z));
-      /* RELATIVO al objetivo de la sombra: si se pone en absoluto y el recuadro de
-         sombras se desplaza con la cámara, la luz cambia de dirección al moverse */
-      var tg = this.sol.target.position;
-      this.sol.position.set(tg.x + Math.cos(az) * ce * d, tg.y + Math.sin(el) * d,
-                            tg.z + Math.sin(az) * ce * d);
-      /* la elevación decide el alto del recuadro de sombras: con sol rasante hay que
-         estirarlo o el texel se proyecta metros por el suelo */
-      this._el = el;
+      /* la luz va RELATIVA al objetivo de la sombra: en absoluto, al desplazar el
+         recuadro con la cámara cambiaría de dirección */
+      this.colocaSol();
+      /* la elevación decide el alto del recuadro: con sol rasante hay que estirarlo o el
+         texel se proyecta metros por el suelo */
+      this._el = Math.max((90 - s.zen) * D2R, 0.04);
       this.ajustaSombra();
       this.sol.intensity = s.dia ? 1.45 : 0.05;
       this.hemi.intensity = s.dia ? 0.50 : 0.16;
@@ -656,28 +682,88 @@ Campo3D.prototype.picar = function () {
    forma del hueco, así que se mide en vez de estimarse. */
 Campo3D.prototype.encuadra = function () {
   if (!this.pos || !this.pos.length) return;
-  var T = this.THREE, hx = this._ext.x / 2, hz = this._ext.z / 2, hy = 5;
-  this.blancoOrbita.set(0, 3, 0);
+  var T = this.THREE, i;
+  this._encuadrando = true;
 
-  var esq = [], sx, sy, sz;
-  for (sx = -1; sx <= 1; sx += 2) for (sy = 0; sy <= 1; sy++) for (sz = -1; sz <= 1; sz += 2) {
-    esq.push(new T.Vector3(sx * hx, sy * hy, sz * hz));
+  /* Se encuadra sobre LOS SEGUIDORES, no sobre una caja derivada de ellos. Con la caja,
+     Ayora —que tiene forma de mancha irregular de 2,8 km— salía ocupando el 32 % del
+     ancho y descentrada: la caja envolvente de una planta en L es mucho mayor que la
+     planta, y encajarla deja el campo pequeño en una esquina.
+
+     Con muchos seguidores se muestrea: 800 puntos bastan para el contorno de 5.500. */
+  var paso = Math.max(1, Math.floor(this.pos.length / 800));
+  var semi = ((global.Seguidor && global.Seguidor.DIMS.span) || 34) / 2;
+  var mnX = 1e9, mxX = -1e9, mnZ = 1e9, mxZ = -1e9;
+  for (i = 0; i < this.pos.length; i += paso) {
+    mnX = Math.min(mnX, this.pos[i].x); mxX = Math.max(mxX, this.pos[i].x);
+    mnZ = Math.min(mnZ, this.pos[i].z); mxZ = Math.max(mxZ, this.pos[i].z);
+  }
+  /* el centro de mira es el de la planta, no el origen: si el layout no está centrado
+     en su propio bbox, mirar al origen la deja de lado */
+  this.blancoOrbita.set((mnX + mxX) / 2, 3, (mnZ + mxZ) / 2);
+
+  var pts = [];
+  for (i = 0; i < this.pos.length; i += paso) {
+    /* cada seguidor ocupa SU LARGO Y EN SU DIRECCIÓN: el tubo va en X local, y con el eje
+       girado (Bagnarelli va a 23,7°) el extremo no cae en x±semi sino en diagonal. Con el
+       punto solo, los seguidores del borde se salen por media mesa. */
+    var rr = this.rots ? this.rots[i] : 0, cx = Math.cos(rr) * semi, cz = Math.sin(rr) * semi;
+    pts.push(new T.Vector3(this.pos[i].x - cx, 0, this.pos[i].z - cz),
+             new T.Vector3(this.pos[i].x + cx, 5, this.pos[i].z + cz));
   }
   var yo = this, v = new T.Vector3();
-  function cabe(r) {
+
+  /* Encajar la distancia no basta. En perspectiva y con la cámara inclinada, la nube se
+     proyecta ASIMÉTRICA: el borde cercano baja mucho más de lo que sube el lejano, así
+     que la bisección se para cuando el de abajo toca el marco y arriba queda medio cuadro
+     vacío — Ayora salía ocupando el 37 % del ancho y por debajo del centro.
+
+     Así que se hacen las dos cosas a la vez, unas cuantas veces: encajar la distancia,
+     mirar dónde ha quedado el centro de lo proyectado y mover el punto de mira para
+     compensarlo. Converge en tres o cuatro vueltas. */
+  function marco(r) {
     yo.orbita.pon(r);
     yo.camera.updateMatrixWorld();
-    for (var i = 0; i < esq.length; i++) {
-      v.copy(esq[i]).project(yo.camera);
-      if (Math.abs(v.x) > 0.95 || Math.abs(v.y) > 0.95) return false;
+    var x0 = 9, x1 = -9, y0 = 9, y1 = -9;
+    for (var k = 0; k < pts.length; k++) {
+      v.copy(pts[k]).project(yo.camera);
+      x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x);
+      y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
     }
-    return true;
+    return { x0: x0, x1: x1, y0: y0, y1: y1,
+             cx: (x0 + x1) / 2, cy: (y0 + y1) / 2,
+             cabe: Math.max(-x0, x1, -y0, y1) <= 0.93 };
   }
-  var lo = 25, hi = Math.max(90, Math.hypot(hx, hz) * 6);
-  if (cabe(hi)) {
-    for (var it = 0; it < 20; it++) { var m = (lo + hi) / 2; if (cabe(m)) hi = m; else lo = m; }
+  var lo, hi = Math.max(90, Math.hypot(mxX - mnX, mxZ - mnZ) * 4), m, it, pas;
+  var der = new T.Vector3(), fwd = new T.Vector3();
+
+  for (pas = 0; pas < 5; pas++) {
+    lo = 25;
+    if (!marco(hi).cabe) break;                    /* ni de lejos: se deja donde está */
+    for (it = 0; it < 20; it++) { m = (lo + hi) / 2; if (marco(m).cabe) hi = m; else lo = m; }
+    var f = marco(hi);
+    if (Math.abs(f.cx) < 0.02 && Math.abs(f.cy) < 0.02) break;
+    /* el desplazamiento se estima sobre el SUELO: la derecha de la cámara y su dirección
+       de avance, las dos aplanadas. El factor no es exacto —depende de la inclinación—,
+       por eso se aplica al 80 % y se repite en vez de resolverlo de una vez. */
+    var esc = hi * Math.tan(this.camera.fov * D2R / 2) * 0.8;
+    der.set(1, 0, 0).applyQuaternion(this.camera.quaternion); der.y = 0; der.normalize();
+    fwd.set(0, 0, -1).applyQuaternion(this.camera.quaternion); fwd.y = 0;
+    var largoFwd = fwd.length();
+    fwd.normalize();
+    this.blancoOrbita.addScaledVector(der, f.cx * esc * this.camera.aspect);
+    this.blancoOrbita.addScaledVector(fwd, f.cy * esc / Math.max(0.25, largoFwd));
+    hi = Math.max(90, hi * 1.15);                  /* margen para volver a encajar */
+  }
+  /* un encaje final: la última vuelta movió el punto de mira y salió del bucle con el
+     margen puesto, así que sin esto queda holgado y algo descentrado */
+  lo = 25;
+  if (marco(hi).cabe) {
+    for (it = 0; it < 20; it++) { m = (lo + hi) / 2; if (marco(m).cabe) hi = m; else lo = m; }
   }
   this.orbita.pon(hi);
+  this._encuadrando = false;
+  this.ajustaSombra();
   this._sucio = true;
 };
 

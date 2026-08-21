@@ -2481,16 +2481,24 @@ $('mbCsv').onclick = exportaCsv;
    Y el HUSO. Estaba clavado en el de la casilla, así que Túnez, San José y Dicayagua
    corrían con hora de Madrid: San José con siete horas de desfase es un día solar que
    no se parece en nada al suyo. */
+/* Se llama también AL ARRANCAR, no solo al cambiar de planta. Con la lista generada, la
+   primera opción —Ayora— ya viene seleccionada, así que el `change` no se dispara nunca
+   y la página abría con 24 seguidores en un campo de dos kilómetros: 24 palitos perdidos
+   en el descampado. Que la selección inicial no configure nada es el fallo clásico de
+   colgarlo todo del evento. */
+function aplicaPlanta() {
+  var L = PLANTAS[+$('loc').value];
+  if (!L || L.lab) return L;
+  $('nTcu').value = L.tcu;
+  $('nHsu').value = Math.max(1, L.hsu);
+  $('nRep').value = L.rep;
+  $('filas').value = L.bifila ? 'bifila' : 'monofila';
+  $('nGrup').value = Math.max(1, Math.min(10, L.ncu || 1));
+  $('nGrupV').textContent = $('nGrup').value;
+  return L;
+}
 $('loc').onchange = function () {
-  var L = PLANTAS[+this.value];
-  if (L && !L.lab) {
-    $('nTcu').value = L.tcu;
-    $('nHsu').value = Math.max(1, L.hsu);
-    $('nRep').value = L.rep;
-    $('filas').value = L.bifila ? 'bifila' : 'monofila';
-    $('nGrup').value = Math.max(1, Math.min(10, L.ncu || 1));
-    $('nGrupV').textContent = $('nGrup').value;
-  }
+  aplicaPlanta();
   construye();
   if (CAMPO) {
     CAMPO.bifila = $('filas').value !== 'monofila';
@@ -2521,6 +2529,7 @@ $('btnCanon').onclick = function () {
 /* en marcha */
 cargaParams();      /* ANTES de construir: la planta nace ya con los valores puestos */
 pintaParams();
+aplicaPlanta();     /* y con los equipos de la planta seleccionada, no con los de fábrica */
 construye();
 aplicaEstrategia();
 aplicaPoliticaDifusa();

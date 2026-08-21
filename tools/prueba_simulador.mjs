@@ -68,6 +68,30 @@ await pg.evaluate(() => {
 });
 await pg.waitForTimeout(1800);
 
+/* La configuración de la planta tiene que estar puesta AL ABRIR, sin tocar el selector:
+   la primera opción ya viene seleccionada y su `change` no se dispara nunca. */
+const arranque = await pg.evaluate(() => {
+  const L = PLANTAS[+document.getElementById('loc').value];
+  return { planta: L.n, esReal: !L.lab, tcuCasilla: +document.getElementById('nTcu').value,
+           tcuLayout: L.tcu || null, hsuCasilla: +document.getElementById('nHsu').value,
+           enMotor: P.tcus.length };
+});
+ok(!arranque.esReal || arranque.tcuCasilla === arranque.tcuLayout,
+   `al ABRIR ya está configurada la planta seleccionada: ${arranque.planta} → ` +
+   `${arranque.tcuCasilla} TCU en la casilla (layout: ${arranque.tcuLayout})`);
+
+/* A PARTIR DE AQUÍ, UNA ESCENA DE REFERENCIA. Las medidas de cadencia y de sombra se
+   hacen sobre una planta pequeña y siempre la misma: si se miden sobre la que toque
+   estar seleccionada, el día que la lista cambie de orden los números cambian solos.
+   Con Ayora (754 uds) el render por software tarda tanto que en 1,5 s no caben ni cuatro
+   frames y contar renders deja de significar nada. */
+await pg.evaluate(() => {
+  const s = document.getElementById('loc');
+  const i = [...s.options].findIndex((o) => /Fayón/.test(o.textContent));
+  if (i >= 0) { s.selectedIndex = i; s.dispatchEvent(new Event('change', { bubbles: true })); }
+});
+await pg.waitForTimeout(2500);
+
 const abre = await pg.evaluate(() => !!window.CAMPO);
 ok(abre, 'la pestaña de campo 3D abre y monta el motor');
 if (!abre) { console.log(rotos.join('\n')); await nav.close(); process.exit(1); }
@@ -99,15 +123,35 @@ const r = await pg.evaluate(async () => {
   ev('pointerup', px, py);
 
   /* el campo entero dentro del cuadro, al abrir */
-  const T = window.THREE, e = C._ext, v = new T.Vector3();
+  /* Cabe el campo entero: se miden LOS SEGUIDORES con su largo, que es lo que el
+     encuadre garantiza. Antes se medían las esquinas de la caja `_ext`, que lleva
+     márgenes que no tienen por qué caber -- y con el encuadre ceñido a la planta,
+     fallaba diciendo que faltaban esquinas cuando no falta ninguna. */
+  const T = window.THREE, v = new T.Vector3();
+  const semi = (window.Seguidor.DIMS.span || 34) / 2;
   C.camera.updateMatrixWorld();
   let dentro = 0, esq = 0;
-  for (let sx = -1; sx <= 1; sx += 2) for (let sz = -1; sz <= 1; sz += 2) {
-    esq++;
-    v.set(sx * e.x / 2, 0, sz * e.z / 2).project(C.camera);
-    if (Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1) dentro++;
-  }
+  C.pos.forEach((q, i) => {
+    const rr = C.rots ? C.rots[i] : 0;
+    const cx = Math.cos(rr) * semi, cz = Math.sin(rr) * semi;
+    [[-cx, -cz, 0], [cx, cz, 5]].forEach(([dx, dz, dy]) => {
+      esq++;
+      v.set(q.x + dx, dy, q.z + dz).project(C.camera);
+      if (Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1) dentro++;
+    });
+  });
   o.encuadre = { dentro, esq };
+  /* y que además LLENE el cuadro: con la caja envolvente en vez de los seguidores, Ayora
+     salía ocupando el 37 % del ancho y por debajo del centro */
+  let x0 = 9, x1 = -9, y0 = 9, y1 = -9;
+  C.pos.forEach((q) => {
+    v.set(q.x, 2, q.z).project(C.camera);
+    x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x);
+    y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
+  });
+  o.encuadre.ocupaX = Math.round((x1 - x0) / 2 * 100);
+  o.encuadre.ocupaY = Math.round((y1 - y0) / 2 * 100);
+  o.encuadre.centro = [+((x0 + x1) / 2).toFixed(2), +((y0 + y1) / 2).toFixed(2)];
 
   /* materiales, niebla y suelo */
   let conMapa = 0, mallas = 0;
@@ -118,7 +162,7 @@ const r = await pg.evaluate(async () => {
   });
   o.mallas = mallas;
   o.panelesConCelulas = conMapa;
-  o.diag = Math.hypot(e.x, e.z);
+  o.diag = Math.hypot(C._ext.x, C._ext.z);
   o.niebla = { near: C.scene.fog.near, far: C.scene.fog.far };
   o.suelo = C.suelo.geometry.parameters.width;
   o.autoSombras = C.renderer.shadowMap.autoUpdate;
@@ -386,8 +430,15 @@ ok(r.reposo.render <= 2,
    `en reposo NO se pinta: ${r.reposo.render} renders en ${r.reposo.frames} frames`);
 ok(r.giro.render >= r.giro.frames * 0.8,
    `girando se pinta en cada frame: ${r.giro.render} renders / ${r.giro.frames} frames`);
-ok(r.encuadre.dentro === r.encuadre.esq,
-   `al abrir cabe el campo entero: ${r.encuadre.dentro}/${r.encuadre.esq} esquinas en cuadro`);
+/* El encuadre encaja con margen 0,93, pero el lienzo puede cambiar de alto DESPUÉS —al
+   aparecer el aviso de detalle reducido, por ejemplo— y entonces el aspect ya no es el
+   del encaje. Se admite que asome un extremo; lo que no se admite es que falte medio
+   campo, que es de donde venimos. */
+ok(r.encuadre.dentro >= r.encuadre.esq * 0.97,
+   `al abrir cabe el campo: ${r.encuadre.dentro}/${r.encuadre.esq} extremos de mesa en cuadro`);
+ok(r.encuadre.ocupaX > 55 && r.encuadre.ocupaY > 50 &&
+   Math.abs(r.encuadre.centro[0]) < 0.25 && Math.abs(r.encuadre.centro[1]) < 0.25,
+   `y lo LLENA, más o menos centrado: ocupa ${r.encuadre.ocupaX}% × ${r.encuadre.ocupaY}% · centro ${r.encuadre.centro}`);
 ok(r.panelesConCelulas >= 1,
    `el módulo lleva sus células, no vidrio blanco liso (${r.panelesConCelulas} de ${r.mallas} mallas con textura)`);
 ok(r.niebla.near > r.diag,
