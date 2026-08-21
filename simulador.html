@@ -54,6 +54,23 @@
   .escfila input{background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;font-family:var(--mono)}
   .eco-ok{color:var(--ok)} .eco-no{color:var(--danger)}
   .fijados{border-color:var(--accent)}
+  /* el guion editable: una fila por evento, todo tocable donde está */
+  .ev{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 8px;border-radius:7px;
+      border:1px solid var(--bd);margin-top:5px;background:#0d141c;font-size:13px}
+  .ev.hecho{opacity:.55}
+  .ev.prox{border-color:var(--accent)}
+  .ev.vacio{color:var(--tx3);display:block;padding:10px 12px}
+  .ev .marca{width:12px;color:var(--tx3);text-align:center}
+  .ev .hora{width:52px;font-family:ui-monospace,monospace;text-align:center}
+  .ev .tipo{color:var(--tx3);min-width:104px}
+  .ev .u{color:var(--tx3);font-size:12px}
+  .ev .est{margin-left:auto;color:var(--tx3);font-size:12px;white-space:nowrap}
+  .ev input,.ev select{background:#111a24;color:var(--tx);border:1px solid var(--bd);
+      border-radius:5px;padding:3px 6px;font-size:12.5px;font-family:inherit}
+  .ev .quita{background:none;border:1px solid var(--bd);color:var(--tx3);border-radius:5px;
+      cursor:pointer;padding:2px 7px;font-size:12px}
+  .ev .quita:hover{color:var(--danger);border-color:var(--danger)}
+  #mb3d table.mb{width:100%}
   .pin{cursor:pointer;opacity:.28;font-size:10px;margin-right:5px;user-select:none}
   .pin:hover{opacity:.8} .pin.on{opacity:1}
   .flotaAgr{display:flex;flex-direction:column;gap:6px}
@@ -399,17 +416,17 @@
     <section class="content">
       <div class="tabs">
         <button class="tab on" data-v="planta">Planta</button>
-        <button class="tab" data-v="esc">Escenarios</button>
-        <button class="tab" data-v="campo">Campo 3D</button>
+        <!-- «Escenarios» era una pestaña aparte. Con el guion editable y los registros
+             en vivo dentro del Campo 3D, se quedaba sin nada propio: seguir un guion sin
+             ver la planta no sirve, y ver la planta sin el guion tampoco. -->
+        <button class="tab" data-v="campo">Campo 3D · escenario</button>
         <button class="tab" data-v="modbus">Mapa Modbus en vivo</button>
         <button class="tab" data-v="tcu">Detalle del equipo</button>
       </div>
 
       <!-- ═══ vista ESCENARIOS ═══ -->
-      <div id="vesc" style="display:none">
-        <!-- Los mandos del escenario NO son de esta pestaña: el mismo bloque se MUEVE al
-             Campo 3D cuando se mira allí, para poder seguir un guion viendo moverse la
-             planta. Se mueve el nodo, no se duplica: dos copias serían dos estados. -->
+      <!-- ═══ vista CAMPO 3D ═══ -->
+      <div id="vcampo" style="display:none">
         <div class="card" id="escBarra">
           <h2>Escenarios <span class="badge" id="escEstado">—</span></h2>
           <div class="sub" id="escIntro">Una situación escrita una vez: se graba mientras trasteas, se reproduce igual y se comparte por enlace. Los ensayos del Anexo 4 dejan de ser un PDF y pasan a ser algo que se ejecuta.</div>
@@ -426,19 +443,22 @@
           <div class="note" id="escDesc"></div>
           <div class="note" id="escFalta"></div>
           <div class="note" id="escLinkOut"></div>
+          <h2 style="margin-top:12px">Guion <span class="badge" id="escN">0 eventos</span></h2>
+          <div class="sub" id="escGuionSub">En orden de hora, y <b>editable aquí mismo</b>: cambia la hora o el valor, quita lo que sobre, añade lo que falte. Mientras grabas, todo lo que toques entra solo con la hora simulada en la que lo hiciste.</div>
+          <div id="escGuion"></div>
+          <div class="note" id="escAdd"></div>
         </div>
-        <div class="card">
-          <h2>Guion <span class="badge" id="escN">0 eventos</span></h2>
-          <div class="sub">En orden de hora. Mientras grabas, todo lo que toques —meteo, escrituras, averías— entra aquí con la hora simulada en la que lo hiciste.</div>
-          <div id="escGuion" class="kv"></div>
-        </div>
-      </div>
-
-      <!-- ═══ vista CAMPO 3D ═══ -->
-      <div id="vcampo" style="display:none">
-        <div id="huecoEsc"></div>   <!-- aquí aterrizan los mandos del escenario -->
         <div class="card" style="padding:0;overflow:hidden">
-          <div id="campo3d" style="width:100%;height:min(72vh,760px);position:relative;background:#0b1119"></div>
+          <div id="campo3d" style="width:100%;height:min(52vh,560px);position:relative;background:#0b1119"></div>
+        </div>
+        <!-- Los registros del equipo que estás mirando, debajo del campo. Es lo que hace
+             que el gemelo sirva: la mesa torcida ARRIBA y el registro diciendo que está
+             clavada en su objetivo ABAJO, a la vez y sin cambiar de pestaña. -->
+        <div class="card" id="mb3d">
+          <h2>Registros en vivo <span class="badge" id="mb3dQuien">—</span>
+            <span class="badge" id="mb3dFuente" style="margin-left:6px">—</span></h2>
+          <div class="sub" style="margin-top:0">Del equipo seleccionado en el campo. Clava los que quieras en el <b>Mapa Modbus en vivo</b> y saldrán aquí; sin ninguno clavado se enseñan los del lazo.</div>
+          <div id="mb3dCuerpo"></div>
         </div>
         <div class="card">
           <div class="sub" style="margin:0">Cada seguidor gira a su <b>inclinación REAL</b>, no a la que publica. Si el inclinómetro va descalibrado, aquí se ve la mesa torcida mientras el mapa Modbus dice que está clavada en su objetivo. El testigo de encima es la salud, con el criterio del SCADA: <b style="color:var(--ok)">verde</b> · <b style="color:var(--warn)">ámbar</b> · <b style="color:var(--danger)">rojo</b> · <b style="color:var(--tx3)">gris sin comunicación</b>. Clic en un seguidor para seleccionarlo · arrastrar gira · botón derecho desplaza · rueda acerca.</div>
@@ -910,16 +930,124 @@ function pintaEscenario() {
                           : ' — <b>y la simulación está parada</b>: dale a ▶'))
     : 'Guion terminado: los ' + evs.length + ' eventos se han disparado.');
 
-  $('escGuion').innerHTML = evs.length
-    ? evs.map(function (e, i) {
-        var hecho = ESC && i < ESC.i;
-        var prox = falta && falta.ev === e;
-        return '<div><span>' + (hecho ? '✓ ' : (prox ? '▸ ' : '· ')) + Escenario.textoDe(e) + '</span><b>' +
-               (hecho ? 'hecho' : (prox ? 'en ' + minSim(falta.h) : 'pendiente')) + '</b></div>';
-      }).join('')
-    : '<div><span>Vacío. Elige uno de la lista o dale a ⏺ Grabar y trastea.</span><b>—</b></div>';
+  pintaGuion(evs, falta);
   $('escSalta').style.display = falta && falta.h > 0.02 ? '' : 'none';
   sincroVel();
+}
+
+/* ── EL GUION, EDITABLE ─────────────────────────────────────────────────────
+   Era una lista de solo lectura: para mover un evento media hora o probar con 70 km/h
+   en vez de 45 había que grabar el escenario otra vez entero. Ahora cada fila se toca
+   donde está —hora, valor, equipo— y se quita o se añade.
+
+   Los campos de cada tipo salen de `Escenario.TIPOS`, que vive con `aplica()`: así el
+   editor no puede ofrecer un evento que el motor no sepa ejecutar. */
+function pintaGuion(evs, falta) {
+  var cont = $('escGuion');
+  if (!ESC) { cont.innerHTML = ''; return; }
+  if (!evs.length) {
+    cont.innerHTML = '<div class="ev vacio">Guion vacío. Añade un evento aquí abajo, ' +
+                     'elige uno de la lista o dale a ⏺ Grabar y trastea.</div>';
+    pintaAñadir();
+    return;
+  }
+  var html = evs.map(function (e, i) {
+    var hecho = ESC.i > i, prox = falta && falta.ev === e;
+    var T = Escenario.TIPOS[e.t] || {};
+    var campos = '';
+    if (e.t === 'meteo' || e.t === 'av') {
+      campos = '<select data-i="' + i + '" data-c="k">' + (T.ks || []).map(function (o) {
+        return '<option value="' + o.k + '"' + (o.k === e.k ? ' selected' : '') + '>' + o.n + '</option>';
+      }).join('') + '</select>';
+    }
+    if (e.t === 'meteo') {
+      var def = (T.ks || []).filter(function (o) { return o.k === e.k; })[0] || {};
+      campos += '<input type="text" inputmode="decimal" size="4" data-i="' + i + '" data-c="v" value="' + e.v + '">' +
+                '<span class="u">' + (def.u || '') + '</span>';
+    } else if (e.t === 'av') {
+      campos += '<select data-i="' + i + '" data-c="on">' +
+                '<option value="1"' + (e.on ? ' selected' : '') + '>aparece</option>' +
+                '<option value="0"' + (e.on ? '' : ' selected') + '>se repara</option></select>' +
+                '<span class="u">TCU</span><input type="text" inputmode="numeric" size="3" data-i="' + i + '" data-c="id" value="' + (e.id || 1) + '">';
+    } else {
+      campos = '<select data-i="' + i + '" data-c="dev">' + ['ncu', 'tcu', 'hsu'].map(function (d) {
+        return '<option value="' + d + '"' + (d === (e.dev || 'tcu') ? ' selected' : '') + '>' + d.toUpperCase() + '</option>';
+      }).join('') + '</select>' +
+      (e.dev === 'ncu' ? '' : '<input type="text" inputmode="numeric" size="3" data-i="' + i + '" data-c="id" value="' + (e.id || 1) + '">') +
+      '<span class="u">reg</span><input type="text" inputmode="numeric" size="6" data-i="' + i + '" data-c="dir" value="' + e.dir + '">' +
+      '<span class="u">=</span><input type="text" size="8" data-i="' + i + '" data-c="vals" value="' + (e.vals || [e.v || 0]).join(',') + '">';
+    }
+    return '<div class="ev' + (hecho ? ' hecho' : '') + (prox ? ' prox' : '') + '">' +
+      '<span class="marca">' + (hecho ? '✓' : (prox ? '▸' : '·')) + '</span>' +
+      '<input class="hora" type="text" inputmode="numeric" size="5" data-i="' + i + '" data-c="h" value="' + hhmm(e.h) + '">' +
+      '<span class="tipo">' + (T.n || e.t) + '</span>' + campos +
+      '<span class="est">' + (hecho ? 'hecho' : (prox ? 'en ' + minSim(falta.h) : 'pendiente')) + '</span>' +
+      '<button class="quita" data-q="' + i + '" title="Quitar">✕</button></div>';
+  }).join('');
+  cont.innerHTML = html;
+  pintaAñadir();
+  ataGuion();
+}
+
+function pintaAñadir() {
+  var c = $('escAdd');
+  if (c.dataset.hecho) return;
+  c.innerHTML = 'Añadir: ' + Object.keys(Escenario.TIPOS).map(function (t) {
+    return '<button class="btn sec" data-add="' + t + '" style="width:auto;padding:5px 11px">+ ' +
+           Escenario.TIPOS[t].n + '</button>';
+  }).join(' ');
+  c.dataset.hecho = '1';
+  Array.prototype.forEach.call(c.querySelectorAll('[data-add]'), function (b) {
+    b.onclick = function () {
+      if (!ESC) return;
+      if (!ESC._mio) { ESC = Escenario.deJSON(ESC.aJSON()); ESC._mio = true; $('escLista').value = 'mio'; }
+      ESC.eventos.push(Escenario.nuevo(b.getAttribute('data-add'), P ? P.t.hora + 0.5 : 12));
+      ESC.eventos.sort(function (a, b2) { return a.h - b2.h; });
+      if (P) ESC.recoloca(P.t.hora);
+      pintaEscenario();
+    };
+  });
+}
+
+/* Tocar un guion de ejemplo lo convierte en «el mío»: los de la casa son la referencia
+   y no se pisan — si no, el D.1.1 dejaría de ser el D.1.1 en cuanto alguien lo trastea. */
+function mio() {
+  if (ESC && !ESC._mio) { ESC = Escenario.deJSON(ESC.aJSON()); ESC._mio = true; $('escLista').value = 'mio'; }
+  return ESC;
+}
+function ataGuion() {
+  var c = $('escGuion');
+  Array.prototype.forEach.call(c.querySelectorAll('[data-c]'), function (el) {
+    el.onchange = function () {
+      var i = +el.getAttribute('data-i'), campo = el.getAttribute('data-c');
+      var E = mio(), e = E.eventos[i]; if (!e) return;
+      var v = el.value.trim().replace(',', '.'), cambio = {};
+      if (campo === 'h') cambio.h = deHhmm(v, e.h);
+      else if (campo === 'v') cambio.v = parseFloat(v) || 0;
+      else if (campo === 'on') cambio.on = v === '1';
+      else if (campo === 'id') cambio.id = parseInt(v, 10) || 1;
+      else if (campo === 'dir') cambio.dir = parseInt(v, 10) || 0;
+      else if (campo === 'vals') cambio.vals = v.split(/[,\s]+/).map(Number).filter(function (x) { return isFinite(x); });
+      else cambio[campo] = v;
+      E.cambia(i, cambio, P ? P.t.hora : null);
+      pintaEscenario();
+    };
+  });
+  Array.prototype.forEach.call(c.querySelectorAll('[data-q]'), function (b) {
+    b.onclick = function () {
+      var E = mio();
+      E.quita(+b.getAttribute('data-q'));
+      if (P) E.recoloca(P.t.hora);
+      pintaEscenario();
+    };
+  });
+}
+/* «10:30» o «10.5», las dos: se teclea de las dos formas según de dónde venga uno */
+function deHhmm(s, porDefecto) {
+  var m = String(s).match(/^(\d{1,2})[:h](\d{1,2})$/);
+  if (m) return Math.min(24, +m[1]) + Math.min(59, +m[2]) / 60;
+  var v = parseFloat(s);
+  return isFinite(v) ? Math.max(0, Math.min(24, v)) : porDefecto;
 }
 function hhmm(h) { return dosD(Math.floor(h)) + ':' + dosD(Math.round((h % 1) * 60)); }
 function minSim(h) {
@@ -1015,7 +1143,14 @@ function reproduce() {
   if (CAMPO) CAMPO.construye(P);
   HIST.limpia();
   corriendo = true; $('btnPlay').textContent = '⏸ Pausa';
+  vePestaña('campo');          /* reproducir sin ver la planta no enseña nada */
   pintaEscenario();
+}
+
+/* cambiar de vista desde código, pasando por el mismo sitio que un clic */
+function vePestaña(v) {
+  var b = document.querySelector('.tab[data-v="' + v + '"]');
+  if (b && vista !== v) b.click();
 }
 
 
@@ -1127,20 +1262,54 @@ function indiceDe(id) {
   for (var i = 0; i < P.tcus.length; i++) if (P.tcus[i].id === id) return i;
   return null;
 }
-/* Escenarios y Campo 3D a la vez: seguir un guion sin ver moverse la planta obliga a
-   ir y volver de pestaña, y entonces el escenario avanza donde no lo miras. El bloque
-   de mandos se MUEVE al 3D —el mismo nodo, no una copia— y vuelve a su pestaña al
-   salir. En el 3D se esconde el párrafo de introducción, que ahí solo estorba. */
-function llevaBarraEsc() {
-  var b = $('escBarra');
-  if (!b) return;
-  if (vista === 'campo') $('huecoEsc').appendChild(b);
-  else $('vesc').insertBefore(b, $('vesc').firstChild);
-  $('escIntro').style.display = vista === 'campo' ? 'none' : '';
-  $('escLinkOut').style.display = vista === 'campo' ? 'none' : '';
-  /* el lienzo cede lo que ocupa la barra, o el 3D se sale por abajo */
-  $('campo3d').style.height = vista === 'campo' ? 'min(58vh,620px)' : 'min(72vh,760px)';
-  if (CAMPO) CAMPO.redimensiona();
+/* ═══════════════════ registros bajo el campo ═══════════════════
+   La gracia del gemelo es que la mesa y lo que el equipo PUBLICA no son lo mismo. Verlo
+   obligaba a saltar de pestaña, y saltando no se ve: el inclinómetro descalibrado se
+   nota justo mirando el campo torcido y el 30111 clavado en su objetivo, a la vez.
+
+   Decodifica con las MISMAS funciones que el visor grande —`imagenes`, `decodifica`,
+   `legible`—, así que no hay dos lecturas del mapa que puedan divergir. */
+var MB3D_LAZO = [30111, 30112, 30110, 30113, 30001, 30096, 30011, 30006];
+function pintaModbus3D() {
+  if (!P || vista !== 'campo') return;
+  var t = tcuSel(); if (!t) return;
+  $('mb3dQuien').textContent = 'TCU ' + t.id;
+
+  /* la unidad la manda el equipo seleccionado en el campo, no el selector del visor */
+  var previa = $('mbUnidad').value;
+  $('mbUnidad').value = String(t.id);
+  var img = imagenes('tcu');
+  $('mbUnidad').value = previa;
+
+  var clavados = FIJADOS.filter(function (k) { return k.indexOf('tcu:') === 0; })
+                        .map(function (k) { return +k.split(':')[1]; });
+  var propios = clavados.length > 0;
+  var dirs = propios ? clavados : MB3D_LAZO;
+  $('mb3dFuente').textContent = propios ? clavados.length + ' clavados' : 'los del lazo';
+
+  var filas = '';
+  dirs.forEach(function (dir) {
+    var r = buscaDef('tcu', dir);
+    if (!r) return;
+    var d = decodifica(r, dir, img, false);
+    var clave = '3d:' + dir, cambia = false;
+    if (d) {
+      if (previos[clave] != null && previos[clave] !== d.crudo.join(',')) destellos[clave] = 3;
+      previos[clave] = d.crudo.join(',');
+      if (destellos[clave] > 0) { cambia = true; destellos[clave]--; }
+    }
+    var valor = d ? legible(d, r, 'tcu', dir) : '—';
+    if (d && (dir === 30113 || dir === 30114)) {
+      valor = '<span class="aprox">' + (dir === 30113 ? SIM.CRIT_TXT[d.val] : SIM.FUENTE_TXT[d.val]) + '</span>';
+    }
+    filas += '<tr class="' + (d ? '' : 'nosim') + (cambia ? ' cambia' : '') + '">' +
+      '<td class="dir">' + dir + '</td><td class="nom">' + r[1] + '</td>' +
+      '<td class="cru">' + (d ? d.crudo.map(function (x) { return '0x' + x.toString(16).toUpperCase().padStart(4, '0'); }).join(' ') : '—') + '</td>' +
+      '<td class="val">' + valor + '</td></tr>';
+  });
+  $('mb3dCuerpo').innerHTML =
+    '<table class="mb"><thead><tr><th>Dirección</th><th>Registro</th><th>Crudo</th><th>Valor</th></tr></thead>' +
+    '<tbody>' + filas + '</tbody></table>';
 }
 
 function montaCampo() {
@@ -1295,9 +1464,9 @@ function pintaTodo() {
   else if (vista === 'campo') {
     if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); }
     pintaEscenario();          /* los mandos del escenario están aquí: que no se congelen */
+    pintaModbus3D();
   }
   else if (vista === 'modbus') pintaModbus();
-  else if (vista === 'esc') pintaEscenario();
   else { pintaDetalle(); pintaHistoria(); }
 }
 function cabecera() {
@@ -1999,8 +2168,6 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
     vista = b.getAttribute('data-v');
     $('vplanta').style.display = vista === 'planta' ? '' : 'none';
     $('vcampo').style.display = vista === 'campo' ? '' : 'none';
-    $('vesc').style.display = vista === 'esc' ? '' : 'none';
-    llevaBarraEsc();
     if (vista === 'campo') montaCampo();
     $('vmodbus').style.display = vista === 'modbus' ? '' : 'none';
     $('vtcu').style.display = vista === 'tcu' ? '' : 'none';

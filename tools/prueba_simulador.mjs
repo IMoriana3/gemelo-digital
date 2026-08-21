@@ -191,8 +191,6 @@ const r = await pg.evaluate(async () => {
      «reproduciendo» con la simulacion parada, y la velocidad estaba en un deslizador
      del otro panel. */
   const $$ = (x) => document.getElementById(x);
-  [...document.querySelectorAll('button,[data-vista],.tab')]
-    .filter((x) => /escenario/i.test(x.textContent || ''))[0].click();
   /* el reloj lo han movido las pruebas de sombras hasta el atardecer; se devuelve a la
      mañana o los eventos del guion ya habrian pasado y no habria nada que contar */
   P.t.hora = 9;
@@ -226,16 +224,34 @@ const r = await pg.evaluate(async () => {
   o.repro.enPausa = $$('escEstado').textContent;
   o.repro.botonPausa = $$('escPausa').textContent;
 
-  /* Los mandos del escenario VIAJAN al Campo 3D: un solo nodo que se mueve, nunca dos
-     copias -- dos copias serian dos estados y uno de los dos mentiria. */
-  const tab = (re) => [...document.querySelectorAll('.tab')].find((x) => re.test(x.textContent)).click();
-  tab(/campo/i);
-  o.barra = { enCampo: $$('escBarra').parentElement.id,
-              copias: document.querySelectorAll('#escBarra, [id="escBarra"]').length,
-              vePlay: !!$$('escPlay').offsetParent,
-              lienzo: $$('campo3d').style.height };
-  tab(/escenario/i);
-  o.barra.vuelve = $$('escBarra').parentElement.id;
+  /* UNA SOLA vista: el guion arriba, el campo en medio y los registros abajo. Si vuelve
+     a haber una pestana de escenarios aparte, se sigue un guion sin ver la planta. */
+  o.vista = {
+    pestanas: [...document.querySelectorAll('.tab')].map((t) => t.textContent.trim()),
+    barraEnCampo: $$('escBarra').closest('#vcampo') !== null,
+    guionEnCampo: $$('escGuion').closest('#vcampo') !== null,
+    registrosEnCampo: !!$$('mb3d') && $$('mb3d').closest('#vcampo') !== null,
+    regs: document.querySelectorAll('#mb3dCuerpo tbody tr').length,
+    fuente: $$('mb3dFuente').textContent
+  };
+
+  /* EL GUION SE EDITA donde esta: hora, valor, quitar y anadir. */
+  const filas = () => [...document.querySelectorAll('#escGuion .ev')];
+  const ed = {};
+  ed.filas = filas().length;
+  const inHora = document.querySelector('#escGuion .hora');
+  inHora.value = '11:15'; inHora.dispatchEvent(new Event('change', { bubbles: true }));
+  const inVal = document.querySelector('#escGuion [data-c=v]');
+  inVal.value = '95'; inVal.dispatchEvent(new Event('change', { bubbles: true }));
+  ed.trasEditar = ESC.eventos.map((e) => `${e.h.toFixed(2)}:${e.v}`);
+  ed.esMio = !!ESC._mio;
+  [...document.querySelectorAll('#escGuion .quita')].pop().click();
+  ed.trasQuitar = ESC.eventos.length;
+  document.querySelector('#escAdd [data-add=av]').click();
+  ed.trasAnadir = ESC.eventos.length;
+  ed.tipos = [...new Set(ESC.eventos.map((e) => e.t))].sort();
+  ed.ordenado = ESC.eventos.every((e, k, a) => k === 0 || a[k - 1].h <= e.h);
+  o.editor = ed;
 
   /* Rehacer la planta no puede dejar geometrías tiradas en la GPU. Se PINTA después de
      cada reconstrucción: `info.memory` cuenta lo subido a la tarjeta, y sin un render
@@ -320,12 +336,22 @@ ok(R.salto.antesDe > 0 && R.salto.antesDe <= 2,
    `⏩ deja el reloj justo antes del evento, para verlo llegar: ${R.salto.de} → ${R.salto.hasta} h (${R.salto.antesDe} min antes de las ${R.salto.evento}:00)`);
 ok(R.salto.iTras > 0 && R.salto.viento === 45,
    `y el evento entra al seguir: viento ${R.salto.viento} km/h, ${R.salto.iTras} evento(s) hechos`);
-ok(r.barra.enCampo === 'huecoEsc' && r.barra.vePlay,
-   'los mandos del escenario viajan al Campo 3D: se sigue el guion viendo moverse la planta');
-ok(r.barra.copias === 1 && r.barra.vuelve === 'vesc',
-   `un solo bloque, no dos copias con dos estados (${r.barra.copias}), y vuelve a su pestaña`);
-ok(/58vh/.test(r.barra.lienzo),
-   `el lienzo cede lo que ocupa la barra (${r.barra.lienzo})`);
+ok(r.vista.barraEnCampo && r.vista.guionEnCampo && r.vista.registrosEnCampo,
+   'guion, campo y registros en la MISMA vista: se sigue un escenario viendo moverse la planta');
+ok(!r.vista.pestanas.some((t) => /^escenarios$/i.test(t)),
+   `y no hay pestaña de escenarios aparte: ${r.vista.pestanas.join(' · ')}`);
+ok(r.vista.regs >= 6,
+   `los registros del equipo salen bajo el campo (${r.vista.regs} · ${r.vista.fuente})`);
+
+console.log('');
+const E = r.editor;
+ok(E.filas >= 4, `el guion se pinta fila a fila, editable (${E.filas} eventos)`);
+ok(E.trasEditar[0] === '11.25:95' && E.ordenado,
+   `cambiar hora y valor se aplica y REORDENA: ${E.trasEditar.join(' · ')}`);
+ok(E.esMio, 'tocar un ejemplo de la casa hace una copia: el D.1.1 sigue siendo el D.1.1');
+ok(E.trasQuitar === E.filas - 1 && E.trasAnadir === E.filas,
+   `quitar y añadir eventos: ${E.filas} → ${E.trasQuitar} → ${E.trasAnadir}`);
+ok(E.tipos.includes('av'), `y el añadido es del tipo pedido (${E.tipos.join(', ')})`);
 
 ok(rotos.length === 0, 'sin errores de JavaScript' + (rotos.length ? ': ' + rotos[0] : ''));
 

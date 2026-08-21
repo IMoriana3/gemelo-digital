@@ -313,7 +313,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `cielo.js` · `difusa.js` | descomposición de Erbs y políticas de cielo cubierto (respaldo del navegador cuando no está el motor de SolarGPT) |
 | `canon.js` | cliente del motor local de SolarGPT: trayectoria y balance de batería llamados, no copiados |
 | `historia.js` | la traza de lo que ha pasado: objetivo, real, medido, SoC, viento y los eventos que lo explican |
-| `escenario.js` | situaciones grabables y reproducibles, compartibles por URL. Sus mandos **viven también en el Campo 3D**: el mismo bloque se mueve allí, para seguir un guion viendo moverse la planta |
+| `escenario.js` | situaciones grabables, **editables** y reproducibles, compartibles por URL. El catálogo de tipos de evento vive aquí, con `aplica()`, para que el editor no pueda ofrecer nada que el motor no sepa ejecutar |
 | `careo.js` | superpone una captura de la TCU Toolbox a la traza simulada: de «creemos que» a «±X» |
 | `campo3d.js` | el campo en 3D, con la geometría de `seguidor.js`: el seguidor **bífila** de la casa —dos vigas, un motor— o monofila si la planta lo es |
 | `servidor.mjs` | publica el motor por HTTP para que `scada/tools/ncu_simulada.py` lo sirva por **Modbus TCP de verdad** |
@@ -373,6 +373,7 @@ El contraste que decide es directo: **Wh de motor por día y por TCU**, que es l
   ```
 
   Con eso el colector y la toolbox reales hablan con la planta simulada, con su jerarquía, su inclinómetro que miente y su seta enclavada. Y **la escritura vuelve por el mismo sitio**: un FC06/FC16 contra esa NCU entra por `P.escribe()`, la misma puerta que usa la interfaz. No hay un camino «de la web» y otro «de Modbus». `python3 tools/ncu_simulada.py --gemelo … --autotest` recorre el camino entero y lo comprueba.
+- **Escenarios y Campo 3D son UNA vista.** El guion editable arriba, el campo en medio y los registros del equipo seleccionado abajo. Había una pestaña «Escenarios» aparte y se quitó: seguir un guion sin ver la planta no sirve, y ver la planta sin el guion tampoco. Los registros de abajo se decodifican con las mismas funciones que el visor grande, así que no hay dos lecturas del mapa.
 - **La seta no es un mando.** Es la entrada digital `30100.13`, y 30100 es de solo lectura: escribirla por Modbus se rechaza con excepción 02. El botón del panel simula que alguien la pulsa en el armario. Los mandos de verdad —forzados `40001…40007`, modo `40070`/`40071`— sí escriben, por `P.escribe()`, la misma puerta que el Modbus. **Un OFF de flota no existe en la NCU**: como en campo, va equipo por equipo con `40000 = 1`.
 - **La consigna de ángulo manual no tiene registro** en el mapa: el R7 la publica en el bloque de 50000 (solo lectura) y el mapa del TCU solo trae `40017`, que es jog este/oeste. La interfaz la pone por dentro y lo dice; es un hueco del mapa, no un atajo elegido.
 - **El selector bífila/monofila solo cambia la geometría del Campo 3D.** El consumo de motor y la batería salen de la física canónica, que ya es la del seguidor real.

@@ -95,6 +95,69 @@ function aplica(P, e) {
   return { ok: false, avisos: ['tipo de evento desconocido: ' + e.t] };
 }
 
+/* ── QUÉ SE PUEDE ESCRIBIR EN UN GUION ──
+   El catálogo vive aquí, con `aplica()`, y no en la interfaz. Si estuviera allí, el día
+   que se añada un evento nuevo habría que acordarse de tocar los dos sitios, y el editor
+   acabaría ofreciendo cosas que `aplica()` no sabe hacer —o al revés—. La interfaz se
+   limita a pintar esto. */
+var TIPOS = {
+  meteo: {
+    n: 'Meteo', campo: 'k',
+    ks: [ { k: 'viento', n: 'viento', u: 'km/h', min: 0, max: 160 },
+          { k: 'rachas', n: 'rachas', u: '%', min: 0, max: 100 },
+          { k: 'dir',    n: 'dirección', u: '°', min: 0, max: 360 },
+          { k: 'nubes',  n: 'nubes', u: '%', min: 0, max: 100 },
+          { k: 'nieve',  n: 'nieve', u: 'cm', min: 0, max: 60 },
+          { k: 'temp',   n: 'temperatura', u: '°C', min: -25, max: 45 } ]
+  },
+  w: {
+    n: 'Escritura Modbus', campo: 'dir',
+    ay: 'lo que se manda de verdad a un equipo: dirección y valor'
+  },
+  av: {
+    n: 'Avería', campo: 'k',
+    ks: [ { k: 'atasco',  n: 'eje calado' },
+          { k: 'duro',    n: 'eje duro' },
+          { k: 'off',     n: 'sin comunicación' },
+          { k: 'seta',    n: 'seta local pulsada' },
+          { k: 'cable',   n: 'cable de seta cortado' },
+          { k: 'setancu', n: 'seta del armario de la NCU' },
+          { k: 'accel',   n: 'inclinómetro averiado' } ]
+  }
+};
+Escenario.TIPOS = TIPOS;
+
+/* Un evento nuevo, con valores de partida que ya hacen algo — uno vacío obliga a
+   rellenar cuatro campos antes de ver nada. */
+Escenario.nuevo = function (t, h) {
+  h = h == null ? 12 : h;
+  if (t === 'meteo') return { h: h, t: 'meteo', k: 'viento', v: 45 };
+  if (t === 'av')    return { h: h, t: 'av', k: 'duro', id: 1, on: true };
+  return { h: h, t: 'w', dev: 'tcu', id: 1, dir: 40007, vals: [8192] };
+};
+
+Escenario.prototype.quita = function (i) {
+  if (i < 0 || i >= this.eventos.length) return;
+  this.eventos.splice(i, 1);
+  if (this.i > i) this.i--;
+};
+
+/* Cambiar un evento lo reordena, porque el guion va por hora. Y se recalcula por dónde
+   va la reproducción: si se mueve un evento al pasado, tiene que contar como hecho. */
+Escenario.prototype.cambia = function (i, campos, hora) {
+  var e = this.eventos[i];
+  if (!e) return null;
+  Object.assign(e, campos);
+  this.eventos.sort(function (a, b) { return a.h - b.h; });
+  if (hora != null) this.recoloca(hora);
+  return e;
+};
+Escenario.prototype.recoloca = function (hora) {
+  var n = 0;
+  for (var k = 0; k < this.eventos.length; k++) if (this.eventos[k].h <= hora) n++;
+  this.i = n;
+};
+
 /* Texto corto de un evento, para listarlo. */
 Escenario.prototype.txt = function (e) { return textoDe(e); };
 function textoDe(e) {
