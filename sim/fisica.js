@@ -17,8 +17,8 @@
    a 1e-9. Si difieren, se corrige AQUÍ: el Python manda. Si el core cambió a
    propósito, se regeneran los goldens y el cambio se ve en el diff.
 
-   COBERTURA HOY: 3 de las 6 funciones (motorW, heaterW, consumoTCU). Las otras tres
-   —cRateSafeLFP, hotDerate, poaAt— esperan a que el core publique su contraparte, y
+   COBERTURA HOY: 4 de las 7 funciones (motorW, heaterW, etaCharger, consumoTCU). Las otras
+   tres —cRateSafeLFP, hotDerate, poaAt— esperan a que el core publique su contraparte, y
    el arnés lo imprime en cada ejecución en vez de dejarlo implícito.
 */
 var FISICA = {
@@ -117,6 +117,19 @@ function cRateSafeLFP(t){
 }
 function hotDerate(t){if(t>=JEITA_T4)return 0;if(t>JEITA_T3)return 1-0.7*(t-JEITA_T3)/(JEITA_T4-JEITA_T3);return 1;}
 function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
+
+/* Rendimiento del regulador de carga en función de la irradiancia del panel,
+   η(G) = 0,96·(1 − e^(−G/100)), digitalizada de PS26002_RevA. Espejo de
+   solargpt_core.tcu_compare._eta_charger — el arnés la carea. Sin esto la
+   caída local de la ficha de batería no puede cargar. */
+var ETA_G = [0,50,100,200,350,500,600,750,850,1000,1100,1350];
+var ETA_V = ETA_G.map(function(g){ return 0.96*(1-Math.exp(-g/100)); }); ETA_V[0] = 0;
+function etaCharger(G){
+  var g = Math.abs(G||0); if (g <= 0) return 0;
+  if (g >= ETA_G[ETA_G.length-1]) return ETA_V[ETA_V.length-1];
+  var i = 0; while (i < ETA_G.length-2 && ETA_G[i+1] < g) i++;
+  return ETA_V[i] + (ETA_V[i+1]-ETA_V[i]) * ((g-ETA_G[i])/(ETA_G[i+1]-ETA_G[i]));
+}
 function poaAt(Rdeg,el,az,bh,dh,gh){
   if(el<=0)return 0;
   var R=Rdeg*D2R, sx=Math.cos(el)*Math.sin(az), sz=Math.sin(el);
@@ -152,6 +165,7 @@ function consumoTCU(o){
 FISICA.cRateSafeLFP = cRateSafeLFP;
 FISICA.hotDerate = hotDerate;
 FISICA.heaterW = heaterW;
+FISICA.etaCharger = etaCharger;
 FISICA.poaAt = poaAt;
 FISICA.motorW = motorW;
 FISICA.consumoTCU = consumoTCU;

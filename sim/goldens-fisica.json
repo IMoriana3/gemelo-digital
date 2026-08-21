@@ -4,6 +4,7 @@
   "vigiladas": [
    "motorW",
    "heaterW",
+   "etaCharger",
    "consumoTCU"
   ],
   "sin_vigilar": {
@@ -11,7 +12,7 @@
    "hotDerate": "contraparte solo en tcu_availability (sin mergear)",
    "poaAt": "contraparte solo en tcu_availability (sin mergear)"
   },
-  "nota": "3 de 6. Entran las otras tres cuando aterrice la absorción de tcu_availability. Un arnés que cubre la mitad sin decirlo convierte su verde en «todo careado», que es mentira."
+  "nota": "4 de 7. Entran las otras tres cuando aterrice la absorción de tcu_availability. Un arnés que cubre la mitad sin decirlo convierte su verde en «todo careado», que es mentira."
  },
  "constantes": {
   "motor.K0": 0.0503,
@@ -154,6 +155,84 @@
     "W": 0.0
    }
   ],
+  "etaCharger": [
+   {
+    "G": 0.0,
+    "eta": 0.0
+   },
+   {
+    "G": 1.0,
+    "eta": 0.007554611333517438
+   },
+   {
+    "G": 25.0,
+    "eta": 0.18886528333793595
+   },
+   {
+    "G": 50.0,
+    "eta": 0.3777305666758719
+   },
+   {
+    "G": 75.0,
+    "eta": 0.4922831515756436
+   },
+   {
+    "G": 100.0,
+    "eta": 0.6068357364754153
+   },
+   {
+    "G": 150.0,
+    "eta": 0.7184569322841335
+   },
+   {
+    "G": 200.0,
+    "eta": 0.8300781280928518
+   },
+   {
+    "G": 275.0,
+    "eta": 0.880544320003713
+   },
+   {
+    "G": 350.0,
+    "eta": 0.9310105119145742
+   },
+   {
+    "G": 500.0,
+    "eta": 0.9535315708808779
+   },
+   {
+    "G": 600.0,
+    "eta": 0.9576203979104002
+   },
+   {
+    "G": 750.0,
+    "eta": 0.9594690390046581
+   },
+   {
+    "G": 850.0,
+    "eta": 0.9598046703657498
+   },
+   {
+    "G": 1000.0,
+    "eta": 0.959956416067428
+   },
+   {
+    "G": 1100.0,
+    "eta": 0.9599839663672413
+   },
+   {
+    "G": 1225.0,
+    "eta": 0.9599913251232591
+   },
+   {
+    "G": 1350.0,
+    "eta": 0.959998683879277
+   },
+   {
+    "G": 1500.0,
+    "eta": 0.959998683879277
+   }
+  ],
   "consumoTCU": [
    {
     "in": {
@@ -269,5 +348,5 @@
    }
   ]
  },
- "n_casos": 39
+ "n_casos": 58
 }

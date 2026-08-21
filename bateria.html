@@ -218,6 +218,7 @@
 </div>
 </div>
 
+<script src="sim/fisica.js"></script><!-- ESPEJO del core Python, careado por tools/carea_fisica.mjs -->
 <script src="sim/viento.js"></script><!-- abanderamiento: el MISMO módulo que el simulador de planta y terreno.html -->
 <script>
 'use strict';
@@ -365,14 +366,10 @@ function poaAt(Rdeg,el,az,bh,dh,gh){
    Sustituye al rendimiento plano del 0,90 y al umbral duro de arranque: el propio
    regulador arranca despacio con irradiancia baja (η≈0,38 a 50 W/m², 0,61 a 100)
    y llega al 0,96 con sol pleno. */
-var ETA_G=[0,50,100,200,350,500,600,750,850,1000,1100,1350];
-var ETA_V=ETA_G.map(function(g){return 0.96*(1-Math.exp(-g/100))}); ETA_V[0]=0;
-function etaCharger(G){
-  var g=Math.abs(G||0); if(g<=0)return 0;
-  if(g>=ETA_G[ETA_G.length-1])return ETA_V[ETA_V.length-1];
-  var i=0; while(i<ETA_G.length-2 && ETA_G[i+1]<g) i++;
-  return ETA_V[i]+(ETA_V[i+1]-ETA_V[i])*((g-ETA_G[i])/(ETA_G[i+1]-ETA_G[i]));
-}
+/* η(G) del regulador: la pone el ESPEJO (sim/fisica.js), que el arnés carea contra
+   solargpt_core.tcu_compare._eta_charger. Aquí había una copia idéntica; una copia
+   idéntica hoy es la que mañana se queda atrás. */
+function etaCharger(G){ return FISICA.etaCharger(G); }
 
 /* ═══════════ Curva de carga CC/CV — BatteryModel v2 canónico (notebook 11.0) ═══════════
    La corriente admisible cae en SOC altos (fase CV): sin esto la batería sube en línea

@@ -20,7 +20,7 @@
        node tools/carea_fisica.mjs            # sale 1 si algo difiere
        node tools/carea_fisica.mjs --verboso  # imprime cada caso
 
-   COBERTURA: hoy son 3 de las 6 funciones de fisica.js, y el arnés lo IMPRIME.
+   COBERTURA: hoy son 4 de las 7 funciones de fisica.js, y el arnés lo IMPRIME.
    Un arnés que cubre la mitad sin decirlo convierte su verde en «todo careado»,
    que es mentira. Las otras tres entran cuando el core publique su contraparte.
 */
@@ -78,6 +78,7 @@ for (const [k, v] of Object.entries(G.constantes)) {
 /* ── las tres funciones vigiladas ── */
 for (const c of G.casos.motorW)  careo(`motorW(${c.ang})`,  c.W, F.motorW(c.ang));
 for (const c of G.casos.heaterW) careo(`heaterW(${c.t})`,   c.W, F.heaterW(c.t));
+for (const c of G.casos.etaCharger) careo(`etaCharger(${c.G})`, c.eta, F.etaCharger(c.G));
 
 for (const c of G.casos.consumoTCU) {
   const r = F.consumoTCU({ ...c.in, calefactada: false });
@@ -100,7 +101,7 @@ if (n !== N_ESPERADO) {
 
 /* ── informe ── */
 console.log(`\nfisica.js ↔ core · ${n} careos · tolerancia ${TOL}`);
-console.log(`cobertura: ${G.cobertura.vigiladas.join(', ')}  (${G.cobertura.vigiladas.length}/6)`);
+console.log(`cobertura: ${G.cobertura.vigiladas.join(', ')}  (${G.cobertura.vigiladas.length}/7)`);
 for (const [f, motivo] of Object.entries(G.cobertura.sin_vigilar))
   console.log(`   SIN VIGILAR  ${f} — ${motivo}`);
 
