@@ -411,11 +411,17 @@ Campo3D.prototype.construye = function (P) {
     }
     return planes[c];
   };
-  monta(planDe('largo', true), bifila ? -pitch / 2 : 0, largos);
-  monta(planDe('medio', true), bifila ? -pitch / 2 : 0, cortos);
+  /* LA VIGA DEL MOTOR VA AL OESTE. Lo dice el layout: «el motor va en la viga OESTE, a
+     filaZ al oeste del eje de unidad, y ahí es donde va la TCU». En este marco el norte
+     es −X y el este −Z, o sea que el OESTE es +Z — y yo tenía la del motor en −Z, con
+     lo que toda la electrónica salía en la fila de enfrente. No canta hasta que se
+     compara con el plano, que es lo que hace que estos errores duren. */
+  var dzOeste = bifila ? pitch / 2 : 0;
+  monta(planDe('largo', true), dzOeste, largos);
+  monta(planDe('medio', true), dzOeste, cortos);
   if (bifila) {
-    monta(planDe('largo', false), pitch / 2, largos);
-    monta(planDe('medio', false), pitch / 2, cortos);
+    monta(planDe('largo', false), -pitch / 2, largos);
+    monta(planDe('medio', false), -pitch / 2, cortos);
 
     /* El EJE DE TRANSMISIÓN: lo que hace que la gemela se mueva sin motor propio. Sin él
        la bífila son dos vigas girando a la vez porque sí. No es una pieza de `parts()`
@@ -454,7 +460,11 @@ Campo3D.prototype.construye = function (P) {
   this.grupoPlanta.add(this.testigos);
   this._colTmp = new T.Color();
   this._salud = new Array(this.n);
-  var mt = new T.Matrix4(), off = new T.Matrix4().makeTranslation(largo / 2 + 1.6, 1.2, 0);
+  /* El testigo va SOBRE EL MOTOR, que es donde está la TCU cuya salud representa. Estaba
+     en el extremo de la fila, que es un sitio sin nada: con dos vigas por seguidor, un
+     punto flotando en una punta no dice de quién es. El motor está en el centro del tubo
+     (la corona va en el origen local) y en la viga oeste. */
+  var mt = new T.Matrix4(), off = new T.Matrix4().makeTranslation(0, 1.1, dzOeste);
   for (var q = 0; q < this.n; q++) {
     mt.multiplyMatrices(this.bases[q], off);
     this.testigos.setMatrixAt(q, mt);

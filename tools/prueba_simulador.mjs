@@ -195,6 +195,21 @@ const r = await pg.evaluate(async () => {
   o.dz = [...new Set(C.piezas.map((p) => (p.mT ? +p.mT.elements[14].toFixed(2) : 0)))].sort((a, b) => a - b);
   o.eje = !!S.ejeTransGeom;
 
+  /* LA VIGA DEL MOTOR VA AL OESTE, que en este marco es +Z: lo dice el layout. Se
+     reconoce porque lleva casi todas las piezas -- la gemela solo tiene el slew twin. */
+  const porDz = {};
+  C.piezas.forEach((p) => { const dz = p.mT ? +p.mT.elements[14].toFixed(1) : 0;
+                            porDz[dz] = (porDz[dz] || 0) + 1; });
+  const lados = Object.entries(porDz).sort((a, b) => b[1] - a[1]);
+  o.oeste = { conMasPiezas: +lados[0][0], reparto: porDz };
+
+  /* y el TESTIGO de salud va SOBRE EL MOTOR: centro del tubo, viga oeste. */
+  const m0 = new T.Matrix4();
+  C.testigos.getMatrixAt(0, m0);
+  const pt = new T.Vector3().setFromMatrixPosition(m0);
+  const pb = new T.Vector3().setFromMatrixPosition(C.bases[0]);
+  o.testigo = [+(pt.x - pb.x).toFixed(1), +(pt.y - pb.y).toFixed(1), +(pt.z - pb.z).toFixed(1)];
+
   /* Nada enterrado ni flotando: el eje del tubo a la altura del poste y el poste
      tocando el suelo. Estaba todo 2 m mas abajo, con 1,10 m de poste bajo tierra. */
   const caja = new T.Box3(), mm = new T.Matrix4();
@@ -463,6 +478,10 @@ ok(r.viga.sinOpcion === r.viga.oeste,
 ok(r.mono.bifila === false && r.mono.dz.join() === '0' && r.vuelta === true,
    'el selector monofila/bífila rehace el campo y vuelve');
 ok(r.eje, 'el modelo trae el eje de transmisión, que es lo que mueve la viga gemela');
+ok(r.oeste.conMasPiezas > 0,
+   `la viga del MOTOR va al oeste (+Z), como dice el layout: ${JSON.stringify(r.oeste.reparto)}`);
+ok(r.testigo[0] === 0 && r.testigo[1] > 0 && r.testigo[2] === r.oeste.conMasPiezas,
+   `y el testigo de salud va SOBRE EL MOTOR, no en una punta: ${r.testigo.join(', ')} desde el eje de unidad`);
 ok(r.alturas.min >= -0.01 && r.alturas.max > r.alturas.postH,
    `nada enterrado ni flotando: de ${r.alturas.min} a ${r.alturas.max} m, con el eje del tubo a ${r.alturas.postH} m`);
 ok(r.sombraCerca < r.sombraLejos / 2,
