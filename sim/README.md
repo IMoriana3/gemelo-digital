@@ -313,7 +313,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `cielo.js` · `difusa.js` | descomposición de Erbs y políticas de cielo cubierto (respaldo del navegador cuando no está el motor de SolarGPT) |
 | `canon.js` | cliente del motor local de SolarGPT: trayectoria y balance de batería llamados, no copiados |
 | `historia.js` | la traza de lo que ha pasado: objetivo, real, medido, SoC, viento y los eventos que lo explican |
-| `escenario.js` | situaciones grabables y reproducibles, compartibles por URL |
+| `escenario.js` | situaciones grabables y reproducibles, compartibles por URL. Sus mandos **viven también en el Campo 3D**: el mismo bloque se mueve allí, para seguir un guion viendo moverse la planta |
 | `careo.js` | superpone una captura de la TCU Toolbox a la traza simulada: de «creemos que» a «±X» |
 | `campo3d.js` | el campo en 3D, con la geometría de `seguidor.js`: el seguidor **bífila** de la casa —dos vigas, un motor— o monofila si la planta lo es |
 | `servidor.mjs` | publica el motor por HTTP para que `scada/tools/ncu_simulada.py` lo sirva por **Modbus TCP de verdad** |

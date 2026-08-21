@@ -407,9 +407,12 @@
 
       <!-- ═══ vista ESCENARIOS ═══ -->
       <div id="vesc" style="display:none">
-        <div class="card">
+        <!-- Los mandos del escenario NO son de esta pestaña: el mismo bloque se MUEVE al
+             Campo 3D cuando se mira allí, para poder seguir un guion viendo moverse la
+             planta. Se mueve el nodo, no se duplica: dos copias serían dos estados. -->
+        <div class="card" id="escBarra">
           <h2>Escenarios <span class="badge" id="escEstado">—</span></h2>
-          <div class="sub">Una situación escrita una vez: se graba mientras trasteas, se reproduce igual y se comparte por enlace. Los ensayos del Anexo 4 dejan de ser un PDF y pasan a ser algo que se ejecuta.</div>
+          <div class="sub" id="escIntro">Una situación escrita una vez: se graba mientras trasteas, se reproduce igual y se comparte por enlace. Los ensayos del Anexo 4 dejan de ser un PDF y pasan a ser algo que se ejecuta.</div>
           <div class="escfila">
             <select id="escLista"></select>
             <button class="btn" id="escPlay" style="width:auto;padding:7px 16px">▶ Reproducir</button>
@@ -433,6 +436,7 @@
 
       <!-- ═══ vista CAMPO 3D ═══ -->
       <div id="vcampo" style="display:none">
+        <div id="huecoEsc"></div>   <!-- aquí aterrizan los mandos del escenario -->
         <div class="card" style="padding:0;overflow:hidden">
           <div id="campo3d" style="width:100%;height:min(72vh,760px);position:relative;background:#0b1119"></div>
         </div>
@@ -1123,6 +1127,22 @@ function indiceDe(id) {
   for (var i = 0; i < P.tcus.length; i++) if (P.tcus[i].id === id) return i;
   return null;
 }
+/* Escenarios y Campo 3D a la vez: seguir un guion sin ver moverse la planta obliga a
+   ir y volver de pestaña, y entonces el escenario avanza donde no lo miras. El bloque
+   de mandos se MUEVE al 3D —el mismo nodo, no una copia— y vuelve a su pestaña al
+   salir. En el 3D se esconde el párrafo de introducción, que ahí solo estorba. */
+function llevaBarraEsc() {
+  var b = $('escBarra');
+  if (!b) return;
+  if (vista === 'campo') $('huecoEsc').appendChild(b);
+  else $('vesc').insertBefore(b, $('vesc').firstChild);
+  $('escIntro').style.display = vista === 'campo' ? 'none' : '';
+  $('escLinkOut').style.display = vista === 'campo' ? 'none' : '';
+  /* el lienzo cede lo que ocupa la barra, o el 3D se sale por abajo */
+  $('campo3d').style.height = vista === 'campo' ? 'min(58vh,620px)' : 'min(72vh,760px)';
+  if (CAMPO) CAMPO.redimensiona();
+}
+
 function montaCampo() {
   if (CAMPO || !P) { if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); } return; }
   try {
@@ -1272,7 +1292,10 @@ function pintaTodo() {
   if (!P) return;
   cabecera();
   if (vista === 'planta') { pintaChips(); pintaFlota(); pintaNcu(); pintaHsu(); }
-  else if (vista === 'campo') { if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); } }
+  else if (vista === 'campo') {
+    if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); }
+    pintaEscenario();          /* los mandos del escenario están aquí: que no se congelen */
+  }
   else if (vista === 'modbus') pintaModbus();
   else if (vista === 'esc') pintaEscenario();
   else { pintaDetalle(); pintaHistoria(); }
@@ -1977,6 +2000,7 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
     $('vplanta').style.display = vista === 'planta' ? '' : 'none';
     $('vcampo').style.display = vista === 'campo' ? '' : 'none';
     $('vesc').style.display = vista === 'esc' ? '' : 'none';
+    llevaBarraEsc();
     if (vista === 'campo') montaCampo();
     $('vmodbus').style.display = vista === 'modbus' ? '' : 'none';
     $('vtcu').style.display = vista === 'tcu' ? '' : 'none';

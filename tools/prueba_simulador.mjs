@@ -226,6 +226,17 @@ const r = await pg.evaluate(async () => {
   o.repro.enPausa = $$('escEstado').textContent;
   o.repro.botonPausa = $$('escPausa').textContent;
 
+  /* Los mandos del escenario VIAJAN al Campo 3D: un solo nodo que se mueve, nunca dos
+     copias -- dos copias serian dos estados y uno de los dos mentiria. */
+  const tab = (re) => [...document.querySelectorAll('.tab')].find((x) => re.test(x.textContent)).click();
+  tab(/campo/i);
+  o.barra = { enCampo: $$('escBarra').parentElement.id,
+              copias: document.querySelectorAll('#escBarra, [id="escBarra"]').length,
+              vePlay: !!$$('escPlay').offsetParent,
+              lienzo: $$('campo3d').style.height };
+  tab(/escenario/i);
+  o.barra.vuelve = $$('escBarra').parentElement.id;
+
   /* Rehacer la planta no puede dejar geometrías tiradas en la GPU. Se PINTA después de
      cada reconstrucción: `info.memory` cuenta lo subido a la tarjeta, y sin un render
      por medio las mallas nuevas aún no están subidas — se leería un cero engañoso. */
@@ -309,6 +320,12 @@ ok(R.salto.antesDe > 0 && R.salto.antesDe <= 2,
    `⏩ deja el reloj justo antes del evento, para verlo llegar: ${R.salto.de} → ${R.salto.hasta} h (${R.salto.antesDe} min antes de las ${R.salto.evento}:00)`);
 ok(R.salto.iTras > 0 && R.salto.viento === 45,
    `y el evento entra al seguir: viento ${R.salto.viento} km/h, ${R.salto.iTras} evento(s) hechos`);
+ok(r.barra.enCampo === 'huecoEsc' && r.barra.vePlay,
+   'los mandos del escenario viajan al Campo 3D: se sigue el guion viendo moverse la planta');
+ok(r.barra.copias === 1 && r.barra.vuelve === 'vesc',
+   `un solo bloque, no dos copias con dos estados (${r.barra.copias}), y vuelve a su pestaña`);
+ok(/58vh/.test(r.barra.lienzo),
+   `el lienzo cede lo que ocupa la barra (${r.barra.lienzo})`);
 
 ok(rotos.length === 0, 'sin errores de JavaScript' + (rotos.length ? ': ' + rotos[0] : ''));
 
