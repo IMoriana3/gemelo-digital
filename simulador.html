@@ -672,10 +672,10 @@ function aplicaEstrategia(manual) {
   $('winterNota').innerHTML = 'Canónico: techo ' + pol.invierno.socMax + ' %, calibración cada ' +
     pol.invierno.calibDias + ' días y consumo de motor a ' + SIM.K.DEG_H_WINTER + ' °/h en vez de ' +
     SIM.K.DEG_H_NORMAL + '. Verano: ' + pol.verano.socMax + ' % / ' + pol.verano.calibDias + ' d.';
-  $('fisicaNota').innerHTML = 'Esta física no se escribe aquí: <code>sim/fisica.js</code> la genera de ' +
-    '<b>solargpt_core/tcu.py</b> (perfiles, motor medido y políticas), <b>tfm_constants.py</b> y el bloque ' +
-    'canónico de <a href="bateria.html" style="color:var(--blue)">bateria.html</a> (C-rate, JEITA, calefactor, ' +
-    'transposición). El generador se niega a escribir si las tres fuentes no dicen lo mismo.';
+  $('fisicaNota').innerHTML = 'Esta física no se escribe aquí: <code>sim/fisica.js</code> es el <b>espejo</b> del core ' +
+    '(<b>solargpt_core/tcu_compare.py</b> y <b>tcu.py</b>: motor medido, calefactor, regulador y ' +
+    'políticas), y <code>tools/carea_fisica.mjs</code> lo carea contra sus goldens a 1e-9. ' +
+    'Cubre hoy 4 de sus 7 funciones y lo imprime en cada ejecución.';
 }
 /* Cambiar de estrategia en caliente: se le pone una máquina nueva a cada TCU y se
    deja constancia de cuál manda. La B2 es la de la casa (decisión EPC). */

@@ -88,6 +88,35 @@ Canon.prototype.trayectoria = function (pet) {
   });
 };
 
+/* Balance de batería del TCU: POST /tcubalance. Mismo trato que la trayectoria —
+   el modelo de batería (SOC, OCV, curva η(G) del cargador, JEITA, calefactor,
+   inhibiciones y calibración) es de `run_tcu_sim` y se ejecuta ALLÍ.
+
+   Devuelve la respuesta tal cual, que ya viene autodeclarada: `motor` dice qué la
+   calculó, `modelo_stow` qué abanderamiento lleva dentro y `motor_el_burgo` el
+   consumo medido con su dominio. Aquí no se reinterpreta nada.
+
+   Null si el motor no está o contesta mal: quien llama cae a su cálculo local y
+   —esto es lo importante— lo DICE. */
+Canon.prototype.balance = function (pet) {
+  var yo = this;
+  return fetch(this.url + '/tcubalance', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(pet)
+  }).then(function (r) {
+    return r.ok ? r.json()
+                : r.text().then(function (t) { return Promise.reject(new Error(t.slice(0, 200))); });
+  }).then(function (j) {
+    if (!j || !j.resumen || !j.energia_wh) throw new Error('respuesta sin balance');
+    yo.estado = 'listo';
+    return j;
+  }).catch(function (e) {
+    yo.estado = 'error'; yo.detalle = String(e.message || e);
+    return null;
+  });
+};
+
 /* Consulta por hora civil, interpolando entre muestras. La serie da la vuelta al
    día, así que la hora se busca en circular: a las 23,9 h el vecino es 0,0 h. */
 Canon.prototype.en = function (hora) {
