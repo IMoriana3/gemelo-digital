@@ -277,7 +277,10 @@ const r = await pg.evaluate(async () => {
   for (let i = 0; i < 3; i++) { P.paso(60); ESC.paso(P, P.t.hora); }
   o.repro.salto = { de: +h0.toFixed(2), hasta: +hSalto.toFixed(2), evento: hEv,
                     antesDe: +((hEv - hSalto) * 60).toFixed(1),
-                    iTras: ESC.i, viento: +(P.meteo.viento * 3.6).toFixed(0) };
+                    iTras: ESC.i,
+                    /* el evento fija lo PEDIDO; el viento va llegando con su rampa */
+                    pedido: +(P.meteo.vientoObj * 3.6).toFixed(0),
+                    viento: +(P.meteo.viento * 3.6).toFixed(0) };
   $$('t3dPlay').click();
   o.repro.enPausa = $$('escEstado').textContent;
   o.repro.botonPausa = $$('t3dPlay').textContent;
@@ -513,8 +516,9 @@ ok(R.corriendo === 'reproduciendo' && R.enPausa === 'en pausa' && R.botonPausa =
    `reproduciendo → ${R.enPausa} con el botón de la barra de tiempo`);
 ok(R.salto.antesDe > 0 && R.salto.antesDe <= 2,
    `⏩ deja el reloj justo antes del evento, para verlo llegar: ${R.salto.de} → ${R.salto.hasta} h (${R.salto.antesDe} min antes de las ${R.salto.evento}:00)`);
-ok(R.salto.iTras > 0 && R.salto.viento === 45,
-   `y el evento entra al seguir: viento ${R.salto.viento} km/h, ${R.salto.iTras} evento(s) hechos`);
+ok(R.salto.iTras > 0 && R.salto.pedido === 45 && R.salto.viento > 5 && R.salto.viento < 45,
+   `y el evento entra al seguir: pide 45 km/h y el viento va por ${R.salto.viento} — ` +
+   `con rampa, que es como sube el viento de verdad`);
 ok(r.vista.barraEnCampo && r.vista.guionEnCampo && r.vista.registrosEnCampo,
    'guion, campo y registros en la MISMA vista: se sigue un escenario viendo moverse la planta');
 ok(!r.vista.pestanas.some((t) => /^escenarios$/i.test(t)),

@@ -68,7 +68,9 @@ Escenario.prototype.paso = function (P, hora) {
 
 function aplica(P, e) {
   if (e.t === 'meteo') {
-    if (e.k === 'viento') P.meteo.viento = e.v / 3.6;        /* se escribe en km/h */
+    /* se PIDE, no se impone: un escenario que salta de 0 a 100 km/h en un paso hace
+       abanderar la flota entera de golpe, que es justo lo que no pasa en campo */
+    if (e.k === 'viento') P.meteo.pideViento(e.v / 3.6);     /* se escribe en km/h */
     else if (e.k === 'rachas') P.meteo.rachas = e.v / 100;
     else if (e.k === 'dir') P.meteo.dirViento = e.v;
     else if (e.k === 'nubes') P.meteo.nubes = e.v;

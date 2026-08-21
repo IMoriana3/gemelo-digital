@@ -305,6 +305,12 @@ Rnd.prototype.next = function () {
   return this.s / 4294967296;
 };
 Rnd.prototype.entre = function (a, b) { return a + (b - a) * this.next(); };
+/* Normal(0,1) por Box-Muller, con la misma semilla: la turbulencia tiene que ser
+   reproducible o dos corridas del mismo escenario abanderarían en momentos distintos. */
+Rnd.prototype.normal = function () {
+  var u = Math.max(1e-9, this.next()), v = this.next();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+};
 
 /* ═══════════════════ sol y seguimiento ═══════════════════
    Las mismas fórmulas del gemelo (index.html): hora CIVIL → hora solar con
@@ -377,7 +383,7 @@ function bits(campos, valores) {
 function HSU(id, planta) {
   this.id = id; this.p = planta;
   this.rnd = new Rnd(9000 + id * 7);
-  this.viento = 3; this.racha = 3; this.dir = 200 + id * 15;
+  this.viento = 3; this.racha = 3; this.gust = 1; this.dir = 200 + id * 15;
   this.nieve = 0; this.ghi = 0; this.poa = 0; this.difusa = 0;
   this.nivel = 0; this.vBat = 13200;
   this.online = true; this.ultimoContacto = planta.t.epoch;
@@ -391,7 +397,23 @@ HSU.prototype.paso = function (dt) {
   this.tSuavizado += dt;
   var f = Math.sin(this.tSuavizado / 47 + this.id) * 0.5 + Math.sin(this.tSuavizado / 13 + this.id * 2) * 0.3;
   this.viento = Math.max(0, m.viento * (1 + 0.18 * f) + this.rnd.entre(-0.4, 0.4));
-  this.racha = Math.max(this.viento, this.viento * (1 + m.rachas * 0.45));
+
+  /* LA RACHA ES UN PICO, no un porcentaje fijo sobre la media. Antes era
+     `viento · (1 + rachas·0,45)`, o sea una escala constante: el «factor de racha» subía
+     y bajaba con el deslizador pero nunca RACHEABA. Ahora es un proceso de reversión a la
+     media —Ornstein-Uhlenbeck— con una constante de unos segundos: sube deprisa, se
+     mantiene un momento y afloja, que es la forma que tiene una ráfaga.
+
+     La forma discreta exacta (`a = e^(−dt/τ)`, ruido escalado por √(1−a²)) mantiene la
+     misma desviación típica dé el paso que dé — a ×1800 el paso son 60 s simulados, y con
+     una integración ingenua la turbulencia se dispararía o se apagaría según la velocidad
+     de la simulación. */
+  var tau = 9;                                     /* s: escala de una ráfaga */
+  var aG = Math.exp(-dt / tau);
+  var sigma = m.rachas * 0.45;                     /* misma amplitud que el factor viejo */
+  this.gust = 1 + (this.gust - 1) * aG + sigma * Math.sqrt(1 - aG * aG) * this.rnd.normal();
+  if (this.gust < 1) this.gust = 1;                /* una racha suma, no resta */
+  this.racha = this.viento * this.gust;
   this.dir = (m.dirViento + Math.sin(this.tSuavizado / 90 + this.id) * 12 + 360) % 360;
   this.nieve = m.nieve;
   var P = posicionSolar(this.p.loc, this.p.t.dia, this.p.t.hora);
@@ -399,9 +421,13 @@ HSU.prototype.paso = function (dt) {
   this.ghi = 1000 * claro;
   this.difusa = this.ghi * (0.12 + 0.6 * (m.nubes / 100));
   this.poa = this.ghi * 1.12;               /* POA de un seguidor de referencia */
-  /* nivel de viento (bits 2:0 del MSR): 0 calma · 1 aviso ≥40 km/h · 2 alarma ≥60 km/h */
-  var v = Math.max(this.viento, this.racha);
-  this.nivel = v >= K.WIND_T2 ? 2 : (v >= K.WIND_T1 ? 1 : 0);
+  /* Nivel de viento (bits 2:0 del MSR): 0 calma · 1 aviso ≥40 km/h · 2 alarma ≥60 km/h.
+     Lo decide la MEDIA, no el pico. Antes era `max(media, racha)`, y con rachas de verdad
+     —un proceso con picos, no un porcentaje fijo— eso hace que el nivel suba y baje con
+     cada ráfaga de tres segundos: un equipo que abandera y desabandera sin parar. Un
+     anemómetro reporta media y racha por separado, y la racha ya tiene su propio bit
+     (`alarmaRacha`, 30002.10). */
+  this.nivel = this.viento >= K.WIND_T2 ? 2 : (this.viento >= K.WIND_T1 ? 1 : 0);
   if (this.online) this.ultimoContacto = this.p.t.epoch;
 };
 HSU.prototype.alarmaViento = function () { return this.nivel >= 2; };
@@ -1099,7 +1125,10 @@ NCU.prototype.paso = function () {
     if (!h.online) { fw = true; fs = true; continue; }
     if (h.nivel > n) n = h.nivel;
     /* para decidir un abanderamiento, el peor dato es el que cuenta (CONTRATO.md) */
-    if (Math.max(h.viento, h.racha) > vmax) { vmax = Math.max(h.viento, h.racha); dmax = h.dir; }
+    /* la MEDIA de la estación que más sopla, no su pico. El abanderamiento se decide
+       sobre esto, y con rachas de verdad —picos de segundos— tomar el máximo hace que el
+       seguidor abandere y desabandere con cada ráfaga. La racha tiene su alarma aparte. */
+    if (h.viento > vmax) { vmax = h.viento; dmax = h.dir; }
     av = av || h.alarmaViento(); an = an || h.alarmaNieve(); ar = ar || h.alarmaRacha();
     fw = fw || h.falloVientoSensor; fs = fs || h.falloNieveSensor;
     /* dirección de viento del ESTE (45°–135°): el R7 lo republica como «inverted wind» */
@@ -1113,13 +1142,41 @@ NCU.prototype.paso = function () {
 /* ═══════════════════ meteorología de la planta ═══════════════════ */
 function Meteo() {
   this.nubes = 15;        /* % */
-  this.viento = 3;        /* m/s medios */
-  this.rachas = 0.2;      /* factor de racha 0..1 */
+  /* EL VIENTO NO SALTA. `vientoObj` es lo que se pide —el deslizador, un escenario— y
+     `viento` lo que hay ahora mismo: la media de planta llega al objetivo con una
+     constante de tiempo de minutos, que es como sube y baja el viento de verdad. Antes
+     pasaba de 0 a 100 km/h en un paso, y con eso el abanderamiento se disparaba de golpe
+     en toda la flota a la vez — que es justo lo que no pasa en campo. */
+  this.viento = 3;        /* m/s medios AHORA */
+  this.vientoObj = 3;     /* m/s medios pedidos */
+  this.tauViento = 240;   /* s para llegar al 63 % del cambio */
+  this.rachas = 0.2;      /* intensidad de turbulencia 0..1 */
   this.dirViento = 200;   /* ° */
   this.nieve = 0;         /* m acumulados */
   this.tMedia = 14; this.tAmplitud = 9;
   this.p = null;
 }
+/* Escribir `meteo.viento = x` a pelo sigue haciendo lo de siempre: SALTAR. Es lo que
+   quiere una prueba que monta una situación de temporal y no quiere esperar cuatro
+   minutos simulados a que llegue. La rampa se pide expresamente con `pideViento()`, que
+   es lo que usan el deslizador y los escenarios — o sea, todo lo que hace un humano. */
+Object.defineProperty(Meteo.prototype, 'viento', {
+  get: function () { return this._v; },
+  set: function (v) { this._v = v; this.vientoObj = v; },
+  configurable: true
+});
+
+/* Se pide un viento; la planta tarda en tenerlo. */
+Meteo.prototype.pideViento = function (v) { this.vientoObj = Math.max(0, v); };
+/* y para arrancar o saltar a una situación ya establecida, sin rampa */
+Meteo.prototype.ponViento = function (v) { this.viento = this.vientoObj = Math.max(0, v); };
+Meteo.prototype.paso = function (dt) {
+  if (this.vientoObj == null) this.vientoObj = this.viento;
+  var a = Math.exp(-dt / Math.max(1, this.tauViento));
+  /* al `_v` directamente: pasar por el setter fijaría el objetivo y no habría rampa */
+  this._v = this.vientoObj + (this._v - this.vientoObj) * a;
+  if (Math.abs(this._v - this.vientoObj) < 0.02) this._v = this.vientoObj;
+};
 Meteo.prototype.transmitancia = function () { return Math.max(0.08, 1 - (this.nubes / 100) * 0.85); };
 Meteo.prototype.tAmb = function () {
   /* día sinusoidal con mínimo al alba y máximo a media tarde */
@@ -1244,6 +1301,7 @@ Planta.prototype.paso = function (dt) {
   var ent = Math.floor(this.tResto);
   if (ent) { this.t.epoch += ent; this.tResto -= ent; }
   this.averiasPaso(dt);
+  this.meteo.paso(dt);          /* el viento va llegando a lo que se le ha pedido */
   var i;
   for (i = 0; i < this.hsus.length; i++) this.hsus[i].paso(dt);
   this.ncu.paso();

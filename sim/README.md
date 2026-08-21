@@ -335,6 +335,15 @@ node tools/carea_fisica.mjs  # si cambia la gestión de batería en SolarGPT
 
 La prueba decodifica **al revés** que el motor —como lo haría el colector del SCADA, no como lo escribió quien lo codificó—, así que un cambio de orden de palabra o de escala se cae en el sitio.
 
+### El viento no salta, y las rachas rachean
+
+Dos cosas que el simulador hacía mal y que se notan justo donde importa, que es el abanderamiento:
+
+- **La media tarda en subir.** El deslizador y los escenarios *piden* un viento (`pideViento`) y la planta llega con una constante de tiempo de **cuatro minutos**. Antes pasaba de 0 a 100 km/h en un paso, y con eso la flota entera abanderaba de golpe — que es justo lo que no pasa en campo. Escribir `meteo.viento` a pelo sigue saltando: es lo que quiere una prueba que monta un temporal y no quiere esperar la rampa.
+- **La racha es un pico, no un porcentaje.** Era `viento × (1 + rachas·0,45)`, una escala constante: el «factor de racha» subía con el deslizador pero nunca racheaba. Ahora es un proceso de **reversión a la media** con τ ≈ 9 s — sube deprisa, se mantiene un momento y afloja. La forma discreta exacta mantiene la misma desviación típica dé el paso que dé; con una integración ingenua, a ×1800 (60 s por paso) la turbulencia se dispararía o se apagaría según la velocidad de la simulación.
+
+Y una consecuencia: **el nivel de viento lo decide la media, no el pico**. Era `max(media, racha)`, y con ráfagas de verdad eso hace que el nivel suba y baje con cada una — un equipo que abandera y desabandera sin parar. Un anemómetro reporta media y racha por separado, y la racha ya tiene su propio bit (`alarmaRacha`, 30002.10). Lo mismo en la NCU, que agrega la media de la estación que más sopla.
+
 ## De dónde salen los números
 
 - **Mapa y bits:** ficha `cobertura-zigbee/modbus.html`, que transcribe `NCU_Modbus_Map_R7`, `SUNNER_TCU_ModbusMap_v6` (FW v1.4.3) y `HSU_Modbus_Map_R23`.

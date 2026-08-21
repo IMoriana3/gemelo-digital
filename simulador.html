@@ -472,6 +472,19 @@
             <input type="range" id="t3dDia" min="1" max="365" step="1" value="172" style="max-width:140px;flex:0 1 140px">
             <span class="t" id="t3dDiaLbl" style="min-width:64px">21 jun</span>
           </div>
+          <!-- El viento, donde se ve lo que hace. Estaba solo en el panel de la
+               izquierda, y lo que decide un abanderamiento se toca mirando el campo. -->
+          <div class="timerow">
+            <span class="lbl">viento</span>
+            <input type="range" id="t3dViento" min="0" max="30" step="0.5" style="max-width:220px">
+            <span class="t" id="t3dVientoLbl" style="min-width:72px">11 km/h</span>
+            <span class="lbl">de</span>
+            <input type="range" id="t3dDir" min="0" max="359" step="5" style="max-width:170px">
+            <span class="t" id="t3dDirLbl" style="min-width:78px">SSO 200°</span>
+            <span class="lbl">rachas</span>
+            <input type="range" id="t3dRacha" min="0" max="100" step="5" style="max-width:130px">
+            <span class="t" id="t3dRachaLbl" style="min-width:44px">20 %</span>
+          </div>
           <div class="hud" id="hud3d"></div>
         </div>
         <!-- Los registros del equipo que estás mirando, debajo del campo. Es lo que hace
@@ -851,7 +864,7 @@ function aplicaEstrategiaViento() {
     (e.canon ? ' <b>Es la de la casa</b> (decisión EPC).' : '');
 }
 function aplicaMeteo() {
-  P.meteo.viento = +$('viento').value;
+  P.meteo.pideViento(+$('viento').value);   /* el viento tarda en llegar, como en el campo */
   P.meteo.rachas = +$('racha').value / 100;
   P.meteo.dirViento = +$('dirViento').value;
   P.meteo.nubes = +$('nubes').value;
@@ -1192,6 +1205,21 @@ function sincroVel() {
     $('t3dDia').value = String(P.t.dia);
     $('t3dDiaLbl').textContent = fechaCorta(P.t.dia);
   }
+}
+/* Los tres mandos del viento son ESPEJO de los del panel: el mismo estado, tocado desde
+   donde se esté mirando. Y la velocidad se PIDE —`pideViento`—, así que el número de al
+   lado enseña lo que hay y, si aún va de camino, adónde va. */
+function sincroViento() {
+  if (!P) return;
+  var v = +$('viento').value, d = +$('dirViento').value, r = +$('racha').value;
+  if (document.activeElement !== $('t3dViento')) $('t3dViento').value = String(v);
+  if (document.activeElement !== $('t3dDir')) $('t3dDir').value = String(d);
+  if (document.activeElement !== $('t3dRacha')) $('t3dRacha').value = String(r);
+  var hay = P.meteo.viento * 3.6, pide = P.meteo.vientoObj * 3.6;
+  $('t3dVientoLbl').textContent = hay.toFixed(0) + ' km/h' +
+    (Math.abs(hay - pide) > 1.5 ? ' → ' + pide.toFixed(0) : '');
+  $('t3dDirLbl').textContent = rumbo(d) + ' ' + d + '°';
+  $('t3dRachaLbl').textContent = r + ' %';
 }
 function fechaCorta(dia) {
   var md = [31,28,31,30,31,30,31,31,30,31,30,31];
@@ -1617,6 +1645,7 @@ function pintaTodo() {
     if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); }
     pintaEscenario();          /* los mandos del escenario están aquí: que no se congelen */
     pintaHud3D();
+    sincroViento();
     pintaModbus3D();
     if (CAMPO && $('nota3d')) {
       var n3 = $('nota3d');
@@ -2400,6 +2429,13 @@ $('escLista').onchange = function () { cargaEscenario(this.value); };
 $('escPlay').onclick = reproduce;
 $('escSalta').onclick = saltaAlEvento;
 $('t3dVel').onchange = function () { ponVel(this.value); pintaEscenario(); };
+[['t3dViento', 'viento'], ['t3dDir', 'dirViento'], ['t3dRacha', 'racha']].forEach(function (par) {
+  $(par[0]).oninput = function () {
+    $(par[1]).value = this.value;
+    $(par[1]).dispatchEvent(new Event('input', { bubbles: true }));
+    sincroViento();
+  };
+});
 /* EL DESLIZADOR DE TIEMPO, como en overcast: se arrastra y la planta va a esa hora.
    Mueve el mismo `#hora` del panel, que es quien manda; no hay dos relojes. */
 $('t3dHora').oninput = function () { ponHora(+this.value / 60, false); };

@@ -89,6 +89,62 @@ ok(Math.sign(pl.tcu(1).anguloReal) === ladoMañana,
    'sigue en el mismo lado después del mediodía solar', pl.tcu(1).anguloReal.toFixed(0) + '°');
 ok(cruce < 1, 'y no ha dado ningún viaje al otro lado con el viento encima');
 
+console.log('\n── el viento no salta, y las rachas rachean ──');
+{
+  const pv = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 10 });
+  pv.meteo.ponViento(0);
+  pv.meteo.pideViento(27.8);                       /* 100 km/h pedidos */
+  const t = [];
+  for (let k = 0; k < 16; k++) { pv.paso(30); t.push(pv.meteo.viento * 3.6); }
+  ok(t[0] < 25 && t[0] > 3, 'medio minuto después aún no ha llegado ni a un cuarto',
+     t[0].toFixed(0) + ' km/h de 100');
+  ok(t.every((v, i) => i === 0 || v > t[i - 1]), 'y sube de forma monótona, sin escalones');
+  ok(t[15] > 80 && t[15] < 100, 'a los ocho minutos ronda el valor pedido',
+     t[15].toFixed(0) + ' km/h');
+
+  /* escribir `viento` a pelo SÍ salta: es lo que quiere una prueba que monta un temporal */
+  pv.meteo.viento = 5;
+  pv.paso(1);
+  ok(Math.abs(pv.meteo.viento - 5) < 0.1, 'pero escribir meteo.viento a pelo sigue saltando',
+     pv.meteo.viento.toFixed(1) + ' m/s');
+
+  /* la racha es un PICO, no un porcentaje fijo: tiene que variar sola */
+  pv.meteo.ponViento(12); pv.meteo.rachas = 0.4;
+  for (let k = 0; k < 40; k++) pv.paso(5);
+  const g = [];
+  for (let k = 0; k < 60; k++) { pv.paso(5); g.push(+(pv.hsus[0].racha / pv.hsus[0].viento).toFixed(2)); }
+  const distintos = new Set(g).size;
+  ok(distintos > 10, 'la racha va y viene, no es un factor plano',
+     distintos + ' valores distintos en 60 muestras');
+  ok(Math.min.apply(null, g) >= 1 && Math.max.apply(null, g) > 1.1,
+     'y siempre SUMA sobre la media, con picos por encima',
+     '×' + Math.min.apply(null, g).toFixed(2) + ' … ×' + Math.max.apply(null, g).toFixed(2));
+
+  /* El nivel lo decide la MEDIA, y la forma exacta de comprobarlo es que la turbulencia
+     NO lo cambie: misma media, misma semilla, `rachas` de 0 a tope. Si lo decidiera el
+     pico —como antes, con `max(media, racha)`— el equipo abanderaría del todo con cada
+     ráfaga de tres segundos. Elegir un viento «lejos de los umbrales» no vale: la media
+     de la propia estación varía un 18 % y siempre acaba pisando alguno. */
+  const nivelCon = (rachas) => {
+    const q = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 10 });
+    q.meteo.ponViento(12); q.meteo.rachas = rachas;
+    const vistos = [];
+    let picos = 0;
+    for (let k = 0; k < 200; k++) {
+      q.paso(5);
+      vistos.push(q.hsus[0].nivel);
+      if (q.hsus[0].racha >= SIM.K.WIND_T2) picos++;
+    }
+    return { niveles: vistos.join(''), picos: picos };
+  };
+  const sin = nivelCon(0), con = nivelCon(1);
+  ok(con.picos > 0 && sin.picos === 0,
+     'con la turbulencia al máximo hay rachas que pasan de 60 km/h y sin ella no',
+     con.picos + ' contra ' + sin.picos + ' de 200 muestras');
+  ok(sin.niveles === con.niveles,
+     'y el NIVEL sale idéntico con y sin ráfagas: lo fija la media, no el pico');
+}
+
 console.log('\n── sector parcial: 40-60 km/h ──');
 const pp = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 10 });
 pp.meteo.viento = 13;                                     /* 47 km/h → parcial */

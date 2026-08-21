@@ -599,12 +599,22 @@ Campo3D.prototype.actualiza = function (P) {
      detrás de la cámara no se ve, que es lo correcto. */
   if (s && (solMovio || this._solPuesto !== this.orbita.radio())) {
     this._solPuesto = this.orbita.radio();
-    var dm = Math.max(45, this._solPuesto * 0.8);
     var el2 = Math.max((90 - s.zen) * D2R, 0.04), az2 = s.az * D2R, ce2 = Math.cos(el2);
-    var tg2 = this.sol.target.position;
-    this.solMesh.position.set(tg2.x + Math.cos(az2) * ce2 * dm, Math.sin(el2) * dm,
-                              tg2.z + Math.sin(az2) * ce2 * dm);
-    this.solMesh.scale.setScalar(Math.max(1.2, dm * 0.035));
+    /* El disco tiene que quedar FUERA de la planta. Estaba atado solo al zoom, y con el
+       sol bajo su distancia horizontal —cos(elev)·dm— se quedaba corta: el sol salía
+       entre las filas, a ras del suelo y dentro del campo. Ahora la distancia HORIZONTAL
+       es lo que se garantiza: pasada la esquina más lejana de la planta, y además lo
+       bastante lejos para la cámara que hay puesta. */
+    var radioCampo = Math.hypot(this._ext.x, this._ext.z) / 2;
+    var horiz = Math.max(radioCampo * 1.35, this._solPuesto * 0.75, 60);
+    var dm = horiz / Math.max(0.05, ce2);            /* de horizontal a distancia real */
+    /* Y va referido al CENTRO DE LA PLANTA, no al objetivo de la sombra. La LUZ sí sigue
+       a ese objetivo —lo necesita el mapa de sombras—, pero el disco es el sol del
+       paisaje: colgado del objetivo, que se desplaza con la cámara, acababa cayendo
+       entre las filas. */
+    this.solMesh.position.set(Math.cos(az2) * horiz, Math.sin(el2) * dm,
+                              Math.sin(az2) * horiz);
+    this.solMesh.scale.setScalar(Math.max(1.2, dm * 0.03));
     this.solMesh.visible = !!s.dia;
     this._sucio = true;
   }
