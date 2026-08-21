@@ -6,7 +6,7 @@ Se abre en `../simulador.html`. No necesita servidor ni red: es HTML y tres fich
 
 ## Por qué
 
-El gemelo de `index.html` ya tenía seguimiento solar y los modos manual/auto de un seguidor. Lo que faltaba para que sirviera de banco de pruebas es todo lo demás: **la planta**. Un TCU no decide solo — le llegan el viento de una HSU que no es la suya, un interruptor de limpieza del armario de la NCU, un forzado por Modbus a su grupo, una seta que inhibe el motor entero. Y esas decisiones se ven, desde fuera, como registros Modbus concretos.
+El gemelo de `index.html` ya tenía seguimiento solar y los modos manual/auto de un seguidor. Lo que faltaba para que sirviera de banco de pruebas es todo lo demás: **la planta**. Un TCU no decide solo — le llegan el viento de una HSU que no es la suya, un interruptor de limpieza del armario de la NCU, un forzado por Modbus a su grupo, una seta que le corta el motor. Y esas decisiones se ven, desde fuera, como registros Modbus concretos.
 
 Aquí están las dos cosas a la vez: el comportamiento y su reflejo en el mapa.
 
@@ -16,7 +16,7 @@ De más a menos prioritaria. La regla que gana es la que fija el ángulo objetiv
 
 | # | Regla | Qué la dispara | Dónde se ve |
 |---|---|---|---|
-| — | **Seta de emergencia (TCU)** | pulsador local, cable NC cortado — o el **pulsador de parada** de la NCU | no decide el objetivo: **corta el motor**. 30002.4 `AlarmStopButton` · 30006.11. El de la NCU es 30100.13 `Stop button`, que **no es una seta**: ver nota abajo |
+| — | **Seta de emergencia** — del TCU, y solo del TCU | pulsador local o cable NC cortado | no decide el objetivo: **corta el motor** de ese equipo. 30002.4 `AlarmStopButton` · 30006.11. La NCU no tiene seta ni pulsador de parada: ver nota abajo |
 | 1 | **SP1 viento** | nivel de viento de cualquier HSU o `force_sp_1` al grupo | 30001 bits 15:13 = 1 |
 | 2 | **SP3 nieve** | alarma de nieve o `force_sp_3` | 30001 bits 15:13 = 3 |
 | 3 | **SP4 limpieza** | interruptor de limpieza del grupo (NCU 30100 bits 12:3) o `force_sp_4` | 30001 bits 15:13 = 4 |
