@@ -308,7 +308,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 |---|---|
 | `planta.js` | el motor: física, jerarquía y generación de la imagen de registros. Sin DOM — se ejecuta igual en Node |
 | `modbus-map.js` | **generado**, no se toca a mano: 515 direcciones del mapa canónico |
-| `fisica.js` | **generado**, no se toca a mano: perfiles, constantes medidas, políticas y curvas de carga |
+| `fisica.js` | **espejo vigilado** del core, no generado: se mantiene a mano declarando que manda el Python, y `tools/carea_fisica.mjs` lo carea contra sus goldens |
 | `viento.js` | **compartido con cobertura-zigbee**: la estrategia B2 de abanderamiento, una sola implementación |
 | `cielo.js` · `difusa.js` | descomposición de Erbs y políticas de cielo cubierto (respaldo del navegador cuando no está el motor de SolarGPT) |
 | `canon.js` | cliente del motor local de SolarGPT: trayectoria y balance de batería llamados, no copiados |
