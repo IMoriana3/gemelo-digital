@@ -93,7 +93,7 @@
   <div class="brand"><span class="dot"></span>Factiun · <b>Gestión de Batería TCU</b></div>
   <a href="index.html">← Gemelo Seguidor + TCU</a>
   <a href="simulador.html">Planta + Modbus →</a>
-  <div class="right"><span id="srcTag">—</span><span id="clock"></span></div>
+  <div class="right"><span id="motorTag" title="Quién ha calculado el balance que estás viendo" style="margin-right:10px;padding:2px 8px;border-radius:8px;border:1px solid var(--line2);font-size:12px;color:var(--warn)">— comprobando motor</span><span id="srcTag">—</span><span id="clock"></span></div>
 </nav>
 <div class="main">
 
@@ -218,6 +218,8 @@
 </div>
 </div>
 
+<script src="sim/fisica.js"></script><!-- ESPEJO del core Python, careado por tools/carea_fisica.mjs -->
+<script src="sim/canon.js"></script><!-- cliente del motor local de SolarGPT (POST /tcubalance) -->
 <script src="sim/viento.js"></script><!-- abanderamiento: el MISMO módulo que el simulador de planta y terreno.html -->
 <script>
 'use strict';
@@ -283,9 +285,10 @@ var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
 var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=0.5;
 
 /* ═══════════ CONSUMO DEL TCU — canónico, un solo sitio ═══════════
-   Lo que gasta un TCU en un paso: electrónica, motor y calefactor. Vive AQUÍ y lo copia
-   entero tools/extrae_fisica.mjs a sim/fisica.js, así que ni el simulador de planta ni el
-   informe de impacto lo recalculan: llaman a esta misma función.
+   Lo que gasta un TCU en un paso: electrónica, motor y calefactor. La FUENTE DE AUTORIDAD
+   es el core Python (solargpt_core/tcu_compare.py); sim/fisica.js es su espejo vigilado por
+   tools/carea_fisica.mjs, y esta copia se retira cuando la ficha pase a consumir
+   /tcubalance (B4.3). Hasta entonces las tres tienen que decir lo mismo.
 
    Los tres modelos de motor son los de este fichero y NO se recortan con ningún tope: el
    «peak limit» de 50 W de las constantes canónicas es un envolvente de diseño y la curva
@@ -364,14 +367,10 @@ function poaAt(Rdeg,el,az,bh,dh,gh){
    Sustituye al rendimiento plano del 0,90 y al umbral duro de arranque: el propio
    regulador arranca despacio con irradiancia baja (η≈0,38 a 50 W/m², 0,61 a 100)
    y llega al 0,96 con sol pleno. */
-var ETA_G=[0,50,100,200,350,500,600,750,850,1000,1100,1350];
-var ETA_V=ETA_G.map(function(g){return 0.96*(1-Math.exp(-g/100))}); ETA_V[0]=0;
-function etaCharger(G){
-  var g=Math.abs(G||0); if(g<=0)return 0;
-  if(g>=ETA_G[ETA_G.length-1])return ETA_V[ETA_V.length-1];
-  var i=0; while(i<ETA_G.length-2 && ETA_G[i+1]<g) i++;
-  return ETA_V[i]+(ETA_V[i+1]-ETA_V[i])*((g-ETA_G[i])/(ETA_G[i+1]-ETA_G[i]));
-}
+/* η(G) del regulador: la pone el ESPEJO (sim/fisica.js), que el arnés carea contra
+   solargpt_core.tcu_compare._eta_charger. Aquí había una copia idéntica; una copia
+   idéntica hoy es la que mañana se queda atrás. */
+function etaCharger(G){ return FISICA.etaCharger(G); }
 
 /* ═══════════ Curva de carga CC/CV — BatteryModel v2 canónico (notebook 11.0) ═══════════
    La corriente admisible cae en SOC altos (fase CV): sin esto la batería sube en línea
@@ -1004,7 +1003,7 @@ function applyStep(meteo){
    Se leen y escriben por `window`, que es donde viven al declararse con `var` en el
    ámbito del script — así el catálogo es UNA tabla y no hay que escribir un getter y
    un setter por constante. Las declaraciones literales de arriba no se tocan nunca:
-   son las que lee tools/extrae_fisica.mjs para cotejarlas contra el canon de SolarGPT. */
+   son las que se carean contra el canon de SolarGPT (tools/carea_fisica.mjs). */
 var PARAMS_FIS=[
  {k:'AXIS_MAX',        n:'Tope mecánico del eje',        u:'°',     d:1, g:'Geometría y movimiento'},
  {k:'NIGHT_POS',       n:'Posición nocturna',            u:'°',     d:1, g:'Geometría y movimiento'},
@@ -1066,7 +1065,7 @@ function pintaParams(){
   });
   $('paramsNota').innerHTML=n
     ? '<b>'+n+'</b> '+(n===1?'parámetro apartado':'parámetros apartados')+' del canon. Vuelve a <b>▶ Simular</b> para verlo, y ten presente que estos números ya <b>no</b> son comparables con SolarGPT.'
-    : 'Todo en su valor canónico, generado de SolarGPT (<code>tcu.py</code>, <code>tracker.py</code>) y cotejado por <code>tools/extrae_fisica.mjs</code>.';
+    : 'Todo en su valor canónico de SolarGPT (<code>tcu.py</code>, <code>tracker.py</code>), careado por <code>tools/carea_fisica.mjs</code>';
 }
 $('btnCanon').onclick=function(){
   PARAMS_FIS.forEach(function(p){window[p.k]=CANON_FIS[p.k];});
@@ -1132,12 +1131,125 @@ $('run').onclick=function(){
       var ctrl=$('cmp').checked?runControls(meteo,prof,loc,soc0,opts):null;
       LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:null,controls:ctrl};
       render(meteo,mng,ref,prof,loc,opts,null,null,ctrl);
+      /* y, si hay motor, el balance de referencia lo firma él */
+      balanceDelMotor(loc,prof,opts,meteo).then(function(j){ if(j) pintaBalanceMotor(j); });
     });
   }
   job.catch(function(e){
     $('out').innerHTML='<div class="empty">❌ '+e.message+'</div>';
   }).then(function(){btn.disabled=false;btn.textContent='▶ Simular'});
 };
+
+/* ═══════════ EL BALANCE SE PIDE AL MOTOR (B4.3) ═══════════
+   El modelo de batería —SOC, OCV, η(G) del cargador, JEITA, calefactor, inhibiciones
+   y calibración— vive en solargpt_core.tcu_compare.run_tcu_sim y se EJECUTA ALLÍ.
+   Con el motor local levantado (SolarGPTfull/server), el balance que se enseña es el
+   suyo. Sin motor, esta página lo calcula con su bucle heredado y LO DICE, que es la
+   diferencia entre una degradación y un engaño.
+
+   Por qué todavía hay bucle local: la capa de estrategia (CASE 1/2/3, defensa,
+   calibración) aún no tiene contraparte publicada en el core —viaja con la absorción,
+   después de B9-a—. Hasta entonces los dos caminos pueden diferir LEGÍTIMAMENTE, y
+   por eso el modo se declara en pantalla: alguien citando cifras de fallback como si
+   fueran del servidor es exactamente el malentendido que la etiqueta evita. */
+var MOTOR = new Canon({ url: 'http://127.0.0.1:8765' });
+var MOTOR_BAL = null;          /* última respuesta de /tcubalance, o null */
+
+function pintaMotor(modo, extra) {
+  var e = $('motorTag'); if (!e) return;
+  var txt, col;
+  if (modo === 'motor') {
+    txt = '⚙ motor /tcubalance'; col = 'var(--ok)';
+    e.title = 'El balance lo ha calculado ' + (extra || 'run_tcu_sim') + ' en el motor local.';
+  } else if (modo === 'local') {
+    txt = '△ cálculo local heredado'; col = 'var(--warn)';
+    e.title = 'Sin motor: lo ha calculado el bucle de esta página, con su estrategia CASE. '
+            + 'Pendiente de unificación con el core (absorción, tras B9-a), así que puede '
+            + 'diferir legítimamente de lo que daría el servidor. No cites estas cifras '
+            + 'como cifras de servidor.' + (extra ? ' · ' + extra : '');
+  } else if (modo === 'error') {
+    txt = '⚠ motor con error → local'; col = 'var(--danger)';
+    e.title = 'El motor respondió mal (' + (extra || '') + '). Se sigue con el cálculo local heredado.';
+  } else {
+    txt = '— comprobando motor'; col = 'var(--warn)'; e.title = '';
+  }
+  e.textContent = txt; e.style.color = col;
+}
+
+/* Pide el balance al motor para el mismo sitio y perfil que se acaba de simular.
+   Devuelve una promesa que SIEMPRE resuelve: null significa «sigue con lo local». */
+/* El catálogo de esta ficha y el de TCU_PRESETS no coinciden uno a uno, así que el
+   mapeo va EXPLÍCITO. Y donde no hay contraparte NO se llama: el endpoint, ante un
+   preset que no conoce, cae a SELFPWR·45W·6Ah — o sea que contestaría sobre otro
+   equipo y el número parecería bueno. Un hueco declarado vale más que un default. */
+var PRESET_CORE = {
+  SP_45W_3Ah:        'SELFPWR · 45W · 3Ah',
+  SP_45W_6Ah:        'SELFPWR · 45W · 6Ah',
+  SP_60W_6Ah:        'SELFPWR · 60W · 6Ah',
+  SP_45W_6Ah_LT:     'SELFPWR · 45W · 6Ah · LT',
+  STRING_60W_6Ah:    'STRING · std',
+  STRING_60W_6Ah_LT: 'STRING · LT',
+  /* STRING_60W_3Ah: el core solo publica STRING de 6 Ah. Sin contraparte. */
+};
+
+function balanceDelMotor(loc, prof, opts, meteo) {
+  if (MOTOR.estado !== 'listo') return Promise.resolve(null);
+  var preset = PRESET_CORE[prof && prof.id];
+  if (!preset) {
+    MOTOR_BAL = null;
+    pintaMotor('local', 'el perfil «' + ((prof && prof.id) || '?') + '» no tiene '
+             + 'contraparte en TCU_PRESETS: no se pregunta al motor para no recibir '
+             + 'la respuesta de otro equipo');
+    return Promise.resolve(null);
+  }
+  var dias = Math.max(1, Math.round((meteo && meteo.length ? meteo.length : 24) / 24));
+  return MOTOR.balance({
+    lat: loc.lat, lon: loc.lon,
+    dia: 1, dias: Math.min(dias, 365), dt_min: 60,
+    preset: preset
+  }).then(function (j) {
+    MOTOR_BAL = j;
+    pintaMotor(j ? 'motor' : 'error', j ? j.motor : MOTOR.detalle);
+    return j;
+  });
+}
+
+/* Pinta lo que ha dicho el motor, al lado de lo que ha calculado la página, y sin
+   mezclarlos: mientras la estrategia no esté unificada los dos pueden diferir con
+   razón, y taparlo con una media sería inventar un tercer número que no es de nadie. */
+function pintaBalanceMotor(j) {
+  var host = $('out'); if (!host || !j) return;
+  var r = j.resumen, e = j.energia_wh;
+  var box = document.createElement('div');
+  box.className = 'card';
+  box.style.cssText = 'margin-top:14px;border:1px solid var(--line2);padding:12px;border-radius:10px';
+  box.innerHTML =
+    '<h3 style="margin:0 0 8px">⚙ Balance del motor <span style="font-weight:400;color:var(--muted)">'
+      + '· ' + j.motor + '</span></h3>'
+    + '<table style="width:100%;font-size:13px"><tbody>'
+    + '<tr><td>Veredicto</td><td style="text-align:right;color:'
+      + (r.veredicto === 'ADEQUATE' ? 'var(--ok)' : 'var(--danger)') + '"><b>' + r.veredicto + '</b></td></tr>'
+    + '<tr><td>SOC mínimo</td><td style="text-align:right">' + fmt(r.soc_min_pct, 1) + ' %</td></tr>'
+    + '<tr><td>Pasos sin disponibilidad por batería</td><td style="text-align:right">' + r.pasos_sin_bateria + '</td></tr>'
+    + '<tr><td>Energía · motor</td><td style="text-align:right">' + fmt(e.motor, 1) + ' Wh</td></tr>'
+    + '<tr><td>Energía · electrónica</td><td style="text-align:right">' + fmt(e.electronica, 1) + ' Wh</td></tr>'
+    + '<tr><td>Energía · calefactor</td><td style="text-align:right">' + fmt(e.calefactor, 1) + ' Wh</td></tr>'
+    + '</tbody></table>'
+    + '<p style="font-size:12px;color:var(--muted);margin:8px 0 0">'
+    + 'Criterio: ' + r.criterio + '.'
+    + (r.razones && r.razones.length ? ' Razones: ' + r.razones.join('; ') + '.' : '')
+    + '<br>Abanderamiento del motor: ' + (j.modelo_stow ? ('defensa a '
+        + j.modelo_stow.posicion_defensa_deg + '°, ' + (j.modelo_stow.histeresis_destow ? 'con' : 'sin')
+        + ' histéresis — ' + j.modelo_stow.pendiente) : 'no declarado') + '.'
+    + '<br><b>No se mezcla con lo de arriba</b>: la estrategia de esta página aún no está '
+    + 'unificada con la del core, así que las dos cifras pueden diferir con razón. '
+    + 'Promediarlas inventaría un número que no es de nadie.</p>';
+  host.appendChild(box);
+}
+
+MOTOR.busca().then(function (hay) {
+  pintaMotor(hay ? 'motor' : 'local', hay ? '' : MOTOR.detalle);
+}).catch(function () { pintaMotor('local'); });
 
 var LAST=null;
 function isoDay(t){return t.toISOString().slice(0,10)}
