@@ -181,8 +181,7 @@ const r = await pg.evaluate(async () => {
     forzar: pulsa('btnFzOn'),
     auto: pulsa('btnAuto'),
     manual: pulsa('btnManual'),
-    off: pulsa('btnOff').length,
-    seta: pulsa('btnSeta')
+    off: pulsa('btnOff').length
   };
   P.escribe = orig2;
 
@@ -271,6 +270,32 @@ const r = await pg.evaluate(async () => {
   o.tiempo.dia = { n: P.t.dia, lbl: $$('t3dDiaLbl').textContent };
   $$('t3dDia').value = '172'; $$('t3dDia').dispatchEvent(new Event('input', { bubbles: true }));
   o.tiempo.tarjetas = [...document.querySelectorAll('#hud3d .ro')].length;
+
+  /* EL RELOJ nunca puede dar las 09:60. Se redondeaba a minutos por separado, y 9,995 h
+     son 59,7 min -> 60. Se barre el dia entero. */
+  o.reloj = { malos: [], ejemplos: {} };
+  for (let k = 0; k < 4000; k++) {
+    const h = k * 24 / 4000, txt = hhmm(h);
+    const [hh, mm] = txt.split(':').map(Number);
+    if (mm > 59 || hh > 23) o.reloj.malos.push(h.toFixed(4) + '→' + txt);
+  }
+  ['9.995', '23.999', '0', '13.5'].forEach((x) => { o.reloj.ejemplos[x] = hhmm(+x); });
+
+  /* y la NCU no tiene seta ni pulsador de parada: 30100.13 se publica a 0 y no hay
+     ningun mando en la interfaz que lo pulse */
+  P.tcus[0].setaLocal = true;
+  for (let k = 0; k < 40; k++) P.paso(5);
+  o.seta = {
+    bitNcu: (P.regsNCU()[30100] >> 13) & 1,
+    bitTcu: (P.regsTCU(P.tcus[0])[30002] >> 4) & 1,
+    suyo: !!P.tcus[0].alarmaMotorEnclavada,
+    otrosEnclavados: P.seguidores().filter((x) => x.alarmaMotorEnclavada && x !== P.tcus[0]).length,
+    hayBoton: !!document.getElementById('btnSeta'),
+    tiposAv: Escenario.TIPOS.av.ks.map((x) => x.k)
+  };
+  P.tcus[0].setaLocal = false;
+  P.tcus.forEach((x) => x.limpiaAlarmas());
+  for (let k = 0; k < 40; k++) P.paso(5);
 
   /* UNA SOLA vista: el guion arriba, el campo en medio y los registros abajo. Si vuelve
      a haber una pestana de escenarios aparte, se sigue un guion sin ver la planta. */
@@ -365,8 +390,6 @@ ok(r.mandos.auto.join() === 'ncu:40070' && r.mandos.manual.join() === 'ncu:40071
    `AUTO y MANUAL escriben 40070/40071: ${r.mandos.auto.concat(r.mandos.manual).join(' ') || '(nada)'}`);
 ok(r.mandos.off > 1,
    `OFF va equipo por equipo, porque la NCU no tiene ese registro: ${r.mandos.off} escrituras`);
-ok(r.mandos.seta.length === 0,
-   'la SETA no escribe nada: es una entrada de hardware, no un mando');
 
 console.log('');
 const R = r.repro;
@@ -404,6 +427,17 @@ ok(Math.abs(TT.tarde.real - TT.tarde.obj) < 1,
 ok(TT.panel === 19, `y mueve el mismo reloj del panel, no un segundo (${TT.panel})`);
 ok(TT.dia.n === 355 && /dic/.test(TT.dia.lbl), `el deslizador de día también (${TT.dia.lbl})`);
 ok(TT.tarjetas >= 8, `el HUD va en tarjetas bajo el campo, como overcast (${TT.tarjetas})`);
+
+ok(r.reloj.malos.length === 0,
+   `el reloj nunca da las 09:60 (4.000 horas del día · ${JSON.stringify(r.reloj.ejemplos)})`);
+
+const SE = r.seta;
+ok(SE.bitTcu === 1 && SE.bitNcu === 0,
+   'la seta es del TCU (30002.4) y la NCU no la ve: 30100.13 sigue a 0, sin nada cableado');
+ok(SE.suyo && SE.otrosEnclavados === 0,
+   `y enclava SU equipo y solo ese: ${SE.otrosEnclavados} equipos más afectados`);
+ok(!SE.hayBoton && !SE.tiposAv.includes('setancu'),
+   `no queda ningún mando de parada de la NCU: era hardware que no existe (${SE.tiposAv.join(', ')})`);
 
 const V = r.veleta;
 ok(V.delN === 'S' && V.delE === 'O' && V.delS === 'N' && V.delO === 'E',

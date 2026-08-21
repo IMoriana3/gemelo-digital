@@ -328,9 +328,7 @@
 
       <div class="grp">
         <h3>Entradas de hardware de la NCU</h3>
-        <div class="note" style="margin-top:0">Esto <b>no se manda</b>: son contactos del armario que la NCU <b>lee</b>. Viven en 30100, que es de solo lectura — escribirla por Modbus se rechaza con excepción 02. El botón simula que alguien va y la pulsa.</div>
-        <button class="btn dang" id="btnSeta">⏹ Pulsador de parada</button>
-        <div class="note" style="margin-bottom:8px">Entrada digital <b>30100.13</b>. El R7 lo llama <i>Stop button</i> y dice solo esto: «<i>True if the stop button was pressed</i>» — <b>no es una seta y la NCU no la tiene</b>; la seta de emergencia es la del TCU (30002.4, <i>emergency push button</i>). <span class="aprox">Que además inhiba el motor de toda la planta, y enclavado, es cosa del simulador: el documento no dice qué efecto tiene.</span></div>
+        <div class="note" style="margin-top:0">Esto <b>no se manda</b>: son contactos del armario que la NCU <b>lee</b>. Viven en 30100, que es de solo lectura — escribirla por Modbus se rechaza con excepción 02.<br>La <b>seta de emergencia no está aquí</b>: es del TCU (30002.4), y se pulsa en el bloque de averías del equipo. El bit 30100.13 que el R7 llama <i>Stop button</i> es una entrada libre del módulo digital y en estas plantas <b>no tiene nada cableado</b>, así que se publica a 0.</div>
         <div class="fld"><label>Limpieza por grupo (30100 bits 12:3)</label>
           <div class="chipsg" id="limpieza"></div></div>
         <label class="sw"><input type="checkbox" id="upsFallo"><span>Fallo de red en el SAI</span></label>
@@ -1104,7 +1102,14 @@ function deHhmm(s, porDefecto) {
   var v = parseFloat(s);
   return isFinite(v) ? Math.max(0, Math.min(24, v)) : porDefecto;
 }
-function hhmm(h) { return dosD(Math.floor(h)) + ':' + dosD(Math.round((h % 1) * 60)); }
+/* Se redondea UNA vez, a minutos, y de ahí salen horas y minutos. Redondear los minutos
+   por su cuenta da las 09:60, que no existen: 9,995 h son 59,7 min, y eso redondea a 60.
+   El módulo de 1440 además cierra la medianoche (24:00 → 00:00). */
+function hhmm(h) {
+  var m = Math.round(h * 60) % 1440;
+  if (m < 0) m += 1440;
+  return dosD(Math.floor(m / 60)) + ':' + dosD(m % 60);
+}
 function minSim(h) {
   var m = Math.round(h * 60);
   return m >= 60 ? (Math.floor(m / 60) + ' h ' + (m % 60) + ' min') : (m + ' min');
@@ -1626,7 +1631,6 @@ function pintaChips() {
     chip('Nieve', num(P.meteo.nieve * 100, 1) + ' cm', n.alarmaNieve ? 'bad' : '', n.alarmaNieve ? 'alarma de nieve' : 'sin alarma') +
     chip('Alimentación', TIPO_TXT[P.tcus[0].perfil.tipo], n.acFallo && P.tcus[0].perfil.tipo === 'ac' ? 'bad' : '',
       P.tcus[0].perfil.n.replace(/^(SP|STRING|AC) · /, '')) +
-    chip('Paro', n.paro ? 'PULSADO' : 'libre', n.paro ? 'bad' : 'ok', '30100.13') +
     chip('Sol', P.tcus[0].solar.dia ? num(90 - P.tcus[0].solar.zen, 0) + '° elev.' : 'noche', P.tcus[0].solar.dia ? 'warn' : '', 'azimut ' + num(P.tcus[0].solar.az, 0) + '°');
 }
 /* ── flota ──
@@ -1724,7 +1728,7 @@ function pintaNcu() {
     kv('Alarma de viento', n.alarmaViento ? 'sí' : 'no') +
     kv('Alarma de nieve', n.alarmaNieve ? 'sí' : 'no') +
     kv('Viento del este (invertido)', n.vientoInvertido ? 'sí' : 'no') +
-    kv('Pulsador de parada (30100.13)', n.paro ? 'PULSADO' : 'libre') +
+    kv('Entrada libre (30100.13)', 'sin cablear') +
     kv('SAI', n.upsFallo ? 'fallo de red' : 'normal') +
     kv('Limpieza activa', lim.length ? lim.join(' ') : '—') +
     kv('Forzados', fz.length ? fz.join(' ') : '—') +
@@ -2198,12 +2202,6 @@ $('btnManual').onclick = function () { modoFlota(SIM.MODO.MANUAL); };
 $('btnOff').onclick = function () { modoFlota(SIM.MODO.OFF); };
 $('filas').onchange = function () {
   if (CAMPO) { CAMPO.ponBifila(this.value !== 'monofila', P); CAMPO.selecciona(indiceDe(sel)); }
-};
-$('btnSeta').onclick = function () {
-  P.ncu.paro = !P.ncu.paro;
-  this.textContent = P.ncu.paro ? '⏹ PARADA PULSADA — soltar' : '⏹ Pulsador de parada';
-  this.className = 'btn ' + (P.ncu.paro ? 'on' : 'dang');
-  toca();
 };
 $('upsFallo').onchange = function () { P.ncu.upsFallo = this.checked; toca(); };
 $('btnPlay').onclick = function () {

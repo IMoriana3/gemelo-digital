@@ -87,7 +87,6 @@ function aplica(P, e) {
     else if (e.k === 'off') tc.online = !on;
     else if (e.k === 'seta') tc.setaLocal = on;
     else if (e.k === 'cable') tc.cableSetaCortado = on;
-    else if (e.k === 'setancu') P.ncu.paro = on;
     else if (e.k === 'accel') tc.avAccel = on;
     else return { ok: false, avisos: ['avería desconocida: ' + e.k] };
     return { ok: true, aplicados: [e.k + (on ? ' ON' : ' OFF') + ' en TCU ' + tc.id] };
@@ -121,7 +120,6 @@ var TIPOS = {
           { k: 'off',     n: 'sin comunicación' },
           { k: 'seta',    n: 'seta local pulsada' },
           { k: 'cable',   n: 'cable de seta cortado' },
-          { k: 'setancu', n: 'pulsador de parada de la NCU' },
           { k: 'accel',   n: 'inclinómetro averiado' } ]
   }
 };
@@ -224,11 +222,11 @@ var EJEMPLOS = [
       { h: 13, t: 'meteo', k: 'viento', v: 10 },
       { h: 15, t: 'meteo', k: 'viento', v: 0 }
     ] },
-  { n: 'Pulsador de parada y rearme', dia: 172, hora: 10,
-    desc: 'Alguien pulsa la pulsador de parada de la NCU. El motor se corta en toda la planta, el algoritmo sigue calculando por debajo y 30110 se va abriendo. Soltarla no rearma: hay que limpiar con 40007.13.',
+  { n: 'Seta pulsada y rearme', dia: 172, hora: 10,
+    desc: 'Alguien pulsa la seta del TCU. El motor se corta —solo el de ese equipo, que es donde está la seta—, el algoritmo sigue calculando por debajo y 30110 se va abriendo. Soltarla no rearma: va enclavada y hay que limpiar con 40007.13.',
     eventos: [
-      { h: 11, t: 'av', k: 'setancu', on: true },
-      { h: 12.5, t: 'av', k: 'setancu', on: false },
+      { h: 11, t: 'av', k: 'seta', id: 1, on: true },
+      { h: 12.5, t: 'av', k: 'seta', id: 1, on: false },
       { h: 13, t: 'w', dev: 'tcu', id: 1, dir: 40007, vals: [8192] }
     ] },
   { n: 'Eje duro: la vía lenta', dia: 172, hora: 9,

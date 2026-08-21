@@ -150,8 +150,8 @@ for (let i = 0; i < 10 * 60; i += 30) P.paso(30);
 ok(t.sp === SIM.SP.NINGUNA, 'pasado el hold, desabanderado', t.estadoTxt());
 t.modo = SIM.MODO.AUTO;
 
-console.log('\n── seta: entrada BINARIA, no una decisión ──');
-P.ncu.paro = true;
+console.log('\n── seta del TCU: entrada BINARIA, no una decisión ──');
+t.setaLocal = true;
 P.paso(0.02);
 ok(!t.seta, 'antirrebote: un pulso de 20 ms no la dispara');
 for (let i = 0; i < 15 * 60; i += 5) P.paso(5);
@@ -168,29 +168,30 @@ ok(Math.abs(s16de(P.regsTCU(t)[30110]) / 10) > 1, 'y 30110 (objetivo − real) s
    (s16de(P.regsTCU(t)[30110]) / 10).toFixed(1) + '°');
 ok(bitde(P.regsTCU(t)[30002], 4, 4) === 1, 'bit de seta en alarmas 1 (30002.4)');
 ok(bitde(P.regsTCU(t)[30006], 15, 15) === 0, 'system_ok cae a 0');
-ok(bitde(P.regsNCU()[30100], 13, 13) === 1, 'seta también en la entrada digital de la NCU');
+ok(bitde(P.regsNCU()[30100], 13, 13) === 0,
+   '30100.13 sigue a 0: la NCU no tiene seta ni pulsador de parada, y no hay nada cableado a esa entrada');
 ok(t.salud() === 'alarma', 'salud del TCU = alarma');
 
 console.log('\n── … y va ENCLAVADA ──');
-P.ncu.paro = false;
+t.setaLocal = false;
 for (let i = 0; i < 5 * 60; i += 5) P.paso(5);
 ok(!t.motorHabilitado, 'soltar la seta NO rearma el motor: la alarma sigue enclavada');
 ok(t.alarmaMotorEnclavada, 'y se ve en el estado del equipo', t.estadoTxt());
 t.limpiaAlarmas();                                  /* 40007 bit 13, como la toolbox */
 P.paso(5);
 ok(t.motorHabilitado, 'solo lo rearma limpiar alarmas (40007 bit 13)');
-P.ncu.paro = true; for (let i = 0; i < 60; i += 5) P.paso(5);
+t.setaLocal = true; for (let i = 0; i < 60; i += 5) P.paso(5);
 t.limpiaAlarmas(); P.paso(5);
 ok(!t.motorHabilitado, 'y limpiar con la seta AÚN pulsada no sirve de nada');
-P.ncu.paro = false; for (let i = 0; i < 60; i += 5) P.paso(5);
+t.setaLocal = false; for (let i = 0; i < 60; i += 5) P.paso(5);
 t.limpiaAlarmas();
 for (let i = 0; i < 30 * 60; i += 5) P.paso(5);
 ok(t.motorHabilitado && Math.abs(t.objetivo - t.anguloReal) < 3, 'rearmado, recupera su posición');
 
-/* el pulsador de parada de la NCU enclava la flota ENTERA, no solo el equipo que se mira: por
-   eso la toolbox limpia alarmas por rango y no de una en una */
-ok(P.seguidores().filter(x => x.alarmaMotorEnclavada).length === P.seguidores().length - 1,
-   'el pulsador de parada dejó enclavada a toda la flota, no solo a la TCU 1');
+/* la seta es DE SU EQUIPO: enclava ese y no la flota. Aquí estuvo simulada una seta de
+   armario de la NCU que cortaba la planta entera — no existe tal pulsador. */
+ok(P.seguidores().filter(x => x.alarmaMotorEnclavada).length === 0,
+   'la seta de la TCU 1 no enclavó a nadie más: no hay parada de planta desde la NCU');
 P.tcus.forEach(x => x.limpiaAlarmas());
 for (let i = 0; i < 20 * 60; i += 10) P.paso(10);
 
