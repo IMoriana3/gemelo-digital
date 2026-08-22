@@ -365,6 +365,44 @@ const r = await pg.evaluate(async () => {
              obj: +P.tcus[0].objetivo.toFixed(1), real: +P.tcus[0].anguloReal.toFixed(1) };
   };
   o.tiempo = { mañana: desliza(420, true), mediodia: desliza(780, true), tarde: desliza(1140, true) };
+
+  /* ARRASTRAR COLOCA, no simula el camino. A 0,17 °/s cruzar los 110° son once minutos:
+     si el deslizador simulara el transitorio, el campo iría siempre persiguiendo un
+     objetivo que ya cambió. Se comprueba que basta con el evento `input` -- o sea
+     mientras se arrastra, sin soltar-- y que la mesa queda EN su objetivo. */
+  const arrastra = (min) => {
+    const rr = $$('t3dHora');
+    rr.value = String(min);
+    rr.dispatchEvent(new Event('input', { bubbles: true }));   /* sin `change` */
+    const t = P.tcus[0];
+    return { h: +P.t.hora.toFixed(1), obj: +t.objetivo.toFixed(1),
+             desv: +Math.abs(t.anguloReal - t.objetivo).toFixed(2) };
+  };
+  o.arrastre = [420, 660, 900, 1140].map(arrastra);
+
+  /* dos excepciones, que son el motivo de que exista este simulador */
+  const t2 = P.tcus[1];
+  t2.setaLocal = true;
+  for (let k = 0; k < 40; k++) P.paso(5);
+  const antesSeta = t2.anguloReal;
+  arrastra(660); arrastra(1020);
+  o.setaQuieta = { motor: t2.motorHabilitado, movio: +Math.abs(t2.anguloReal - antesSeta).toFixed(2) };
+  t2.setaLocal = false; t2.limpiaAlarmas();
+
+  const t1 = P.tcus[0];
+  t1.sensor.desajuste = 3;
+  arrastra(600); arrastra(780);
+  o.incMiente = +Math.abs(t1.angulo - t1.anguloReal).toFixed(2);
+  t1.sensor.desajuste = 0;
+
+  /* Y SE DEJA COMO SE ENCONTRÓ. Estas comprobaciones mueven el reloj y enclavan un
+     equipo; las de más abajo daban por bueno el estado anterior y fallaban por eso —lo
+     que rompía era la prueba, no el simulador. */
+  P.tcus.forEach((t) => { t.setaLocal = false; t.cableSetaCortado = false; });
+  for (let k = 0; k < 10; k++) P.paso(5);
+  P.tcus.forEach((t) => t.limpiaAlarmas());
+  for (let k = 0; k < 10; k++) P.paso(5);
+  desliza(1140, true);                     /* el reloj donde lo dejó el bloque anterior */
   o.tiempo.panel = +$$('hora').value;
   $$('t3dDia').value = '355'; $$('t3dDia').dispatchEvent(new Event('input', { bubbles: true }));
   o.tiempo.dia = { n: P.t.dia, lbl: $$('t3dDiaLbl').textContent };
@@ -547,6 +585,14 @@ ok(TT.mañana.obj < 0 && TT.tarde.obj > 0 &&
    `${TT.mañana.obj}° · ${TT.mediodia.obj}° · ${TT.tarde.obj}°`);
 ok(Math.abs(TT.tarde.real - TT.tarde.obj) < 1,
    `al soltar, la mesa ha llegado a su objetivo (${TT.tarde.real}° vs ${TT.tarde.obj}°)`);
+ok(r.arrastre.every((a) => a.desv < 1.5) &&
+   new Set(r.arrastre.map((a) => a.obj)).size === r.arrastre.length,
+   'y MIENTRAS SE ARRASTRA las mesas ya están en su sitio, sin esperar a soltar: ' +
+   r.arrastre.map((a) => `${a.h}h→${a.obj}°`).join(' · '));
+ok(r.setaQuieta.motor === false && r.setaQuieta.movio < 0.5,
+   `el equipo con la seta pulsada NO se coloca: se movió ${r.setaQuieta.movio}° saltando seis horas`);
+ok(r.incMiente > 2,
+   `y el inclinómetro descalibrado sigue mintiendo ${r.incMiente}°, no se le copia el ángulo`);
 ok(TT.panel === 19, `y mueve el mismo reloj del panel, no un segundo (${TT.panel})`);
 ok(TT.dia.n === 355 && /dic/.test(TT.dia.lbl), `el deslizador de día también (${TT.dia.lbl})`);
 ok(TT.tarjetas >= 8, `el HUD va en tarjetas bajo el campo, como overcast (${TT.tarjetas})`);
