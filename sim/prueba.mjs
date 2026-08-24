@@ -932,5 +932,87 @@ const lejosCar = Careo.compara(Careo.parsea('Fecha;30111 t [deg]\n2026-06-21 03:
 ok(lejosCar.n === 0 && lejosCar.sinPar === 1,
    'un punto sin muestra a esa hora se descarta, no se estira la curva para que case');
 
+/* ── LA CUENTA ATRÁS DEL DESABANDERAMIENTO ──
+   `holdRestante` lo calculaba la máquina de bandera desde siempre y se tiraba en
+   `planta.js`, así que la pantalla no podía distinguir «sigue soplando» de «faltan
+   doce minutos». Ahora se guarda; esto vigila que siga guardándose y que cuente. */
+console.log('\nCuenta atrás de desabanderamiento');
+{
+  const P = new SIM.Planta({ n: 6 });
+  P.meteo.ponViento(70 / 3.6);
+  for (let i = 0; i < 40; i++) P.paso(30);
+  const t = P.tcus[0];
+  ok(t.stow === 2, 'con 70 km/h sostenido, bandera total', 'stow=' + t.stow);
+  ok(t.stowSobreUmbral === true,
+     'y se DICE que el viento sigue por encima: no hay nada que contar');
+
+  P.meteo.ponViento(5 / 3.6); P.paso(60);
+  ok(t.stowSobreUmbral === false, 'al caer el viento, deja de estar por encima');
+  ok(t.stowConHisteresis === true, 'la estrategia por defecto tiene histéresis (dos umbrales)');
+  const h0 = t.stowHold;
+  ok(h0 > 0, 'y arranca una cuenta atrás', h0.toFixed(0) + ' s');
+
+  for (let i = 0; i < 20; i++) P.paso(30);
+  const h1 = t.stowHold;
+  ok(h1 < h0, 'que BAJA con el tiempo', h0.toFixed(0) + ' s -> ' + h1.toFixed(0) + ' s');
+  /* El régimen donde puede romperse: si contara mal el dt, diez minutos de reloj no
+     descontarían diez minutos de cuenta. Se mide, no se supone. */
+  casi(h0 - h1, 600, 31, 'y descuenta el tiempo REAL: 10 min de reloj = 10 min menos');
+
+  for (let i = 0; i < 80; i++) P.paso(30);
+  ok(t.stow === 0, 'agotada la histéresis, desabandera', 'stow=' + t.stow);
+  ok(t.stowHold === 0, 'y la cuenta se queda en cero, no en negativo', String(t.stowHold));
+
+  /* Volver a soplar RECARGA la histéresis: si no, un respiro de un minuto en mitad
+     del temporal desabanderaría antes de tiempo. */
+  P.meteo.ponViento(70 / 3.6); for (let i = 0; i < 40; i++) P.paso(30);
+  P.meteo.ponViento(5 / 3.6); P.paso(60);
+  const hA = t.stowHold;
+  for (let i = 0; i < 10; i++) P.paso(30);
+  P.meteo.ponViento(70 / 3.6); P.paso(30);
+  P.meteo.ponViento(5 / 3.6); P.paso(30);
+  ok(t.stowHold > hA - 60, 'un repunte RECARGA la cuenta, no la deja correr',
+     hA.toFixed(0) + ' s -> ' + t.stowHold.toFixed(0) + ' s');
+}
+
+/* ── NINGUNA FUNCIÓN DEFINIDA DOS VECES ──
+   Este es el guard que habría cazado el bug que originó todo esto. `simulador.html`
+   llevaba 1.256 líneas duplicadas: una revisión añadida sin borrar la original. Como
+   en JavaScript la SEGUNDA definición gana, el resultado era que la mejora recién
+   escrita estaba muerta —el `ponHora` nuevo lo pisaba el viejo, 1.257 líneas más
+   abajo— y que los dos `addEventListener` del bloque quedaban registrados por
+   duplicado. El de limpieza hace un toggle, así que dispararlo dos veces lo dejaba
+   como estaba: el botón no hacía NADA.
+   Nada de esto daba error, ni se veía en el diff, ni lo notaba ninguna prueba. */
+console.log('\nSin definiciones duplicadas en simulador.html');
+{
+  const html = fs.readFileSync(new URL('../simulador.html', import.meta.url), 'utf8');
+  ok(html.length > 40000, 'el fichero se ha leído', html.length + ' B');
+
+  const vistas = new Map();
+  html.split('\n').forEach((l, i) => {
+    const m = /^function (\w+)\s*\(/.exec(l);
+    if (!m) return;
+    if (!vistas.has(m[1])) vistas.set(m[1], []);
+    vistas.get(m[1]).push(i + 1);
+  });
+  const dup = [...vistas].filter(([, v]) => v.length > 1);
+  ok(vistas.size > 50, 'y tiene funciones que mirar', vistas.size + ' funciones');
+  ok(dup.length === 0, 'ninguna se define dos veces (la segunda pisaría a la primera)',
+     dup.length ? dup.map(([k, v]) => k + ' en ' + v.join(' y ')).join(' · ') : 'ninguna');
+
+  /* Y el daño concreto, que es lo que de verdad importa: un manejador registrado dos
+     veces. Los `onclick =` son idempotentes; `addEventListener` se ACUMULA. */
+  const oyentes = new Map();
+  for (const m of html.matchAll(/\$\('(\w+)'\)\.addEventListener\('(\w+)'/g)) {
+    const k = m[1] + ':' + m[2];
+    oyentes.set(k, (oyentes.get(k) || 0) + 1);
+  }
+  const doble = [...oyentes].filter(([, v]) => v > 1);
+  ok(oyentes.size > 0, 'hay addEventListener que vigilar', [...oyentes.keys()].join(' '));
+  ok(doble.length === 0, 'ninguno se registra dos veces',
+     doble.length ? doble.map(([k, v]) => k + ' x' + v).join(' · ') : 'ninguno');
+}
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);

@@ -661,6 +661,17 @@ TCU.prototype.decide = function (dt, ang) {
      surte efecto ya, sin perderle el estado a la máquina (ni el lado abanderado) */
   var rAb = sincronizaBandera(this.ab).paso(dt, this.p.ncu.vientoMax, ang.sel, azSol, this.p.ncu.dirVientoMax);
   this.stow = rAb.estado;
+  /* LA CUENTA ATRÁS YA EXISTÍA Y SE TIRABA. `paso()` devuelve `holdRestante` —lo que
+     queda de la histéresis de desabanderamiento— y aquí solo se recogía el estado, así
+     que la pantalla no podía distinguir dos situaciones que para quien mira la planta
+     son muy distintas: «sigue soplando, esto no baja» y «ya no sopla, faltan doce
+     minutos». Se guardan las tres cosas que hacen falta para decirlo, y no una más.
+     `conHisteresis` importa: A1/B1 son de un solo umbral y el canon dice que van SIN
+     histéresis, así que ahí no hay cuenta atrás que enseñar — y enseñar una inventada
+     sería peor que no enseñar nada. */
+  this.stowHold = rAb.holdRestante;
+  this.stowConHisteresis = this.ab.umbrales === 2;
+  this.stowSobreUmbral = this.p.ncu.vientoMax >= this.ab.t1;
 
   /* modos de batería (L1 baja · L2 muy baja · L3 crítica) con rearme: se entra al
      cruzar el umbral hacia abajo y no se sale hasta superarlo por SOC_REARME, para
