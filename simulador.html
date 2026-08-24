@@ -1430,6 +1430,25 @@ function pintaHud3D() {
          vez: eso es una ALARMA, no un «faltan 30 min».
        · el viento YA ha bajado → entonces sí, cuenta atrás de los 30 min del canon
          (`destow_hold_minutes`), que es lo que hay que esperar antes de soltar. */
+  /* EL VIENTO NO SALTA, Y LA TEJA TIENE QUE DECIRLO. Un evento del guion PIDE una
+     velocidad (`pideViento`) y la planta la alcanza por rampa —tau de cuatro minutos—,
+     a propósito: saltar de 0 a 100 km/h de golpe abanderaría la flota entera, que es lo
+     que no pasa en campo. Pero la teja enseñaba solo el valor de AHORA, así que a los
+     quince segundos de un evento de 45 km/h se leía «27,2» y parecía que el guion no
+     había entrado.
+
+     El tiempo va sobre `meteo.viento`, que es lo que rampa. El número grande es
+     `ncu.vientoMax` —la media de la estación que más sopla, que es con lo que se decide
+     el abanderamiento—, así que sigue a la rampa pero NO es la misma magnitud: por eso
+     el tiempo se anuncia como aproximado y de la METEO, no de este número.
+     (De la sesión del viento, PR #55.) */
+  var pide = m.vientoObj * 3.6, hay = m.viento * 3.6, dif = Math.abs(pide - hay), camino = '';
+  if (dif > 1.5) {
+    var seg = (m.tauViento || 240) * Math.log(dif / 1.5);
+    camino = ' · pide ' + pide.toFixed(0) + ', meteo en ~' +
+             (seg >= 90 ? Math.round(seg / 60) + ' min' : Math.round(seg) + ' s');
+  }
+
   var bTxt = t.stow === 2 ? 'TOTAL' : (t.stow ? 'parcial' : '—'), bSub, bCls = '';
   var u1 = Math.round(SIM.K.WIND_T1 * 3.6);
   if (!t.stow) { bSub = 'nivel ' + ban; }
@@ -1441,7 +1460,7 @@ function pintaHud3D() {
            '<div class="v">' + v + (u ? ' <small>' + u + '</small>' : '') + '</div></div>';
   };
   $('hud3d').innerHTML =
-    ro('Viento', vk.toFixed(1), 'km/h · ' + rumbo(m.dirViento),
+    ro('Viento', vk.toFixed(1), 'km/h · ' + rumbo(m.dirViento) + camino,
        vk >= 60 ? 'no' : (vk >= 40 ? 'al' : '')) +
     ro('Rachas', rk.toFixed(0), 'km/h') +
     ro('Bandera', bTxt, bSub, bCls) +

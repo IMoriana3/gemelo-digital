@@ -56,6 +56,8 @@ Y están **las cuatro** del canon, elegibles en la interfaz igual que en el sele
 
 Con un umbral no hay sector parcial ni histéresis: por encima de 40 km/h, bandera completa, y suelta en cuanto baja. Cambiar de estrategia es **en caliente**, sin rehacer la planta. En el eje A (cara al viento) hace falta saber de dónde **viene** el viento, así que el selector saca además el azimut meteorológico (0 N · 90 E · 180 S · 270 O); en el eje B lo esconde, porque no pinta nada.
 
+Y en la teja de viento, **lo pedido y lo alcanzado juntos**: `27,2 km/h · OSO · pide 45, meteo en ~10 min`. Un evento del guion **pide** una velocidad y la planta la alcanza por rampa (`tau = 240 s`) a propósito —saltar de 0 a 100 km/h abanderaría la flota entera de golpe, que no es lo que pasa en campo—, así que a los quince segundos de un evento de 45 se leía «27,2» y parecía que el guion no había entrado. El tiempo va sobre `meteo.viento`, que es lo que rampa; el número grande es `ncu.vientoMax`, la media de la estación que más sopla, que sigue a la rampa pero **no es la misma magnitud** — por eso el tiempo se anuncia como aproximado y *de la meteo*.
+
 **Abanderado son dos estados, no uno**, y confundirlos es lo que hace que nadie entienda por qué el campo sigue de canto con el día en calma:
 
 - **sigue soplando** por encima del umbral → la histéresis se **rearma en cada paso**, así que no hay espera que contar: es una **alarma**. El HUD lo pone así, `⚠ viento ≥ 40 km/h`, en vez de un «faltan 30:00» que sale entero una y otra vez y no significa nada.

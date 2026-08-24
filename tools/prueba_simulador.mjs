@@ -345,6 +345,12 @@ const r = await pg.evaluate(async () => {
   const celda = (k) => ([...document.querySelectorAll('#hud3d .ro')]
     .map((d) => d.innerText.replace(/\s+/g, ' ')).find((x) => x.toLowerCase().includes(k)) || '');
   o.bandera = { soplando: celda('bandera') };
+
+  /* Y LA RAMPA DEL VIENTO, dicha. Un evento pide 45 km/h y quince segundos despues la
+     teja marca 27: es la rampa de tau=240 s haciendo lo que debe, pero sin decirlo
+     parece que el guion no ha entrado. */
+  P.meteo.pideViento(80 / 3.6); P.paso(15); pintaTodo();
+  o.rampa = celda('viento');
   P.meteo.viento = 2; P.paso(10); pintaTodo();            /* amaina de golpe */
   o.bandera.amainado = celda('bandera');
   /* y se deja como estaba: los bloques de abajo dan por bueno el viento de antes */
@@ -672,6 +678,8 @@ ok(/⚠/.test(BA.soplando) && /km\/h/.test(BA.soplando),
    `con el viento por encima del umbral la bandera avisa, no cuenta: «${BA.soplando}»`);
 ok(/suelta en \d+:\d\d/.test(BA.amainado),
    `y en cuanto amaina arranca la cuenta atrás: «${BA.amainado}»`);
+ok(/pide 80, meteo en ~\d+ (min|s)/.test(r.rampa),
+   `el viento se PIDE y llega por rampa, y la teja dice cuánto falta: «${r.rampa}»`);
 
 console.log('');
 const E = r.editor;
