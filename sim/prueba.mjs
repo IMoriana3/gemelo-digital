@@ -89,6 +89,42 @@ ok(Math.sign(pl.tcu(1).anguloReal) === ladoMañana,
    'sigue en el mismo lado después del mediodía solar', pl.tcu(1).anguloReal.toFixed(0) + '°');
 ok(cruce < 1, 'y no ha dado ningún viaje al otro lado con el viento encima');
 
+console.log('\n── la cuenta atrás para desabanderar ──');
+/* Abanderado son DOS estados y confundirlos es lo que hace que nadie entienda por qué
+   el campo sigue de canto con el día en calma: mientras sopla por encima del umbral la
+   histéresis se REARMA en cada paso —eso es una alarma, no una espera— y solo cuando el
+   viento baja empiezan a contar los 30 min de `destow_hold_minutes`. */
+{
+  const pc = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 11 });
+  pc.meteo.viento = 18.5;                                 /* 67 km/h */
+  for (let i = 0; i < 10 * 60; i += 10) pc.paso(10);
+  const c = pc.tcu(1);
+  ok(c.stow === 2 && c.stowRearma === true,
+     'con el viento por encima del umbral la bandera no espera: está en alarma',
+     'estado ' + c.stow + ' · rearma ' + c.stowRearma);
+  ok(c.stowCuenta === 0,
+     'y no hay cuenta atrás que pintar: la histéresis se rearma en cada paso');
+  /* y las dos posiciones ya no coinciden: eso es exactamente lo que la protección pisa */
+  ok(Math.abs(c.objetivo - c.objetivoSolar) > 10,
+     'el objetivo SOLAR sigue pidiendo seguimiento mientras el de verdad está en bandera',
+     'solar ' + c.objetivoSolar.toFixed(1) + '° · manda ' + c.objetivo.toFixed(1) + '°');
+
+  pc.meteo.viento = 2;                                    /* amaina de golpe: 7 km/h */
+  pc.paso(10);
+  ok(c.stowRearma === false && c.stowCuenta > 1700,
+     'en cuanto baja, la cuenta atrás arranca entera', 'quedan ' + Math.round(c.stowCuenta) + ' s');
+  const antes = c.stowCuenta;
+  for (let i = 0; i < 300; i += 10) pc.paso(10);
+  ok(c.stowCuenta < antes - 250 && c.stow === 2,
+     'y descuenta de verdad sin soltar la bandera antes de tiempo',
+     Math.round(antes) + ' → ' + Math.round(c.stowCuenta) + ' s');
+  for (let i = 0; i < 30 * 60; i += 10) pc.paso(10);
+  ok(c.stow === 0 && c.stowCuenta === 0,
+     'pasada la histéresis suelta la bandera', 'estado ' + c.stow);
+  casi(c.objetivo, c.objetivoSolar, 0.01,
+       'y entonces las dos posiciones vuelven a ser la misma');
+}
+
 console.log('\n── el viento no salta, y las rachas rachean ──');
 {
   const pv = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 10 });

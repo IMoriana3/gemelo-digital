@@ -486,6 +486,10 @@ function TCU(id, planta, opts) {
   this.anguloReal = this.repetidor ? 0 : K.NIGHT_POS;   /* la MESA: solo lo sabe el simulador */
   this.angulo = this.anguloReal;                        /* lo que MIDE el TCU y publica */
   this.objetivo = this.anguloReal;
+  this.objetivoSolar = this.anguloReal;   /* adónde iría sin protecciones */
+  this.stowCuenta = 0;                    /* s para desabanderar, si ya ha bajado el viento */
+  this.stowRearma = false;                /* el viento sigue por encima del umbral */
+  this.stowHisteresis = 0; this.stowLado = 0;
 
   this.forzadoLocal = 0;             /* 40000 = 11..17: forzado escrito a ESTE equipo */
   this.jog = 0;                      /* 40017: mando manual del motor (−1 este, +1 oeste) */
@@ -661,6 +665,27 @@ TCU.prototype.decide = function (dt, ang) {
      surte efecto ya, sin perderle el estado a la máquina (ni el lado abanderado) */
   var rAb = sincronizaBandera(this.ab).paso(dt, this.p.ncu.vientoMax, ang.sel, azSol, this.p.ncu.dirVientoMax);
   this.stow = rAb.estado;
+  /* Lo que hace falta para saber CUÁNDO se suelta la bandera, que es la pregunta que
+     se hace el operario mirando el SCADA. Dos situaciones distintas:
+       · el viento sigue por encima del umbral → no hay espera, hay ALARMA: la
+         histéresis se rearma en cada paso y la cuenta sale entera una y otra vez;
+       · el viento ya ha bajado → cuenta atrás de verdad, los 30 min del canon
+         (`destow_hold_minutes`) descontándose. */
+  this.stowCuenta = rAb.cuenta;          /* s que faltan para desabanderar (0 si no aplica) */
+  this.stowRearma = rAb.sobreUmbral;     /* sigue soplando por encima del umbral */
+  this.stowHisteresis = rAb.histeresis;  /* la ventana entera, para pintar la barra */
+  this.stowLado = rAb.lado;
+
+  /* ---- POSICIÓN OBJETIVO SOLAR ----
+     Adónde iría este seguidor si no hubiera protecciones: seguimiento con su
+     backtracking, o la posición nocturna. Es la referencia contra la que se LEE todo
+     lo demás — sin ella, ver el campo a 55° no dice si está abanderado, forzado o es
+     que el sol está bajo. Se calcula SIEMPRE, gane quien gane abajo, y de ella comen
+     también las ramas 6 y 7: si se calculara dos veces acabarían siendo dos algoritmos.
+     Va SIN recortar a los topes a propósito, para que se vea que el tope aprieta. */
+  if (this.repetidor) this.objetivoSolar = 0;
+  else if (!ang.dia) this.objetivoSolar = this.cfgTcu.nightPos;
+  else { var Cs = this.p.canonEn(this.p.t.hora); this.objetivoSolar = Cs ? Cs.objetivo : ang.sel; }
 
   /* modos de batería (L1 baja · L2 muy baja · L3 crítica) con rearme: se entra al
      cruzar el umbral hacia abajo y no se sale hasta superarlo por SOC_REARME, para
@@ -734,7 +759,7 @@ TCU.prototype.decide = function (dt, ang) {
   } else if (this.modo === MODO.OFF) {
     obj = this.angulo; crit = CRIT.INHIBIDO; inhibido = true;
   } else if (!ang.dia) {
-    obj = this.cfgTcu.nightPos; crit = CRIT.NOCHE;
+    obj = this.objetivoSolar; crit = CRIT.NOCHE;
   } else if (this.p.canonEn(this.p.t.hora)) {
     /* EL ALGORITMO ES DEL MOTOR. Aquí no se decide el ángulo de seguimiento: se
        ejecuta el que ha calculado SolarGPT, con su backtracking y su política de
@@ -742,14 +767,14 @@ TCU.prototype.decide = function (dt, ang) {
        pulsos, el inclinómetro que miente, el motor que consume— pero no una segunda
        versión del algoritmo. */
     var C = this.p.canonEn(this.p.t.hora);
-    obj = C.objetivo;
+    obj = this.objetivoSolar;
     crit = C.difusa ? CRIT.DIFUSA : (Math.abs(C.objetivo) < Math.abs(ang.real) - 1e-3
                                      ? CRIT.BACKTRACKING : CRIT.SEGUIMIENTO);
     this.difusaActiva = C.difusa; this.difusaAlpha = C.alpha;
     this.difusaTxt = C.difusa ? 'del motor canónico' : '';
     this.motorCanon = true;
   } else {
-    obj = ang.sel; crit = ang.btActivo ? CRIT.BACKTRACKING : CRIT.SEGUIMIENTO;
+    obj = this.objetivoSolar; crit = ang.btActivo ? CRIT.BACKTRACKING : CRIT.SEGUIMIENTO;
     this.motorCanon = false;
   }
 

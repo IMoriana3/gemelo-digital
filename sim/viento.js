@@ -99,6 +99,11 @@ Abanderamiento.prototype.ladoDelSol = function (az) { return this.ladoDe(az); };
 /* dt en segundos · viento en m/s · ángulo de seguimiento y azimut solar en grados */
 Abanderamiento.prototype.paso = function (dt, vientoMs, anguloSeguimiento, azimutSolDeg, azimutVientoDeg) {
   var antes = this.estado;
+  /* ¿sigue soplando por encima del umbral que abandera? Es la diferencia entre «está
+     abanderado y esperando» y «está abanderado porque el viento no para»: mientras esto
+     sea cierto la histéresis se REARMA en cada paso, así que no hay cuenta atrás que
+     valga — sale entera una y otra vez. */
+  var sobre = this.umbrales === 1 ? vientoMs > this.t1 : vientoMs >= this.t1;
   if (this.umbrales === 1) {
     /* A1/B1: todo o nada, y sin histéresis — así lo define el canon */
     this.estado = vientoMs > this.t1 ? 2 : 0;
@@ -132,6 +137,13 @@ Abanderamiento.prototype.paso = function (dt, vientoMs, anguloSeguimiento, azimu
     objetivo: obj,
     lado: this.lado,
     holdRestante: Math.max(0, this.hold),
+    /* lo que hace falta para pintar la espera de verdad */
+    sobreUmbral: sobre,
+    /* segundos que faltan para soltar la bandera. Solo cuenta cuando el viento YA ha
+       bajado: si sigue por encima no es una cuenta atrás, es una alarma. Y con un solo
+       umbral no hay histéresis, así que tampoco hay nada que contar. */
+    cuenta: (this.estado > 0 && !sobre && this.umbrales === 2) ? Math.max(0, this.hold) : 0,
+    histeresis: this.umbrales === 2 ? this.holdS : 0,
     txt: this.estado === 2 ? 'bandera total' : (this.estado === 1 ? 'bandera parcial' : '')
   };
 };

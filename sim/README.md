@@ -56,9 +56,31 @@ Y están **las cuatro** del canon, elegibles en la interfaz igual que en el sele
 
 Con un umbral no hay sector parcial ni histéresis: por encima de 40 km/h, bandera completa, y suelta en cuanto baja. Cambiar de estrategia es **en caliente**, sin rehacer la planta. En el eje A (cara al viento) hace falta saber de dónde **viene** el viento, así que el selector saca además el azimut meteorológico (0 N · 90 E · 180 S · 270 O); en el eje B lo esconde, porque no pinta nada.
 
+**Abanderado son dos estados, no uno**, y confundirlos es lo que hace que nadie entienda por qué el campo sigue de canto con el día en calma:
+
+- **sigue soplando** por encima del umbral → la histéresis se **rearma en cada paso**, así que no hay espera que contar: es una **alarma**. El HUD lo pone así, `⚠ viento ≥ 40 km/h`, en vez de un «faltan 30:00» que sale entero una y otra vez y no significa nada.
+- **ya ha amainado** → entonces sí: **cuenta atrás** de los 30 min, descontándose, en el HUD y en la fila 1 de la jerarquía.
+
+Con un solo umbral (A1/B1) no hay histéresis, y se dice: «sin histéresis».
+
 Y una regla que **no está en el canon pero sí en el equipo**, aprendida de `terreno.html`: **el lado se fija al abanderar**. Si abandera de mañana mirando al este, se queda al este aunque el sol cruce el mediodía. Recalcularlo a media bandera manda al seguidor a cruzar 110° con el viento encima — justo lo que el abanderamiento existe para evitar. El simulador lo hacía mal hasta que se unificó.
 
 Ojo con el azimut: el canon usa convención pvlib (90° = este al amanecer) y la casa usa 0 en el mediodía solar con negativo al este. La conversión es `az_pvlib = 180 + az`, y equivocarla abandera al lado contrario sin que salte nada.
+
+## Las CUATRO posiciones
+
+Un seguidor no tiene «un ángulo»: tiene cuatro, y todo lo que este simulador enseña está en los saltos entre ellos. Cada salto tiene un culpable distinto, y ninguna de las cuatro se puede leer sin la de al lado — ver el campo a 55° no dice si está abanderado, forzado o es que el sol está bajo.
+
+| | | el salto hasta la siguiente lo explica |
+|---|---|---|
+| **objetivo solar** | adónde iría sin protecciones: seguimiento con su backtracking, o la posición nocturna | la **protección** que la pisa: bandera, nieve, limpieza, un forzado, la defensa por batería |
+| **objetivo** | lo que el TCU ha decidido de verdad. `30110` es su diferencia con la medida | la **banda muerta** del lazo (45 pulsos ≈ 1,3°) — o un motor que no puede moverse: seta pulsada, eje calado |
+| **real** | dónde está la mesa. **Solo lo sabe el simulador**: en planta hace falta un instrumento externo | el **inclinómetro**: desajuste de montaje, deriva térmica, ruido, cuantización |
+| **mide el TCU** | lo que publica en `30111`, y **lo único que ve el SCADA** | — |
+
+Las cuatro están en el HUD del campo, en las fichas del detalle del equipo y en la traza (la solar a trazos, por detrás). El objetivo solar va **sin recortar a los topes** a propósito: si alguien ha estrechado 41037/41038, se ve que el tope aprieta.
+
+El objetivo solar se calcula **siempre**, gane quien gane la jerarquía, y de él comen también las ramas 6 y 7 —el propio seguimiento— para que no acaben siendo dos algoritmos distintos.
 
 ## El algoritmo se LEE del motor, no se reescribe aquí
 

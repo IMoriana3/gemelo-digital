@@ -307,6 +307,19 @@ const r = await pg.evaluate(async () => {
   o.hud = { txt: $$('hud3d').innerText.replace(/\s+/g, ' '), solVisible: C.solMesh.visible,
             dia: P.tcus[0].solar.dia };
 
+  /* LA BANDERA TIENE DOS ESTADOS y el HUD tiene que distinguirlos: con el viento aun
+     por encima del umbral no hay espera que contar (la histeresis se rearma en cada
+     paso), y en cuanto amaina empiezan los 30 min de cuenta atras. */
+  const celda = (k) => ([...document.querySelectorAll('#hud3d .ro')]
+    .map((d) => d.innerText.replace(/\s+/g, ' ')).find((x) => x.toLowerCase().includes(k)) || '');
+  o.bandera = { soplando: celda('bandera') };
+  P.meteo.viento = 2; P.paso(10); pintaTodo();            /* amaina de golpe */
+  o.bandera.amainado = celda('bandera');
+  /* y se deja como estaba: los bloques de abajo dan por bueno el viento de antes */
+  P.meteo.viento = 12;
+  for (let i = 0; i < 20; i++) P.paso(20);
+  P.t.hora = 12; P.paso(0.001); pintaTodo();
+
   /* ELEGIR PLANTA CONFIGURA LA PLANTA. Antes el emplazamiento solo movia la latitud:
      elegias El Burgo y seguias con 24 seguidores porque era lo que habia en la casilla. */
   const loc = $$('loc');
@@ -618,10 +631,15 @@ ok(!SE.hayBoton && !SE.tiposAv.includes('setancu'),
 const V = r.veleta;
 ok(V.delN === 'S' && V.delE === 'O' && V.delS === 'N' && V.delO === 'E',
    `la veleta apunta ADONDE SOPLA: del N→${V.delN} · del E→${V.delE} · del S→${V.delS} · del O→${V.delO}`);
-ok(['viento', 'rachas', 'altura', 'azimut', 'objetivo', 'real', 'mide el tcu', 'flota']
+ok(['viento', 'rachas', 'altura', 'azimut', 'objetivo solar', 'objetivo', 'real', 'mide el tcu', 'flota']
      .every((k) => r.hud.txt.toLowerCase().includes(k)),
-   'el HUD trae viento y rumbo, altura y azimut del sol, y objetivo / real / medido' +
+   'el HUD trae viento y rumbo, sol, y las CUATRO posiciones: solar / objetivo / real / medido' +
    (r.hud.dia ? '' : ' [OJO: leído de noche]'));
+const BA = r.bandera;
+ok(/⚠/.test(BA.soplando) && /km\/h/.test(BA.soplando),
+   `con el viento por encima del umbral la bandera avisa, no cuenta: «${BA.soplando}»`);
+ok(/suelta en \d+:\d\d/.test(BA.amainado),
+   `y en cuanto amaina arranca la cuenta atrás: «${BA.amainado}»`);
 
 console.log('');
 const E = r.editor;

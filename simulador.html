@@ -569,7 +569,7 @@
         <div class="chips" id="chipsTcu"></div>
         <div class="card">
           <h2>Traza <span class="badge" id="hMuestras">—</span></h2>
-          <div class="sub">Lo que ha pasado, no solo lo que pasa. <b style="color:#e0a52b">objetivo</b> · <b style="color:#36D399">real</b> · <b style="color:#6fb7ff">medido</b> arriba; <b style="color:#b98cff">SoC</b> y <b style="color:#5e7388">viento</b> abajo. Las líneas rojas son eventos: entre <i>objetivo</i> y <i>real</i> está la banda muerta; entre <i>real</i> y <i>medido</i>, el inclinómetro.</div>
+          <div class="sub">Lo que ha pasado, no solo lo que pasa. <b style="color:#9a8c5a">objetivo solar</b> (a trazos) · <b style="color:#e0a52b">objetivo</b> · <b style="color:#36D399">real</b> · <b style="color:#6fb7ff">medido</b> arriba; <b style="color:#b98cff">SoC</b> y <b style="color:#5e7388">viento</b> abajo. Las líneas rojas son eventos. Cada hueco tiene un culpable: entre <i>solar</i> y <i>objetivo</i>, una protección (bandera, nieve, forzado); entre <i>objetivo</i> y <i>real</i>, la banda muerta; entre <i>real</i> y <i>medido</i>, el inclinómetro.</div>
           <canvas id="hCanvas" style="width:100%;height:260px;display:block;border-radius:8px"></canvas>
           <div class="escfila" style="margin-top:8px">
             <button class="btn sec" id="hCsv" style="width:auto;padding:6px 12px">CSV de la traza</button>
@@ -1383,13 +1383,28 @@ function indiceDe(id) {
 
      · ¿de dónde sopla y cuánto? — con el nivel de la NCU y la bandera si la hay
      · ¿dónde está el sol? — altura y azimut, y a qué ángulo pide ir
-     · ¿dónde están las mesas? — la del equipo elegido en sus TRES versiones (objetivo,
-       real y medida), que es de lo que va este simulador, más el rango de la flota
+     · ¿dónde están las mesas? — la del equipo elegido en sus CUATRO versiones, más el
+       rango de la flota. Las cuatro no son un capricho: cada salto entre dos dice una
+       cosa distinta y no hay forma de leer una sin la de al lado.
+
+           objetivo SOLAR   adónde iría sin protecciones (seguimiento + backtracking)
+              ↓ salto = la PROTECCIÓN: abanderamiento, nieve, limpieza, forzado, batería
+           objetivo         lo que el TCU ha decidido de verdad
+              ↓ salto = la BANDA MUERTA del lazo, o el motor que no puede moverse
+           real             dónde está la mesa. Solo lo sabe el simulador
+              ↓ salto = el INCLINÓMETRO: desajuste de montaje, deriva, ruido
+           mide el TCU      lo que publica en 30111, y lo único que ve el SCADA
 
    Va en DOM sobre el lienzo y no en la escena: texto 3D a esta escala es ilegible, se
    pelea con la niebla y cuesta un render. */
 var ROSA = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
 function rumbo(g) { return ROSA[Math.round((((g % 360) + 360) % 360) / 22.5) % 16]; }
+/* segundos → mm:ss, para las cuentas atrás. Redondeo ARRIBA: que ponga 0:00 con la
+   bandera todavía puesta es exactamente el tipo de detalle que hace desconfiar. */
+function msS(seg) {
+  var t = Math.max(0, Math.ceil(seg)), m = Math.floor(t / 60);
+  return m + ':' + String(t % 60).padStart(2, '0');
+}
 
 function pintaHud3D() {
   if (!P || vista !== 'campo') return;
@@ -1405,7 +1420,22 @@ function pintaHud3D() {
     if (a < mn) mn = a; if (a > mx) mx = a;
     if (P.tcus[i].moviendo) mov++;
   }
-  var ban = n.nivelVientoGlobal, bTxt = t.stow === 2 ? 'TOTAL' : (t.stow ? 'parcial' : '—');
+  var ban = n.nivelVientoGlobal;
+
+  /* ── LA BANDERA, con su cuenta atrás ──────────────────────────────────────────
+     Abanderado no es un estado, son dos, y confundirlos es lo que hace que nadie
+     entienda por qué el campo sigue de canto con el día en calma:
+       · el viento SIGUE por encima del umbral → no hay espera que contar. La
+         histéresis se rearma en cada paso, así que la cuenta saldría entera una y otra
+         vez: eso es una ALARMA, no un «faltan 30 min».
+       · el viento YA ha bajado → entonces sí, cuenta atrás de los 30 min del canon
+         (`destow_hold_minutes`), que es lo que hay que esperar antes de soltar. */
+  var bTxt = t.stow === 2 ? 'TOTAL' : (t.stow ? 'parcial' : '—'), bSub, bCls = '';
+  var u1 = Math.round(SIM.K.WIND_T1 * 3.6);
+  if (!t.stow) { bSub = 'nivel ' + ban; }
+  else if (t.stowRearma) { bSub = '⚠ viento ≥ ' + u1 + ' km/h'; bCls = 'no'; }
+  else if (t.stowHisteresis) { bSub = 'suelta en ' + msS(t.stowCuenta); bCls = 'al'; }
+  else { bSub = 'sin histéresis'; bCls = 'al'; }
   var ro = function (k, v, u, c) {
     return '<div class="ro' + (c ? ' ' + c : '') + '"><div class="k">' + k + '</div>' +
            '<div class="v">' + v + (u ? ' <small>' + u + '</small>' : '') + '</div></div>';
@@ -1414,12 +1444,14 @@ function pintaHud3D() {
     ro('Viento', vk.toFixed(1), 'km/h · ' + rumbo(m.dirViento),
        vk >= 60 ? 'no' : (vk >= 40 ? 'al' : '')) +
     ro('Rachas', rk.toFixed(0), 'km/h') +
-    ro('Nivel · bandera', ban + ' · ' + bTxt, '', t.stow ? 'al' : '') +
+    ro('Bandera', bTxt, bSub, bCls) +
     (s.dia ? ro('Sol · altura', el.toFixed(1) + '°', rumbo(180 + s.az)) +
              ro('Sol · azimut', (s.az >= 0 ? '+' : '') + s.az.toFixed(1) + '°',
                 Math.abs(s.bt - s.real) > 0.2 ? 'bt ' + s.bt.toFixed(0) + '°' : 'sigue ' + s.real.toFixed(0) + '°')
            : ro('Sol', 'noche', '')) +
-    ro('Objetivo', t.objetivo.toFixed(1) + '°', 'TCU ' + t.id) +
+    ro('Objetivo solar', t.objetivoSolar.toFixed(1) + '°', 'sin protecciones') +
+    ro('Objetivo', t.objetivo.toFixed(1) + '°', 'TCU ' + t.id,
+       Math.abs(t.objetivo - t.objetivoSolar) > 0.5 ? 'al' : '') +
     ro('Real', t.anguloReal.toFixed(1) + '°', 'la mesa') +
     ro('Mide el TCU', t.angulo.toFixed(1) + '°', '30111',
        Math.abs(t.angulo - t.anguloReal) > 0.5 ? 'no' : '') +
@@ -2059,6 +2091,12 @@ function pintaDetalle() {
     chip((t.repetidor ? 'Repetidor ' : 'TCU ') + t.id, t.salud().toUpperCase(),
       t.salud() === 'ok' ? 'ok' : (t.salud() === 'alarma' ? 'bad' : 'warn'), 'grupo ' + t.grupo) +
     chip('Modo', t.modoTxt(), '', 'criterio: ' + SIM.CRIT_TXT[t.criterio]) +
+    /* las cuatro posiciones, en orden: lo que pide el sol, lo que decide el TCU, dónde
+       está la mesa y lo que publica. Cada salto tiene un culpable distinto. */
+    chip('Pide el sol', num(t.objetivoSolar, 1) + '°',
+      Math.abs(t.objetivo - t.objetivoSolar) > 0.5 ? 'warn' : '',
+      Math.abs(t.objetivo - t.objetivoSolar) > 0.5
+        ? 'lo pisa ' + SIM.CRIT_TXT[t.criterio] : 'sin protecciones') +
     chip('Mide el TCU', num(t.angulo, 2) + '°', 'blue', 'objetivo ' + num(t.objetivo, 1) + '°') +
     chip('Está la mesa', num(t.anguloReal, 2) + '°',
       Math.abs(t.anguloReal - t.angulo) > 1 ? 'bad' : '',
@@ -2089,7 +2127,14 @@ function pintaDetalle() {
     ['0 · Seta / motor (entrada de hardware)', !t.motorHabilitado, false,
       t.seta ? 'SETA pulsada · motor cortado'
              : (t.alarmaMotorEnclavada ? 'alarma enclavada · limpiar con 40007.13' : 'motor habilitado')],
-    ['1 · SP1 viento', t.stow > 0 || e.forzado === 1, t.sp === 1, t.stow === 2 ? 'total ±55°' : (t.stow === 1 ? 'parcial ≥30°' : (e.forzado === 1 ? 'forzado' : '—'))],
+    /* con la bandera puesta, lo que hace falta saber no es que está puesta —eso ya se
+       ve— sino CUÁNDO se suelta: alarma mientras siga soplando, cuenta atrás en cuanto
+       baje. Son los 30 min de `destow_hold_minutes` del canon. */
+    ['1 · SP1 viento', t.stow > 0 || e.forzado === 1, t.sp === 1,
+      t.stow ? (t.stow === 2 ? 'total ±55°' : 'parcial ≥30°') +
+               (t.stowRearma ? ' · ⚠ viento ≥ ' + Math.round(SIM.K.WIND_T1 * 3.6) + ' km/h'
+                             : (t.stowHisteresis ? ' · suelta en ' + msS(t.stowCuenta) : ' · sin histéresis'))
+             : (e.forzado === 1 ? 'forzado' : '—')],
     ['2 · SP3 nieve', e.nieve || e.forzado === 3, t.sp === 3, e.nieve ? 'alarma de nieve' : (e.forzado === 3 ? 'forzado' : '—')],
     ['3 · SP4 limpieza', e.limpieza || e.forzado === 4, t.sp === 4, e.limpieza ? 'interruptor del grupo ' + t.grupo : (e.forzado === 4 ? 'forzado' : '—')],
     ['4 · SP2/5/6/7 forzadas', !!e.forzado && [2, 5, 6, 7].indexOf(e.forzado) >= 0, [2, 5, 6, 7].indexOf(t.sp) >= 0, e.forzado ? 'SP' + e.forzado : '—'],

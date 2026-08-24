@@ -7,9 +7,11 @@
 
    Qué se graba y por qué justo eso:
 
-     · objetivo · real · medido — las TRES, porque la gracia del simulador es que
-       no son la misma. Entre objetivo y real está la banda muerta; entre real y
-       medido, el inclinómetro. Ver las tres juntas es ver el lazo entero.
+     · objetivo solar · objetivo · real · medido — las CUATRO, porque la gracia del
+       simulador es que no son la misma, y cada salto entre dos tiene un culpable
+       distinto: entre solar y objetivo está la PROTECCIÓN (bandera, nieve, forzado),
+       entre objetivo y real la BANDA MUERTA del lazo, y entre real y medido el
+       INCLINÓMETRO. Ver las cuatro juntas es ver el lazo entero y quién lo pisa.
      · SoC y viento — las dos magnitudes que hacen que el seguidor deje de seguir.
      · eventos — abanderamientos, setas, averías, escrituras. Sin ellos la traza
        dice QUÉ pasó pero no POR QUÉ.
@@ -64,6 +66,7 @@ Historia.prototype.paso = function (P, sel) {
   this.tUlt = t;
   this.m.push({
     t: t, h: P.t.hora,
+    sol: tcu.objetivoSolar != null ? tcu.objetivoSolar : tcu.objetivo,
     obj: tcu.objetivo, real: tcu.anguloReal, med: tcu.angulo,
     soc: tcu.soc, viento: P.ncu.vientoMax * 3.6, ghi: tcu.sky ? tcu.sky.ghi : 0,
     crit: tcu.criterio, sp: tcu.sp, seta: tcu.seta ? 1 : 0, id: tcu.id
@@ -94,7 +97,7 @@ Historia.prototype.pinta = function (cv, opt) {
 
   var C = opt.colores || {
     fondo: '#0f1620', reja: '#1e2a38', tx: '#8aa0b4',
-    obj: '#e0a52b', real: '#36D399', med: '#6fb7ff', soc: '#b98cff', viento: '#5e7388', ev: '#e2574c'
+    sol: '#9a8c5a', obj: '#e0a52b', real: '#36D399', med: '#6fb7ff', soc: '#b98cff', viento: '#5e7388', ev: '#e2574c'
   };
   ctx.fillStyle = C.fondo; ctx.fillRect(0, 0, W, H);
 
@@ -110,7 +113,7 @@ Historia.prototype.pinta = function (cv, opt) {
   var yAng = pad.t, yBaj = pad.t + hAng + 8;
   var x = function (t) { return pad.l + (t - t0) / dt * (W - pad.l - pad.r); };
   var tope = Math.max(60, Math.ceil(Math.max.apply(null, m.map(function (s) {
-    return Math.max(Math.abs(s.obj), Math.abs(s.real), Math.abs(s.med));
+    return Math.max(Math.abs(s.sol || 0), Math.abs(s.obj), Math.abs(s.real), Math.abs(s.med));
   })) / 10) * 10);
   var yA = function (v) { return yAng + hAng / 2 - (v / tope) * (hAng / 2); };
   var yB = function (v) { return yBaj + hBaj - (v / 100) * hBaj; };
@@ -141,16 +144,23 @@ Historia.prototype.pinta = function (cv, opt) {
     ctx.moveTo(xx, pad.t); ctx.lineTo(xx, H - pad.b); ctx.stroke();
   });
 
-  function curva(campo, color, yFn, ancho) {
-    ctx.strokeStyle = color; ctx.lineWidth = ancho || 1.5; ctx.beginPath();
+  function curva(campo, color, yFn, ancho, trazos) {
+    ctx.strokeStyle = color; ctx.lineWidth = ancho || 1.5;
+    ctx.setLineDash(trazos || []);
+    ctx.beginPath();
     for (var i = 0; i < m.length; i++) {
-      var px = x(m[i].t), py = yFn(m[i][campo]);
+      var v = m[i][campo]; if (v == null) continue;
+      var px = x(m[i].t), py = yFn(v);
       if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
     ctx.stroke();
+    ctx.setLineDash([]);
   }
-  /* orden: objetivo debajo, real encima, medido finito por delante — así se ve el
-     retraso del lazo y, si el sensor miente, la separación entre real y medido */
+  /* orden: el objetivo SOLAR al fondo y a trazos —es el fantasma, adónde iría sin
+     protecciones—, el objetivo de verdad encima, luego la mesa y el medido finito por
+     delante. Así se ve de un vistazo el retraso del lazo, la separación entre real y
+     medido si el sensor miente, y el hueco entre solar y objetivo cuando algo lo pisa. */
+  curva('sol', C.sol, yA, 1.2, [5, 4]);
   curva('obj', C.obj, yA, 1.2);
   curva('real', C.real, yA, 1.8);
   curva('med', C.med, yA, 1);
@@ -203,9 +213,10 @@ Historia.prototype.pinta = function (cv, opt) {
 
 /* la última traza como CSV, para llevársela */
 Historia.prototype.csv = function () {
-  var l = ['epoch;hora;objetivo_deg;real_deg;medido_deg;soc_pct;viento_kmh;ghi_wm2'];
+  var l = ['epoch;hora;objetivo_solar_deg;objetivo_deg;real_deg;medido_deg;soc_pct;viento_kmh;ghi_wm2'];
   this.m.forEach(function (s) {
-    l.push([s.t, s.h.toFixed(4), s.obj.toFixed(3), s.real.toFixed(3), s.med.toFixed(3),
+    l.push([s.t, s.h.toFixed(4), (s.sol != null ? s.sol : s.obj).toFixed(3),
+            s.obj.toFixed(3), s.real.toFixed(3), s.med.toFixed(3),
             s.soc.toFixed(2), s.viento.toFixed(1), s.ghi.toFixed(0)].join(';'));
   });
   return l.join('\n');
