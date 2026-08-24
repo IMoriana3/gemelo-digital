@@ -29,9 +29,41 @@
    ============================================================================ */
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 
 const RAIZ = path.dirname(new URL('.', import.meta.url).pathname);
 const PAG = pathToFileURL(path.join(RAIZ, 'simulador.html')).href;
+
+/* ── GUARDIA DE NADA DUPLICADO, antes de abrir el navegador ────────────────────
+   Un fichero de un solo <script> con una funcion definida dos veces NO da error: en
+   JavaScript gana la ultima declaracion y la primera desaparece sin ruido. Asi se
+   colo un bloque de 1.265 lineas repetidas -- una revision anadida sin borrar la
+   original-- que dejo INERTE el commit de encima: su codigo estaba en el fichero y lo
+   pisaba la version vieja mil lineas mas abajo. No lo cazo ninguna prueba porque
+   ninguna miraba si algo estaba dos veces; todas miraban si funcionaba, y funcionaba
+   -- la version vieja.
+
+   Peor con los oyentes: `onclick =` es idempotente, pero `addEventListener` se APILA,
+   asi que un boton de conmutar registrado dos veces se dispara dos veces y deja las
+   cosas como estaban. El de limpieza no hacia nada.
+
+   Esto es texto plano y no necesita navegador, asi que corre lo primero. */
+{
+  const src = readFileSync(path.join(RAIZ, 'simulador.html'), 'utf8');
+  const dup = (lista) => [...new Set(lista.filter((v, i) => lista.indexOf(v) !== i))];
+  const fns = [...src.matchAll(/^function\s+(\w+)\s*\(/gm)].map((m) => m[1]);
+  const oyentes = [...src.matchAll(/\$\('([\w-]+)'\)\.addEventListener\('(\w+)'/g)]
+    .map((m) => m[1] + ':' + m[2]);
+  const dFns = dup(fns), dOye = dup(oyentes);
+  if (dFns.length || dOye.length) {
+    console.error('\n✗ simulador.html tiene cosas definidas DOS VECES, y en JS eso no da error:');
+    if (dFns.length) console.error('  funciones: ' + dFns.join(', '));
+    if (dOye.length) console.error('  oyentes:   ' + dOye.join(', ') + '  (addEventListener se apila)');
+    process.exit(1);
+  }
+  console.log('  ✓ nada definido dos veces: ' + fns.length + ' funciones y ' +
+              oyentes.length + ' oyentes, todos únicos');
+}
 
 let chromium;
 try {
