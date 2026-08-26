@@ -968,5 +968,39 @@ const lejosCar = Careo.compara(Careo.parsea('Fecha;30111 t [deg]\n2026-06-21 03:
 ok(lejosCar.n === 0 && lejosCar.sinPar === 1,
    'un punto sin muestra a esa hora se descarta, no se estira la curva para que case');
 
+/* ── el canon interpola, no redondea al vecino ─────────────────────────────
+   `Canon.en(h)` tomaba la muestra MÁS PRÓXIMA y la SIGUIENTE, no el intervalo
+   que encierra la hora. En la segunda mitad de cada intervalo el par elegido
+   dejaba fuera a `h`, el factor salía negativo y el clamp a [0,1] lo tapaba:
+   devolvía la muestra más próxima tal cual. Con 10:00→0° y 11:00→10°, las
+   10:45 daban 10° en vez de 7,5°. Mudo, y sólo en media rampa. */
+console.log('\n── el canon interpola de verdad ──');
+const serieCanon = (hora, theta) => {
+  const c = Object.create(Canon.prototype);
+  c.serie = { hora, theta, objetivo: theta, difusa: null, alpha: null, ghi: null };
+  return c;
+};
+
+const canonRampa = serieCanon([10, 11, 12], [0, 10, 20]);
+casi(canonRampa.en(10.25).theta, 2.5, 1e-9, 'primer cuarto del intervalo');
+casi(canonRampa.en(10.5).theta, 5.0, 1e-9, 'mitad del intervalo');
+casi(canonRampa.en(10.75).theta, 7.5, 1e-9,
+     'y el ÚLTIMO cuarto —el que se redondeaba al vecino— también');
+casi(canonRampa.en(11).theta, 10.0, 1e-9, 'el nodo cae en su propia muestra');
+
+/* la serie da la vuelta al día: 23 h → 0 h es un intervalo, no un salto */
+const canonVuelta = serieCanon([23, 0], [0, 10]);
+casi(canonVuelta.en(23.75).theta, 7.5, 1e-9,
+     'interpola también cruzando la medianoche');
+
+/* con huso no nulo la serie NO está ordenada por hora civil */
+const canonHuso = serieCanon([22, 23, 0, 1], [0, 10, 20, 30]);
+casi(canonHuso.en(0.5).theta, 25.0, 1e-9,
+     'y con la serie desordenada por hora civil sigue cogiendo su intervalo');
+
+/* una sola muestra no tiene intervalo: se devuelve tal cual, sin dividir por cero */
+ok(serieCanon([7], [42]).en(13).theta === 42,
+   'con una sola muestra devuelve su valor, no NaN');
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);
