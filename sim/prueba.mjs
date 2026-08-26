@@ -734,8 +734,15 @@ falso.serie = {                                   /* trayectoria de mentira, a m
 ok(falso.hayTrayectoria(), 'el cliente reconoce que tiene trayectoria');
 ok(Math.abs(falso.en(9).objetivo - (-40)) < 1e-9,
    'y la consulta por hora da el punto exacto cuando cae justo', falso.en(9).objetivo + '°');
-ok(falso.en(10.5).objetivo > -40 && falso.en(10.5).objetivo < 0,
-   'e interpola entre puntos', falso.en(10.5).objetivo.toFixed(1) + '° a las 10:30');
+/* GEM-INTERP-01: esto era un RANGO y en el punto MEDIO del intervalo [9, 12],
+   que es justo donde la interpolación rota no se nota. Ahora, valor exacto —
+   y un instante de la SEGUNDA mitad, que es donde se rompía: con la regla
+   anterior las 11:00 devolvían 0 (el valor de las 12:00) en vez de −13,33. */
+ok(Math.abs(falso.en(10.5).objetivo - (-20)) < 1e-9,
+   'e interpola entre puntos, con el valor EXACTO', falso.en(10.5).objetivo.toFixed(4) + '° a las 10:30');
+ok(Math.abs(falso.en(11).objetivo - (-40 + (2 / 3) * 40)) < 1e-9,
+   'y también en la SEGUNDA mitad del intervalo, que es donde fallaba',
+   falso.en(11).objetivo.toFixed(4) + '° a las 11:00');
 ok(falso.en(12).difusa === true, 'y trae si el motor dijo que la difusa estaba activa');
 
 const Pk = new SIM.Planta({ nTCU: 2, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 9, dia: 172,
@@ -967,6 +974,182 @@ const lejosCar = Careo.compara(Careo.parsea('Fecha;30111 t [deg]\n2026-06-21 03:
                             hcar.m, 30111, 'med', { escala: 10 });
 ok(lejosCar.n === 0 && lejosCar.sinPar === 1,
    'un punto sin muestra a esa hora se descarta, no se estira la curva para que case');
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GEM-INTERP-01 — la interpolación de la trayectoria canónica
+   `Canon.en` buscaba la muestra más CERCANA e interpolaba siempre hacia la
+   siguiente, así que en la segunda mitad de cada intervalo usaba el par de al
+   lado y el `clamp(0,1)` dejaba el resultado clavado en el borde derecho.
+
+   Y SÍ HABÍA UN TEST — el de «e interpola entre puntos», unas líneas más
+   arriba. Pasaba con el bug dentro por dos motivos que conviene tener juntos:
+   consultaba las 10:30, que es el punto MEDIO EXACTO del intervalo [9, 12] —el
+   único instante donde la muestra más cercana empata y gana la izquierda, o
+   sea donde el defecto no puede manifestarse—, y además lo comprobaba con un
+   RANGO (`> −40 && < 0`) en vez de con el valor. Un test correcto, en el
+   fichero correcto, mirando donde la propiedad no se rompe. Se ha reforzado a
+   valor exacto y se le ha añadido un instante de la segunda mitad.
+   ═══════════════════════════════════════════════════════════════════════ */
+console.log('\n── canon: se interpola dentro del intervalo que ENCIERRA la hora ──');
+
+/* Una trayectoria de mentira, con la forma que tiene la de verdad. `theta` se
+   hace igual a `hora × 10` para que el valor correcto sea comprobable de
+   cabeza en cualquier instante. */
+function trayectoria(horas, opts) {
+  const c = new Canon();
+  const f = (opts && opts.valor) || (h => h * 10);
+  c.serie = { hora: horas.slice(), theta: horas.map(f), objetivo: horas.map(f),
+              difusa: horas.map(h => h >= 12 && h < 14),
+              alpha: horas.map(h => h / 24),
+              ghi: horas.map(h => h * 100) };
+  return c;
+}
+const HORARIA = Array.from({ length: 24 }, (_, k) => k);
+
+{
+  /* El caso que venía en el parte. IMPORTANTE: con SOLO DOS muestras este caso
+     ya pasaba ANTES del arreglo — el `(mejor+1) % n` da la vuelta al array y la
+     aritmética sale bien por casualidad. O sea que la reproducción del parte
+     estaba escrita en un régimen donde el defecto no puede manifestarse.
+     Se conserva porque es el contrato que se pidió, pero el que MIDE es el
+     barrido de abajo. */
+  const c = new Canon();
+  c.serie = { hora: [10, 11], theta: [0, 10], objetivo: [0, 10] };
+  casi(c.en(10.75).theta, 7.5, 1e-9, 'el caso del parte: 10:00=0 · 11:00=10 · 10:45 → 7,5');
+}
+
+{
+  /* RÉGIMEN DE RIESGO: la SEGUNDA mitad del intervalo. Ahí la muestra más
+     cercana es el borde derecho, que es lo que rompía la regla anterior. */
+  const c = trayectoria(HORARIA);
+  let peor = 0, malos = 0, total = 0;
+  for (let k = 0; k <= 2300; k++) {
+    const h = k / 100, got = c.en(h).theta, exp = h * 10;
+    total++; const e = Math.abs(got - exp);
+    if (e > 1e-9) { malos++; peor = Math.max(peor, e); }
+  }
+  ok(malos === 0, 'ni un instante mal interpolado en el tramo no envolvente ('
+     + total + ' comprobados)', malos + ' malos · peor error ' + peor.toFixed(4));
+
+  /* La aserción concreta que la regla anterior NO pasaba: a las 10:51 devolvía
+     110 (el valor de las 11:00) en vez de 105,1. */
+  casi(c.en(10.51).theta, 105.1, 1e-9,
+       'la segunda mitad del intervalo NO se queda clavada en el borde derecho');
+  casi(c.en(10.99).theta, 109.9, 1e-9, 'ni siquiera pegada a él');
+}
+
+{
+  /* WRAP 0–24 h. El intervalo 23→0 es un intervalo como cualquier otro y tiene
+     que interpolarse, no saltarse. Antes las 23:30 y las 23:45 devolvían el
+     valor de las 00:00, y las 23:15 un número que ni siquiera está entre sus
+     dos vecinos. */
+  const c = trayectoria(HORARIA);
+  casi(c.en(23).theta, 230, 1e-9, 'wrap: a las 23:00 vale lo de las 23:00');
+  casi(c.en(23.5).theta, 115, 1e-9, 'wrap: a las 23:30 va a MEDIO camino entre 230 y 0');
+  casi(c.en(23.25).theta, 172.5, 1e-9, 'wrap: a un cuarto, tres cuartos del valor');
+  casi(c.en(0).theta, 0, 1e-9, 'wrap: a las 00:00 vale lo de las 00:00');
+  casi(c.en(24).theta, 0, 1e-9, 'y las 24:00 son las 00:00');
+  casi(c.en(-0.5).theta, 115, 1e-9, 'y una hora negativa entra por el otro lado');
+  /* monotonía dentro del intervalo envolvente: si el wrap se tratara como antes,
+     esto se rompería a mitad de camino */
+  let mono = true, prev = c.en(23).theta;
+  for (let k = 1; k <= 100; k++) {
+    const v = c.en(23 + k / 100).theta;
+    if (v > prev + 1e-9) mono = false;
+    prev = v;
+  }
+  ok(mono, 'y el tramo de medianoche baja de forma monótona, sin escalones');
+}
+
+{
+  /* La serie va ordenada por índice de tiempo UTC. Con huso no nulo NO está
+     ordenada por hora civil: da una vuelta con UN salto. Re-ordenarla por hora
+     rompería justo el intervalo de medianoche, y por eso la pareja se toma por
+     ÍNDICE. Este es el régimen donde esa decisión importa. */
+  const desplazada = HORARIA.map(h => (h + 10) % 24);      /* arranca a las 10 h */
+  const c = trayectoria(desplazada);
+  const base = trayectoria(HORARIA);
+  /* El oráculo bueno NO es `h × 10`: la serie da la vuelta, así que en el tramo
+     de medianoche el valor correcto baja de 230 a 0 y `h × 10` mentiría ahí.
+     (Escrito primero así, y lo tumbaron 99 instantes — el error era del
+     oráculo, no del código.) El oráculo que sí vale es más fuerte: rotar el
+     ARRAY no puede cambiar el resultado en ningún instante, porque lo que
+     define el intervalo son las HORAS, no el orden. */
+  casi(c.en(10.75).theta, 107.5, 1e-9, 'serie ordenada por UTC (arranca a las 10 h): interpola bien');
+  casi(c.en(23.75).theta, 57.5, 1e-9, 'y en el tramo que cruza la medianoche');
+  casi(c.en(9.5).theta, 95, 1e-9, 'y en el que cierra la vuelta');
+  let discrepan = 0, peor = 0;
+  for (let k = 0; k <= 2399; k++) {
+    const h = k / 100, d = Math.abs(c.en(h).theta - base.en(h).theta);
+    if (d > 1e-9) discrepan++;
+    peor = Math.max(peor, d);
+  }
+  ok(discrepan === 0, 'y rotar el array 10 posiciones no mueve NI UN instante de '
+     + 'las 2.400 del día: manda la hora, no el orden',
+     discrepan + ' discrepancias · peor ' + peor.toFixed(6));
+}
+
+{
+  /* Un ESTADO y su parámetro salen de la MISMA muestra. Con la regla anterior
+     podían venir de muestras distintas, y entonces sale `difusa=false` con un
+     alpha de cuando sí lo estaba. */
+  const c = trayectoria(HORARIA);
+  let incoherentes = 0;
+  for (let k = 0; k <= 2399; k++) {
+    const h = k / 100, r = c.en(h);
+    const i0 = Math.floor(h) % 24;
+    if (r.difusa !== (i0 >= 12 && i0 < 14)) incoherentes++;
+    if (Math.abs(r.alpha - i0 / 24) > 1e-12) incoherentes++;
+    if (Math.abs(r.ghi - i0 * 100) > 1e-9) incoherentes++;
+  }
+  ok(incoherentes === 0, 'difusa, alpha y ghi salen todos del borde IZQUIERDO del intervalo',
+     incoherentes + ' incoherencias');
+  ok(c.en(12.9).difusa === true && c.en(11.9).difusa === false,
+     'el estado se mantiene desde su muestra hasta la siguiente, como el equipo');
+}
+
+{
+  /* Degenerados: no pueden reventar ni inventarse un valor. */
+  const vacio = new Canon();
+  ok(vacio.en(10) === null, 'sin trayectoria devuelve null, no un cero disfrazado');
+  const una = trayectoria([7]);
+  casi(una.en(19).theta, 70, 1e-9, 'con UNA sola muestra no hay nada que interpolar');
+  const repe = new Canon();
+  repe.serie = { hora: [5, 5], theta: [1, 9], objetivo: [1, 9] };
+  ok(Number.isFinite(repe.en(5).theta) && Number.isFinite(repe.en(17).theta),
+     'dos muestras a la MISMA hora no producen NaN por dividir entre cero',
+     repe.en(17).theta.toFixed(3));
+}
+
+{
+  /* MUTANTE: la regla anterior, aquí al lado, tiene que dar DISTINTO. Si diera
+     lo mismo, el banco de arriba estaría verde sin medir el arreglo. */
+  function reglaAnterior(s, hora) {
+    const h = ((hora % 24) + 24) % 24, n = s.hora.length;
+    let mejor = 0, dmin = 1e9;
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(((s.hora[i] - h + 36) % 24) - 12);
+      if (d < dmin) { dmin = d; mejor = i; }
+    }
+    const j = (mejor + 1) % n;
+    const dh = ((s.hora[j] - s.hora[mejor] + 36) % 24) - 12;
+    let f = Math.abs(dh) > 1e-9 ? ((((h - s.hora[mejor] + 36) % 24) - 12) / dh) : 0;
+    f = Math.max(0, Math.min(1, f));
+    return s.theta[mejor] + f * (s.theta[j] - s.theta[mejor]);
+  }
+  const c = trayectoria(HORARIA);
+  let discrepan = 0;
+  for (let k = 0; k <= 2399; k++) {
+    const h = k / 100;
+    if (Math.abs(reglaAnterior(c.serie, h) - c.en(h).theta) > 1e-9) discrepan++;
+  }
+  ok(discrepan > 1000, 'MUTANTE: la regla anterior discrepa en más de mil instantes '
+     + '(si no, este banco no mide el arreglo)', discrepan + ' de 2400');
+  casi(reglaAnterior(c.serie, 10.51), 110, 1e-9,
+       'y la reproducción exacta del defecto: a las 10:51 devolvía 110');
+}
+
 
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);
