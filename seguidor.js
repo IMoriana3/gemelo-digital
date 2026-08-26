@@ -386,13 +386,45 @@
   }
   S.SOLO_OESTE = SOLO_OESTE;
 
+  /* ====================================================================
+   * LOS PILOTES: dónde se apoya el tubo a lo largo de su eje
+   * ====================================================================
+   * `parts()` deja los postes fuera («los pone CADA app»), y con ellos se
+   * quedaba fuera DÓNDE van. La regla estaba escrita solo en `terreno.html`, y
+   * el simulador de cobertura RF, que no la tenía, se inventaba dos apoyos en la
+   * X del amortiguador: un tubo de 64 m sujeto por tres puntos, sin los
+   * intermedios. Como el criterio es UNO, vive aquí.
+   *
+   * Retícula genérica de la casa: cuatro apoyos, a ±28 y ±9 m del centro en el
+   * seguidor completo de 28 módulos por ala, y PROPORCIONALES al largo en los
+   * acortados (Ayora tiene 28/21/14, San José 32/16) — un medio con la retícula
+   * del completo se queda con las punteras al aire. El slew va aparte, en el
+   * centro, y lo pone la app con la corona.
+   *
+   * NO sustituye a la retícula MEDIDA cuando la hay: El Burgo tiene la suya por
+   * tipo de seguidor, sacada de los círculos del Tierras.dwg, y esa manda.
+   * ==================================================================== */
+  S.pilotesX = function (mods) {
+    var k = (mods || D.modsPerStr) / 28;
+    return [-28 * k, -9 * k, 9 * k, 28 * k];
+  };
+  /* El pie del amortiguador se apoya en un poste que EXISTE: el segundo por cada
+     extremo de la retícula que tenga esa fila. Si va a una X inventada, queda
+     colgado en el vano o atravesando el terreno. */
+  S.damperPostX = function (xs) { return [xs[1], xs[xs.length - 2]]; };
+
   S.buildBeam = function (THREE, opts) {
     opts = opts || {};
     var mats = opts.materials || S.materials(THREE);
     var west = opts.west !== false;
     var skip = opts.skip || {};
     var spin = new THREE.Group(), stat = new THREE.Group(), modCols = [], dampers = [];
-    S.parts(THREE, { size:opts.size||'largo', detail:opts.detail||'full' }).forEach(function (p) {
+    /* `damperX` SE PASA. El comentario de los amortiguadores dice que la X la
+       pone cada app por aquí, y `buildBeam` se la comía: la app colocaba sus
+       postes en la retícula y el pie del amortiguador se quedaba en la X que
+       `parts()` se estima sola, a 70 cm del poste más cercano, colgado del vano. */
+    S.parts(THREE, { size:opts.size||'largo', detail:opts.detail||'full',
+                     damperX:opts.damperX }).forEach(function (p) {
       if (p.motorLink) return;                                   // cable motor↔TCU: lo gestiona la app por frame (pendiente)
       if (p.damperLink) { dampers.push({ a:p.a, b:p.b }); return; }   // amortiguadores: en AMBAS vigas; render per-frame en la app
       if (skip[p.key]) return;
@@ -434,6 +466,150 @@
     return order.map(function (k){ return byType[k]; });
   };
 
-  S.VERSION = '0.4.20';
+  /* ====================================================================
+   * EL APOYO: poste + tambor + horquilla + virola + CASQUILLO
+   * ====================================================================
+   * `parts()` deja fuera los postes a propósito («los pone CADA app, difieren»),
+   * y con ellos se quedaba fuera la unión viga↔poste entera. Pero la unión NO
+   * difiere entre plantas: difiere DÓNDE va. Así que las piezas viven aquí y
+   * cada app decide en qué X las pone.
+   *
+   * Geometría y proporciones: del render del fabricante (Solar Steel) y de las
+   * fotos del poste real, tal como las dibujan Cobertura 3D (`terreno.html`) y
+   * el gemelo digital. Sin cotas de plano — proporciones derivadas de esa
+   * imagen, y así está declarado allí desde el principio.
+   *
+   *   poste     — perfil C 140×70 con labios, canal ABIERTO hacia el exterior
+   *               del tracker (se ve el interior en la foto).
+   *   tambor    — casquillo de giro: polímero oscuro con 12 ranuras radiales.
+   *               Es ESTÁTICO (no bascula), así que su ojo es REDONDO (r 0,088
+   *               ≥ la semidiagonal 0,085 de la viga de 0,12) para que la viga
+   *               cuadrada gire dentro sin atravesarlo a ninguna hora.
+   *   horquilla — pieza de regulación PRE01: dos placas con cuna semicircular,
+   *               orejetas, cartelas que flanquean el perfil C, placa base y
+   *               los 4 tornillos pasantes de la foto.
+   *   virola    — fleje-arco que cierra la horquilla por encima del tambor y
+   *               retiene el casquillo en su cuna.
+   *   casquillo — manguito de polímero que ABRAZA la viga y llena el ojo del
+   *               tambor. GIRA CON la viga: boca cuadrada 0,1216 ceñida a la
+   *               viga de 0,12 y exterior redondo r 0,0865, que cabe en el ojo
+   *               (0,088) a cualquier basculación (semidiagonal 0,0859).
+   *
+   * Marco CANÓNICO, el de `parts()`: +X a lo largo del tubo, Y arriba, origen
+   * en el EJE del tubo. El poste baja desde `-opts.postH` (su base) hasta la
+   * base de la horquilla; el resto va centrado en el eje.
+   * ==================================================================== */
+  S.apoyoMaterials = function (THREE) {
+    return {
+      steel: new THREE.MeshStandardMaterial({ color:0x9aa3ac, roughness:.45, metalness:.65 }),
+      hdpe:  new THREE.MeshStandardMaterial({ color:0x0e0f10, roughness:.85, metalness:.05 })   // el casquillo es NEGRO
+    };
+  };
+
+  /* opts.postH = del suelo a la BASE de la horquilla. Devuelve geometrías, no
+     mallas: la app las instancia o las clona según le convenga. */
+  S.apoyoGeoms = function (THREE, opts) {
+    opts = opts || {};
+    var postH = (opts.postH !== undefined) ? opts.postH : 1.747;   // 2 − 0,253 del gemelo
+    var DEG = Math.PI / 180;
+
+    // --- poste: perfil C 140×70 con labios ---
+    var cp = new THREE.Shape();
+    cp.moveTo(-0.07,0.035); cp.lineTo(-0.07,-0.035); cp.lineTo(0.07,-0.035); cp.lineTo(0.07,0.035);
+    cp.lineTo(0.055,0.035); cp.lineTo(0.055,-0.027); cp.lineTo(-0.055,-0.027); cp.lineTo(-0.055,0.035);
+    cp.closePath();
+    var poste = new THREE.ExtrudeGeometry(cp, { depth:postH, bevelEnabled:false });
+    poste.translate(0,0,-postH/2); poste.rotateX(-Math.PI/2); poste.rotateY(Math.PI/2);
+
+    // --- tambor: ojo redondo + 12 ranuras radiales ---
+    var cj = new THREE.Shape(); cj.absarc(0,0,0.115,0,Math.PI*2,false);
+    var cjh = new THREE.Path(); cjh.absarc(0,0,0.088,0,Math.PI*2,true); cj.holes.push(cjh);
+    for (var sl = 0; sl < 12; sl++) {
+      var a0 = (sl*30+8)*DEG, a1 = (sl*30+24)*DEG, sh = new THREE.Path();
+      sh.moveTo(0.108*Math.cos(a1),0.108*Math.sin(a1)); sh.absarc(0,0,0.108,a1,a0,true);
+      sh.lineTo(0.093*Math.cos(a0),0.093*Math.sin(a0)); sh.absarc(0,0,0.093,a0,a1,false);
+      sh.closePath(); cj.holes.push(sh);
+    }
+    var tambor = new THREE.ExtrudeGeometry(cj, { depth:0.17, bevelEnabled:false, curveSegments:24 });
+    tambor.translate(0,0,-0.085); tambor.rotateY(Math.PI/2);   // ojo a lo largo de la viga
+
+    // --- horquilla PRE01: 2 placas + cartelas + base + 4 tornillos ---
+    var fk = new THREE.Shape();
+    fk.moveTo(-0.05,-0.44); fk.lineTo(0.05,-0.44); fk.lineTo(0.15,-0.20); fk.lineTo(0.15,0.03); fk.lineTo(0.1131,0.03);
+    fk.absarc(0,0,0.117,0.2594,2.8822,true); fk.lineTo(-0.15,0.03); fk.lineTo(-0.15,-0.20); fk.closePath();
+    var fkP = new THREE.ExtrudeGeometry(fk, { depth:0.012, bevelEnabled:false, curveSegments:20 });
+    fkP.translate(0,0,-0.006);
+    var blt = function (bx,by){ return new THREE.CylinderGeometry(0.013,0.013,0.20,6).rotateX(Math.PI/2).translate(bx,by,0); };
+    var horquilla = merge([ fkP.clone().translate(0,0,0.082), fkP.translate(0,0,-0.082),
+      new THREE.BoxGeometry(0.024,0.20,0.152).translate(0.138,-0.14,0),
+      new THREE.BoxGeometry(0.024,0.20,0.152).translate(-0.138,-0.14,0),
+      new THREE.BoxGeometry(0.30,0.016,0.176).translate(0,-0.245,0),
+      blt(0.1315,-0.005), blt(-0.1315,-0.005), blt(0,-0.30), blt(0,-0.38) ]);
+    horquilla.rotateY(Math.PI/2);
+
+    // --- virola: fleje-arco que cierra por encima del tambor ---
+    var vi = new THREE.Shape();
+    vi.moveTo(0.131*Math.cos(-0.2618),0.131*Math.sin(-0.2618)); vi.absarc(0,0,0.131,-0.2618,3.4034,false);
+    vi.lineTo(0.117*Math.cos(3.4034),0.117*Math.sin(3.4034)); vi.absarc(0,0,0.117,3.4034,-0.2618,true); vi.closePath();
+    var virola = new THREE.ExtrudeGeometry(vi, { depth:0.15, bevelEnabled:false, curveSegments:22 });
+    virola.translate(0,0,-0.075); virola.rotateY(Math.PI/2);
+
+    // --- casquillo: boca CUADRADA que abraza la viga, exterior redondo ---
+    var bu = new THREE.Shape(); bu.absarc(0,0,0.0865,0,Math.PI*2,false);
+    var buh = new THREE.Path();
+    buh.moveTo(0.0608,0.0608); buh.lineTo(0.0608,-0.0608); buh.lineTo(-0.0608,-0.0608); buh.lineTo(-0.0608,0.0608); buh.closePath();
+    bu.holes.push(buh);
+    var casquillo = new THREE.ExtrudeGeometry(bu, { depth:0.19, bevelEnabled:false, curveSegments:24 });
+    casquillo.translate(0,0,-0.095); casquillo.rotateY(Math.PI/2);
+
+    return { poste:poste, tambor:tambor, horquilla:horquilla, virola:virola, casquillo:casquillo, postH:postH };
+  };
+
+  /* Fusión de geometrías sin depender de BufferGeometryUtils (que no todas las
+     páginas vendorizan). Misma implementación que usan el gemelo y Cobertura 3D. */
+  function merge(gs) {
+    var P=[],N=[],U=[],I=[],o=0;
+    for (var k=0;k<gs.length;k++){
+      var g=gs[k], p=g.attributes.position, n=g.attributes.normal, u=g.attributes.uv, ix=g.index, c=p.count, j;
+      for (j=0;j<c;j++){ P.push(p.getX(j),p.getY(j),p.getZ(j)); N.push(n.getX(j),n.getY(j),n.getZ(j)); U.push(u?u.getX(j):0,u?u.getY(j):0); }
+      if (ix) for (j=0;j<ix.count;j++) I.push(ix.getX(j)+o); else for (j=0;j<c;j++) I.push(j+o);
+      o+=c;
+    }
+    var G=new THREE.BufferGeometry();
+    G.setAttribute('position', new THREE.Float32BufferAttribute(P,3));
+    G.setAttribute('normal',   new THREE.Float32BufferAttribute(N,3));
+    G.setAttribute('uv',       new THREE.Float32BufferAttribute(U,2));
+    G.setIndex(I); return G;
+  }
+
+  /* ====================================================================
+   * AMORTIGUADOR LARGO (el de Cobertura 3D v5.44-47, no el corto de `parts`)
+   * Pie a 30 cm del SUELO, 30 cm del poste hacia el motor y 13 cm transversal
+   * (luz clara con el poste); MÉNSULA fija poste→pie; y CIMA en la ESQUINA
+   * INFERIOR de la viga vía una OREJETA-CHAPA que gira con ella.
+   * Devuelve las piezas y los dos extremos; la app lo orienta por frame, igual
+   * que hace con `dampers`, porque cruza la frontera fija/basculante.
+   *
+   * `hub` = altura del EJE del tubo sobre el suelo. Hace falta porque el pie se
+   * mide desde el SUELO (30 cm) y el marco canónico tiene su origen en el eje:
+   * sin ella, el pie se va 30 cm por encima del tubo y el amortiguador asoma
+   * por encima del panel.
+   * ==================================================================== */
+  S.amortiguadorLargo = function (THREE, bx, hub) {
+    var sgn = bx > 0 ? 1 : -1, dxl = bx - sgn * 0.30;
+    var pieY = 0.30 - (hub || 0);   // 30 cm del SUELO, en el marco del tubo
+    return {
+      x: dxl,                       // X del pie (30 cm del poste, hacia el motor)
+      pieY: pieY,
+      pie: [dxl, pieY, 0.13],       // extremo FIJO: 30 cm del suelo, 13 cm transversal
+      cima: [dxl, -0.075, 0.085],   // extremo que BASCULA: esquina inferior de la viga
+      body: { r: 0.05, seg: 14 },   // cuerpo del amortiguador
+      rod:  { r: 0.022, seg: 10 },  // vástago
+      mensula: { r: 0.016, seg: 8 },// ménsula fija poste→pie
+      orejeta: { w: 0.10, h: 0.173, d: 0.02 }
+    };
+  };
+
+  S.VERSION = '0.4.22';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);
