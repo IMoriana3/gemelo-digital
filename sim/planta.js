@@ -897,6 +897,28 @@ TCU.prototype.mueve = function (dt, inhibido) {
 
   var dir = dirPedida, antes = this.anguloReal;
   var esperado = Math.min(Math.abs(err), K.SLEW_DPS * dt);   /* lo que se le MANDA girar */
+
+  /* WINTER MODE (11.5b) — LÍMITE CINEMÁTICO, no una rebaja de la factura.
+     WINTER-01: aquí había una SEGUNDA semántica del mismo modo. El eje se movía
+     ENTERO y solo se reducían los grados que se le contaban al motor, así que el
+     seguidor cobraba la POA de un seguimiento perfecto y pagaba la de uno grueso
+     — las dos cosas a la vez, que es físicamente imposible. Medido sobre un día
+     de enero: winter ON y OFF daban la MISMA trayectoria (Δ recorrido 0,000°) y
+     el SOC final cambiaba +10,3 pp.
+     `bateria.html` —el canon del que este simulador copia `consumoTCU`— ya lo
+     había migrado, y lo dejó escrito: «Se aplica a la POSICIÓN: ángulo
+     registrado, POA de carga y consumo de motor hablan del mismo giro (antes se
+     descontaba sólo la energía)». El comentario que había aquí afirmaba lo
+     contrario —«se contabiliza igual que en el simulador de batería»— y era
+     falso desde esa migración.
+     La política es UNA y es ésta: en seguimiento, el avance por paso se acota a
+     `DEG_H_WINTER` °/h. El seguidor va a la zaga del sol, y eso se ve en el
+     ángulo, en la POA y en los Wh, porque es el MISMO giro.
+     Una orden de seguridad o una defensa por batería se ejecutan ENTERAS: winter
+     mode no puede retrasar un abanderamiento. */
+  if (E.winter && this.sp === SP.NINGUNA && !this.parked) {
+    esperado = Math.min(esperado, K.DEG_H_WINTER * dt / 3600);
+  }
   /* EL EJE ATASCADO ES FÍSICO: el motor tira, consume, y la mesa no se mueve. El bit
      de alarma no se pone aquí — lo deduce el firmware unas líneas más abajo. */
   if (!this.ejeAtascado) {
@@ -926,13 +948,10 @@ TCU.prototype.mueve = function (dt, inhibido) {
   } else { this.tSinMoverse = 0; this.velocidadBaja = false; }
 
   var medio = (this.anguloReal + antes) / 2, dtH = dt / 3600, wh;
-  /* WINTER MODE (11.5b): el seguidor sigue yendo al mismo sitio, pero con un paso
-     tan grueso que consume como si corrigiera 3 °/h en vez de 10 °/h. Se contabiliza
-     igual que en el simulador de batería: sobre los grados EFECTIVOS, no sobre el
-     recorrido real, y solo mientras se está siguiendo al sol (una orden de seguridad
-     o una defensa por batería se ejecutan enteras, con winter mode o sin él). */
+  /* Los grados que se le cobran al motor son los que el eje ha girado DE VERDAD.
+     El winter mode ya actuó arriba, sobre la posición (WINTER-01): volver a
+     escalarlos aquí sería contar el mismo descuento dos veces. */
   var efec = mov;
-  if (E.winter && this.sp === SP.NINGUNA && !this.parked) efec *= K.DEG_H_WINTER / K.DEG_H_NORMAL;
   /* el consumo NO se calcula aquí: lo da el módulo de gestión de batería (consumoTCU,
      copiado íntegro de bateria.html por el generador). Este simulador decide cuánto se
      mueve y en qué ángulo; cuántos Wh cuesta eso lo dice el canon. */
