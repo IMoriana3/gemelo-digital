@@ -500,13 +500,44 @@ function TCU(id, planta, opts) {
      se podían tocar más que desde el panel. Un TCU real los lleva EN SUS REGISTROS
      y se cambian escribiéndolos, uno a uno, con la toolbox. Aquí igual: cada TCU
      tiene los suyos, `escribe()` los cambia y `regsTCU()` los publica de vuelta. */
+  /* Resolución del encoder (la misma que `this.sensor.pulsosGrado`, que se
+     construye más abajo) y banda muerta EN VIGOR, para poder expresar los
+     márgenes en pulsos, que es como los lleva el firmware. */
+  var pulsosGrado = K.PULSOS_TOPE / K.AXIS_MAX;
+  var dbGrados = (planta.cfg && planta.cfg.deadband != null)
+    ? planta.cfg.deadband : K.HYST_DEG;
   this.cfgTcu = {
     topeOeste: K.AXIS_MAX, topeEste: -K.AXIS_MAX,   /* 41037 / 41038, en grados */
     evalMotorS: K.EVAL_MOTOR_S,                     /* 41039 */
     iMotorMax: (planta.cfg && planta.cfg.iMotorMax) || 7000,  /* 41040 */
     nightPos: K.NIGHT_POS,                          /* 41042 */
-    dbPulsos: K.DB_PULSOS,                          /* 41060 / 41061 */
-    dbPulsosBaja: K.DB_PULSOS_BAJA,                 /* 41062 / 41063 */
+    /* Los DOS márgenes direccionales, uno por registro, como los declara el
+       catálogo de escritura: 41060 `deadband_west` y 41061 `deadband_east`.
+       Estaban fundidos en UN escalar (`dbPulsos`), así que escribir 41060
+       cambiaba también el margen del ESTE y el `regsTCU` republicaba el mismo
+       número en los dos: la asimetría que el operador acababa de escribir era
+       invisible desde el SCADA. Ver TRACKER-BUG-01. */
+    /* El VALOR arranca en la banda muerta que el lazo tiene en vigor, no en
+       `K.DB_PULSOS`. Motivo: hasta ahora estos registros eran CÓDIGO MUERTO
+       —`p.cfg.deadband` nunca es null, así que la rama de pulsos de `mueve`
+       no se ejecutaba jamás— y publicaban 45 pulsos (1,296°) mientras el lazo
+       corría a `HYST_DEG` = 2,5°. Con `efecto: true` en el catálogo de
+       escritura: el simulador decía que la escritura surtía efecto y no
+       surtía ninguno. Ahora los registros SON la fuente del margen y arrancan
+       en el valor que ya estaba en vigor, así que el comportamiento por
+       defecto no cambia y lo que se lee es lo que se usa.
+       La discrepancia 2,5° / 1,296° / 1,0° (lazo / firmware / core) queda
+       ABIERTA y bajo test: ver `tools/carea_fisica.mjs` y el bloque
+       TRACKER-BUG-01 de `sim/prueba.mjs`. */
+    dbPulsosOeste: Math.round(dbGrados * pulsosGrado),   /* 41060 deadband_west */
+    dbPulsosEste: Math.round(dbGrados * pulsosGrado),    /* 41061 deadband_east */
+    /* El equipo ENGORDA el lazo con la alarma de baja capacidad: el firmware
+       lo documenta como 90 pulsos frente a 45, o sea el DOBLE. Se conserva la
+       razón, no la cifra absoluta, para que el margen normal siga siendo el
+       que ya estaba en vigor. Con la rama muerta anterior este engorde
+       tampoco ocurría nunca. */
+    dbPulsosBaja: Math.round(dbGrados * pulsosGrado
+                             * (K.DB_PULSOS_BAJA / K.DB_PULSOS)),  /* 41062 / 41063 */
     reintentos: K.REINTENTOS_MOTOR,                 /* 41065 */
     velSinCarga: K.VEL_SIN_CARGA,                   /* 41067 */
     spTilt: ((planta.cfg && planta.cfg.spTilt) || []).slice(),   /* 41044…41056 */
@@ -817,14 +848,39 @@ TCU.prototype.mueve = function (dt, inhibido) {
      baja capacidad (41063) — el propio equipo engorda el lazo cuando va justo de
      batería, que es la versión de fábrica del winter mode */
   var C = this.cfgTcu;
-  var pulsos = this.bajaCapacidad > 0 ? C.dbPulsosBaja : C.dbPulsos;
-  var dead = this.p.cfg.deadband != null ? this.p.cfg.deadband : pulsos / this.sensor.pulsosGrado;
+  /* El margen es DIRECCIONAL y sale de SUS registros: 41060 manda hacia el
+     OESTE (θ creciente) y 41061 hacia el ESTE. Con la alarma de baja capacidad
+     manda 41063 para los dos, que es lo que hace el equipo.
+     Antes esto era `this.p.cfg.deadband != null ? … : pulsos/…`, y como
+     `p.cfg.deadband` NUNCA es null (cae a `K.HYST_DEG`), la rama de pulsos era
+     inalcanzable: escribir 41060/41061/41063 no hacía nada pese al
+     `efecto: true` del catálogo. Los registros son ahora la fuente, y nacen
+     en el valor que el lazo ya tenía. */
+  var dirPedida = signo(err);
+  var pulsos = this.bajaCapacidad > 0 ? C.dbPulsosBaja
+             : (dirPedida >= 0 ? C.dbPulsosOeste : C.dbPulsosEste);
+  var dead = pulsos / this.sensor.pulsosGrado;
   /* en seguimiento solo corrige si el error supera el deadband; en posición de
      seguridad va sin histéresis (la orden es de seguridad, no de precisión) */
   var urgente = (this.sp !== SP.NINGUNA) || this.criterio === CRIT.BATERIA;
+
+  /* HISTÉRESIS DIRECCIONAL (TRACKER-BUG-01). La regla de continuidad de abajo
+     —`this.moviendo === 0`— existe para no parar a media maniobra, y estaba
+     dejando pasar justo lo contrario: yendo hacia el oeste, una orden de 0,9·db
+     hacia el ESTE se ejecutaba sin más, porque `moviendo` no era 0 y la banda
+     muerta no llegaba a mirarse. O sea que el margen protegía al que ARRANCA y
+     no al que INVIERTE, que es el caso caro: cada inversión es un cambio de
+     sentido del motor. Medido: 0,9·deadband bastaba para invertir.
+     Contrato: CONTINUAR pide la banda de llegada; INVERTIR pide el margen
+     entero del sentido nuevo — el mismo que pide arrancar parado. Es la misma
+     máquina que `solargpt_core/direction.py` en el core. */
+  var invirtiendo = (this.moviendo !== 0 && dirPedida !== 0 &&
+                     dirPedida !== this.moviendo);
+  var arrancando = (this.moviendo === 0) || invirtiendo;
+
   /* sin motor no hay movimiento: seta pulsada, alarma enclavada o modo que no manda */
   if (!this.motorHabilitado || inhibido ||
-      (!urgente && Math.abs(err) < dead && this.moviendo === 0)) {
+      (!urgente && Math.abs(err) < dead && arrancando)) {
     this.moviendo = 0; this.iMotor = 0; this.vMotor = 0;
     this.tSinMoverse = 0;
     return 0;
@@ -832,11 +888,14 @@ TCU.prototype.mueve = function (dt, inhibido) {
   /* LLEGADA: se da por llegado al entrar en la banda muerta, nunca en un umbral
      más fino que el propio ruido del sensor. Con un criterio de 0,02° y un ruido de
      0,04° el seguidor persigue su propio ruido: no llega jamás, sigue mandando
-     micro-movimientos y acaba autodiagnosticándose un eje bloqueado. */
+     micro-movimientos y acaba autodiagnosticándose un eje bloqueado.
+     Solo aplica CONTINUANDO: quien invierte ya ha pasado el margen entero. */
   var llegada = Math.max(dead * 0.5, 3 * this.sensor.ruidoRms, 2 / this.sensor.pulsosGrado);
-  if (Math.abs(err) <= llegada) { this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; this.tSinMoverse = 0; return 0; }
+  if (!invirtiendo && Math.abs(err) <= llegada) {
+    this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; this.tSinMoverse = 0; return 0;
+  }
 
-  var dir = signo(err), antes = this.anguloReal;
+  var dir = dirPedida, antes = this.anguloReal;
   var esperado = Math.min(Math.abs(err), K.SLEW_DPS * dt);   /* lo que se le MANDA girar */
 
   /* WINTER MODE (11.5b) — LÍMITE CINEMÁTICO, no una rebaja de la factura.
@@ -1493,7 +1552,9 @@ Planta.prototype.regsTCU = function (t) {
   pon(41039, u16(C.evalMotorS * 1000));                   /* ventana de evaluación (ms) */
   pon(41040, u16(C.iMotorMax));                           /* sobrecorriente software (mA) */
   pon32(41042, f32(C.nightPos * D2R, wo));                /* posición nocturna */
-  pon(41060, u16(C.dbPulsos)); pon(41061, u16(C.dbPulsos));
+  /* cada margen direccional se republica en SU registro: antes los dos salían
+     con el mismo número y una asimetría escrita no se podía leer de vuelta */
+  pon(41060, u16(C.dbPulsosOeste)); pon(41061, u16(C.dbPulsosEste));
   pon(41062, u16(C.dbPulsosBaja)); pon(41063, u16(C.dbPulsosBaja));
   pon(41065, u16(C.reintentos));
   pon(41067, u16(C.velSinCarga * 1000));                  /* velocidad en vacío (m°/s) */
@@ -1876,7 +1937,8 @@ Planta.prototype.escribe = function (dev, id, dir, vals) {
   } else if (dir === 41042) { C.nightPos = v * R2;
   } else if (def.sp) { C.spTilt[def.sp] = v * R2;
   } else if (dir === 41058) { t.sensor.offsetCfg = v * R2;
-  } else if (dir === 41060 || dir === 41061) { C.dbPulsos = v;
+  } else if (dir === 41060) { C.dbPulsosOeste = v;   /* deadband_west */
+  } else if (dir === 41061) { C.dbPulsosEste = v;    /* deadband_east */
   } else if (dir === 41063) { C.dbPulsosBaja = v;
   } else if (dir === 41065) { C.reintentos = v;
   } else if (dir === 41067) { C.velSinCarga = v / 1000;

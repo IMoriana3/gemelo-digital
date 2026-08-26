@@ -118,21 +118,39 @@ Canon.prototype.balance = function (pet) {
 };
 
 /* Consulta por hora civil, interpolando entre muestras. La serie da la vuelta al
-   día, así que la hora se busca en circular: a las 23,9 h el vecino es 0,0 h. */
+   día, así que la hora se busca en circular: a las 23,9 h el vecino es 0,0 h.
+
+   Se busca el intervalo que ENCIERRA la hora, no la muestra más próxima. Es la
+   diferencia entre interpolar y no interpolar: con la muestra más próxima y la
+   SIGUIENTE, una hora en la segunda mitad del intervalo cae fuera del par
+   elegido, el factor sale negativo y el clamp a [0,1] lo tapaba — devolviendo el
+   valor de la muestra más próxima. Con 10:00→0° y 11:00→10°, las 10:45 daban
+   10° en vez de 7,5°: un error de hasta media rampa, mudo, y sólo en la mitad
+   de cada intervalo (la primera mitad SÍ salía bien, que es lo que lo hacía
+   difícil de ver). */
 Canon.prototype.en = function (hora) {
   var s = this.serie;
   if (!s || !s.hora.length) return null;
   var h = ((hora % 24) + 24) % 24, n = s.hora.length;
+  /* avance circular a→b, siempre en [0,24) */
+  var av = function (a, b) { return ((b - a) % 24 + 24) % 24; };
   /* la serie viene ordenada por índice de tiempo UTC, que con huso no nulo NO está
-     ordenada por hora civil: se busca el intervalo por proximidad circular */
-  var mejor = 0, dmin = 1e9;
+     ordenada por hora civil: el intervalo se busca en circular. El bueno es aquel
+     cuyo avance hasta `h` no se pasa de su propia anchura; si varios encajan
+     (muestras repetidas), manda el que deja a `h` más cerca de su inicio. */
+  var mejor = 0, j = 0, off = 0, span = 0, dmin = 1e9;
   for (var i = 0; i < n; i++) {
-    var d = Math.abs(((s.hora[i] - h + 36) % 24) - 12);   /* distancia circular */
-    if (d < dmin) { dmin = d; mejor = i; }
+    var k = (i + 1) % n;
+    var anchura = n === 1 ? 24 : av(s.hora[i], s.hora[k]);
+    var avance = av(s.hora[i], h);
+    if (avance <= anchura + 1e-9 && avance < dmin) {
+      dmin = avance; mejor = i; j = k; off = avance; span = anchura;
+    }
   }
-  var j = (mejor + 1) % n;
-  var dh = ((s.hora[j] - s.hora[mejor] + 36) % 24) - 12;
-  var f = Math.abs(dh) > 1e-9 ? ((((h - s.hora[mejor] + 36) % 24) - 12) / dh) : 0;
+  if (dmin === 1e9) {   /* serie degenerada (todas la misma hora): sin intervalo */
+    j = (mejor + 1) % n; off = 0; span = 0;
+  }
+  var f = span > 1e-9 ? off / span : 0;
   f = Math.max(0, Math.min(1, f));
   return {
     theta: s.theta[mejor] + f * (s.theta[j] - s.theta[mejor]),

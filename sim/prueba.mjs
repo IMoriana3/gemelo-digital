@@ -1135,5 +1135,217 @@ const lejosCar = Careo.compara(Careo.parsea('Fecha;30111 t [deg]\n2026-06-21 03:
 ok(lejosCar.n === 0 && lejosCar.sinPar === 1,
    'un punto sin muestra a esa hora se descarta, no se estira la curva para que case');
 
+/* ── el canon interpola, no redondea al vecino ─────────────────────────────
+   `Canon.en(h)` tomaba la muestra MÁS PRÓXIMA y la SIGUIENTE, no el intervalo
+   que encierra la hora. En la segunda mitad de cada intervalo el par elegido
+   dejaba fuera a `h`, el factor salía negativo y el clamp a [0,1] lo tapaba:
+   devolvía la muestra más próxima tal cual. Con 10:00→0° y 11:00→10°, las
+   10:45 daban 10° en vez de 7,5°. Mudo, y sólo en media rampa. */
+console.log('\n── el canon interpola de verdad ──');
+const serieCanon = (hora, theta) => {
+  const c = Object.create(Canon.prototype);
+  c.serie = { hora, theta, objetivo: theta, difusa: null, alpha: null, ghi: null };
+  return c;
+};
+
+const canonRampa = serieCanon([10, 11, 12], [0, 10, 20]);
+casi(canonRampa.en(10.25).theta, 2.5, 1e-9, 'primer cuarto del intervalo');
+casi(canonRampa.en(10.5).theta, 5.0, 1e-9, 'mitad del intervalo');
+casi(canonRampa.en(10.75).theta, 7.5, 1e-9,
+     'y el ÚLTIMO cuarto —el que se redondeaba al vecino— también');
+casi(canonRampa.en(11).theta, 10.0, 1e-9, 'el nodo cae en su propia muestra');
+
+/* la serie da la vuelta al día: 23 h → 0 h es un intervalo, no un salto */
+const canonVuelta = serieCanon([23, 0], [0, 10]);
+casi(canonVuelta.en(23.75).theta, 7.5, 1e-9,
+     'interpola también cruzando la medianoche');
+
+/* con huso no nulo la serie NO está ordenada por hora civil */
+const canonHuso = serieCanon([22, 23, 0, 1], [0, 10, 20, 30]);
+casi(canonHuso.en(0.5).theta, 25.0, 1e-9,
+     'y con la serie desordenada por hora civil sigue cogiendo su intervalo');
+
+/* una sola muestra no tiene intervalo: se devuelve tal cual, sin dividir por cero */
+ok(serieCanon([7], [42]).en(13).theta === 42,
+   'con una sola muestra devuelve su valor, no NaN');
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TRACKER-BUG-01 — histéresis DIRECCIONAL
+   Dos defectos medidos, cada uno con su comprobación:
+     1. `mueve` invertía el sentido con una orden POR DEBAJO de la banda
+        muerta, solo porque venía en marcha: la regla de continuidad —puesta
+        para no parar a media maniobra— saltaba el margen también al INVERTIR.
+     2. 41060 `deadband_west` y 41061 `deadband_east` son DOS registros
+        direccionales y estaban fundidos en un escalar, así que escribir uno
+        cambiaba el otro y `regsTCU` republicaba el mismo número en los dos.
+   ═══════════════════════════════════════════════════════════════════════ */
+console.log('\n── histéresis direccional: invertir cuesta el margen entero ──');
+
+/* Un TCU aislado, en MANUAL para mandarle el objetivo a mano sin que el
+   algoritmo de seguimiento lo pise, y sin ruido de sensor: lo que se mide es
+   la REGLA, no el inclinómetro. */
+function bancoDir(opts) {
+  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 10,
+                             averias: false });
+  const t = p.tcu(1);
+  t.sensor.ruidoRms = 0; t.sensor.offsetReal = 0; t.sensor.offsetCfg = 0;
+  if (opts && opts.deadbandGrados != null) p.cfg.deadband = opts.deadbandGrados;
+  return { p: p, t: t };
+}
+/* un paso de motor SIN pasar por el planificador: se fija el objetivo y se
+   llama al lazo, que es justo la unidad bajo prueba */
+function mueveA(t, objetivo, dt) {
+  t.objetivo = objetivo;
+  t.sp = SIM.SP.NINGUNA; t.criterio = SIM.CRIT.SEGUIMIENTO;
+  const r = t.mueve(dt == null ? 60 : dt, false);
+  /* el lazo mueve `anguloReal` y el inclinómetro se lee en el paso de planta;
+     aquí se ejercita el LAZO aislado, así que se le refresca la medida a mano
+     (con ruido y offset a cero, medida y realidad coinciden) */
+  t.angulo = t.anguloReal;
+  return r;
+}
+/* margen en GRADOS que el lazo aplica ahora mismo en cada sentido */
+function margenOeste(t) { return t.cfgTcu.dbPulsosOeste / t.sensor.pulsosGrado; }
+function margenEste(t) { return t.cfgTcu.dbPulsosEste / t.sensor.pulsosGrado; }
+/* coloca el eje en `a` sin pasar por el lazo */
+function coloca(t, a) { t.anguloReal = a; t.angulo = a; t.moviendo = 0; }
+
+{
+  const t = bancoDir().t, m = margenEste(t);
+  coloca(t, 10);
+  mueveA(t, 10 + 3 * m, 5);                        /* arranca hacia el OESTE */
+  ok(t.moviendo === 1, 'arranca hacia el oeste con una orden por encima del margen',
+     'moviendo=' + t.moviendo + ' · θ ' + t.anguloReal.toFixed(4) + '°');
+
+  const pos = t.anguloReal;
+  mueveA(t, pos - 0.9 * m, 5);                     /* inversión de 0,9·margen */
+  ok(t.moviendo === 0 && Math.abs(t.anguloReal - pos) < 1e-12,
+     'una orden de inversión de 0,9·margen NO mueve el eje (era el bug)',
+     'θ ' + t.anguloReal.toFixed(4) + '° · margen ' + m.toFixed(3) + '°');
+
+  /* tras negarse el eje queda PARADO, así que el siguiente ya es un arranque
+     en frío: por encima del margen entero, se ejecuta */
+  mueveA(t, pos - 1.5 * m, 5);
+  ok(t.anguloReal < pos - 1e-9 && t.moviendo === -1,
+     'y una de 1,5·margen sí la ejecuta', 'θ ' + t.anguloReal.toFixed(4) + '°');
+}
+
+{
+  /* continuar en el MISMO sentido sigue costando solo la banda de llegada:
+     la corrección no puede haber roto la continuidad, que es para lo que la
+     regla existía */
+  const t = bancoDir().t, m = margenOeste(t);
+  coloca(t, 0);
+  mueveA(t, 3 * m, 5);
+  const antes = t.anguloReal, enVuelo = t.moviendo;
+  mueveA(t, t.anguloReal + 0.7 * m, 5);            /* 0,7·margen, mismo sentido */
+  ok(enVuelo === 1 && t.anguloReal > antes + 1e-9 && t.moviendo === 1,
+     'continuar en el mismo sentido sigue bastando con la banda de llegada',
+     '+' + (t.anguloReal - antes).toFixed(4) + '°');
+}
+
+{
+  /* una orden de SEGURIDAD manda sobre los márgenes, en los dos sentidos */
+  const t = bancoDir().t, m = margenEste(t);
+  /* 0,9·margen: por debajo del umbral de arranque y por ENCIMA de la banda de
+     llegada. En seguimiento no se movería; con posición segura activa, sí. */
+  coloca(t, 10);
+  mueveA(t, 10 - 0.9 * m, 5);
+  ok(Math.abs(t.anguloReal - 10) < 1e-12,
+     'en seguimiento, 0,9·margen no mueve el eje');
+  coloca(t, 10);
+  t.objetivo = 10 - 0.9 * m; t.sp = 1;             /* posición segura activa */
+  t.mueve(5, false);
+  ok(t.anguloReal < 10 - 1e-9,
+     'y una posición segura con ese MISMO error sí se ejecuta: la orden de '
+     + 'seguridad no pasa por la histéresis',
+     'θ ' + t.anguloReal.toFixed(4) + '°');
+}
+
+console.log('\n── 41060 y 41061 son DOS márgenes, uno por sentido ──');
+{
+  const b = bancoDir();
+  const p = b.p, t = b.t;
+  const r1 = p.escribe('tcu', 1, 41060, 200);
+  ok(r1.ok, 'se puede escribir deadband_west', r1.aplicados.join(' · '));
+  const esteAntes = t.cfgTcu.dbPulsosEste;
+  ok(t.cfgTcu.dbPulsosOeste === 200 && t.cfgTcu.dbPulsosEste === esteAntes
+     && esteAntes !== 200,
+     'escribir 41060 NO toca el margen del ESTE (era el bug)',
+     'oeste ' + t.cfgTcu.dbPulsosOeste + ' · este ' + t.cfgTcu.dbPulsosEste);
+  p.escribe('tcu', 1, 41061, 90);
+  ok(t.cfgTcu.dbPulsosOeste === 200 && t.cfgTcu.dbPulsosEste === 90,
+     'y escribir 41061 tampoco toca el del OESTE');
+
+  const regs = p.regsTCU(t);
+  ok(regs[41060] === 200 && regs[41061] === 90,
+     'y cada uno se republica en SU registro: la asimetría se puede LEER',
+     '41060=' + regs[41060] + ' · 41061=' + regs[41061]);
+  ok(p.regsTCU(t)[41060] === t.cfgTcu.dbPulsosOeste,
+     'lo que se LEE es lo que el lazo USA: el registro dejó de ser decorativo');
+}
+{
+  /* la asimetría tiene que producir COMPORTAMIENTO distinto, o es cosmética */
+  const b = bancoDir(); const p = b.p, t = b.t;
+  /* 500 es el TOPE del registro en el catálogo; con 900 la escritura se
+     RECHAZA y el test pasaría por el motivo equivocado (comprobado: pasaba). */
+  const w1 = p.escribe('tcu', 1, 41060, 45);       /* oeste: 45 pulsos */
+  const w2 = p.escribe('tcu', 1, 41061, 500);      /* este: 500 pulsos (11×) */
+  ok(w1.ok && w2.ok, 'las dos escrituras se ACEPTAN antes de medir nada',
+     w1.avisos.concat(w2.avisos).join(' · ') || 'sin avisos');
+  const gOeste = margenOeste(t), gEste = margenEste(t);
+  ok(gEste > gOeste * 5, 'y dejan los dos márgenes claramente distintos',
+     'oeste ' + gOeste.toFixed(3) + '° · este ' + gEste.toFixed(3) + '°');
+  coloca(t, 0);
+  mueveA(t, gOeste * 1.2, 5);
+  ok(t.moviendo === 1, 'con margen oeste pequeño, una orden pequeña al oeste arranca',
+     (gOeste * 1.2).toFixed(3) + '° > ' + gOeste.toFixed(3) + '°');
+  coloca(t, 0);
+  mueveA(t, -gOeste * 1.2, 5);
+  ok(t.moviendo === 0 && Math.abs(t.anguloReal) < 1e-12,
+     'y esa MISMA orden hacia el este no arranca: su margen es 11 veces mayor',
+     'hace falta ' + gEste.toFixed(3) + '°');
+  coloca(t, 0);
+  mueveA(t, -gEste * 1.2, 5);
+  ok(t.moviendo === -1, 'pero superando el margen del este, sí');
+}
+
+{
+  /* La rama de los registros ERA CÓDIGO MUERTO: `p.cfg.deadband` nunca es null,
+     así que `mueve` no leía nunca los pulsos. Este es el test que lo habría
+     cazado: escribir 41060 tiene que cambiar el COMPORTAMIENTO, no solo un
+     campo. Sin la corrección, las dos órdenes de abajo hacen lo mismo. */
+  const b = bancoDir(); const p = b.p, t = b.t;
+  coloca(t, 0);
+  mueveA(t, 3.0, 5);
+  const conMargenNormal = t.anguloReal;
+  p.escribe('tcu', 1, 41060, 500);                 /* 500 pulsos ≈ 14,4° */
+  coloca(t, 0);
+  mueveA(t, 3.0, 5);
+  ok(conMargenNormal > 1e-9 && Math.abs(t.anguloReal) < 1e-12,
+     'escribir 41060 cambia el COMPORTAMIENTO, no solo un campo (era código muerto)',
+     'con 87 pulsos movió ' + conMargenNormal.toFixed(4) + '°, con 500 no se mueve');
+}
+
+{
+  /* HALLAZGO ABIERTO — tres banda-muerta distintas dicen ser la misma:
+       · el lazo del gemelo   HYST_DEG      = 2,50°
+       · el firmware Sunner   45 pulsos     = 1,296°   (41060/41061)
+       · el core SolarGPT     CANONICAL_DEADBAND_DEG = 1,00°
+     Esta corrección NO elige: deja el valor EN VIGOR (2,5°) y solo hace que
+     los registros dejen de mentir. Elegir cuál es la buena necesita evidencia
+     de campo y es del mantenedor.
+     SI ESTE TEST FALLA porque los tres números ya coinciden: la decisión se
+     tomó, BORRA este bloque y anota dónde quedó registrada. */
+  const t = bancoDir().t;
+  const lazo = margenOeste(t);
+  const firmware = SIM.K.DB_PULSOS / t.sensor.pulsosGrado;
+  ok(Math.abs(lazo - firmware) > 0.01,
+     'HALLAZGO ABIERTO: lazo y firmware siguen discrepando en la banda muerta',
+     'lazo ' + lazo.toFixed(3) + '° · firmware ' + firmware.toFixed(3) +
+     '° · core 1,000° — decisión pendiente del mantenedor');
+}
+
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);
