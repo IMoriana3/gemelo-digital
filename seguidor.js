@@ -508,10 +508,18 @@
 
   /* opts.postH = del suelo a la BASE de la horquilla. Devuelve geometrías, no
      mallas: la app las instancia o las clona según le convenga. */
+  /* `detalle:'mass'` da el MISMO apoyo con mucha menos malla, para cuando hay
+     miles: el tambor sin sus 12 ranuras, la horquilla sin tornillos y menos
+     segmentos de curva. A la escala de una planta entera no se distingue, y el
+     apoyo completo costaba 5,3 M de triángulos en El Burgo y 62 M en San José —
+     con la página sin atender un clic. De cerca (el corte de estudio, seis
+     filas) va el completo. */
   S.apoyoGeoms = function (THREE, opts) {
     opts = opts || {};
     var postH = (opts.postH !== undefined) ? opts.postH : 1.747;   // 2 − 0,253 del gemelo
     var DEG = Math.PI / 180;
+    var masa = opts.detalle === 'mass';
+    var CS = masa ? 8 : 24;
 
     // --- poste: perfil C 140×70 con labios ---
     var cp = new THREE.Shape();
@@ -524,34 +532,35 @@
     // --- tambor: ojo redondo + 12 ranuras radiales ---
     var cj = new THREE.Shape(); cj.absarc(0,0,0.115,0,Math.PI*2,false);
     var cjh = new THREE.Path(); cjh.absarc(0,0,0.088,0,Math.PI*2,true); cj.holes.push(cjh);
-    for (var sl = 0; sl < 12; sl++) {
+    for (var sl = 0; sl < (masa ? 0 : 12); sl++) {
       var a0 = (sl*30+8)*DEG, a1 = (sl*30+24)*DEG, sh = new THREE.Path();
       sh.moveTo(0.108*Math.cos(a1),0.108*Math.sin(a1)); sh.absarc(0,0,0.108,a1,a0,true);
       sh.lineTo(0.093*Math.cos(a0),0.093*Math.sin(a0)); sh.absarc(0,0,0.093,a0,a1,false);
       sh.closePath(); cj.holes.push(sh);
     }
-    var tambor = new THREE.ExtrudeGeometry(cj, { depth:0.17, bevelEnabled:false, curveSegments:24 });
+    var tambor = new THREE.ExtrudeGeometry(cj, { depth:0.17, bevelEnabled:false, curveSegments:CS });
     tambor.translate(0,0,-0.085); tambor.rotateY(Math.PI/2);   // ojo a lo largo de la viga
 
     // --- horquilla PRE01: 2 placas + cartelas + base + 4 tornillos ---
     var fk = new THREE.Shape();
     fk.moveTo(-0.05,-0.44); fk.lineTo(0.05,-0.44); fk.lineTo(0.15,-0.20); fk.lineTo(0.15,0.03); fk.lineTo(0.1131,0.03);
     fk.absarc(0,0,0.117,0.2594,2.8822,true); fk.lineTo(-0.15,0.03); fk.lineTo(-0.15,-0.20); fk.closePath();
-    var fkP = new THREE.ExtrudeGeometry(fk, { depth:0.012, bevelEnabled:false, curveSegments:20 });
+    var fkP = new THREE.ExtrudeGeometry(fk, { depth:0.012, bevelEnabled:false, curveSegments:masa ? 6 : 20 });
     fkP.translate(0,0,-0.006);
     var blt = function (bx,by){ return new THREE.CylinderGeometry(0.013,0.013,0.20,6).rotateX(Math.PI/2).translate(bx,by,0); };
-    var horquilla = merge([ fkP.clone().translate(0,0,0.082), fkP.translate(0,0,-0.082),
+    var piezasFk = [ fkP.clone().translate(0,0,0.082), fkP.translate(0,0,-0.082),
       new THREE.BoxGeometry(0.024,0.20,0.152).translate(0.138,-0.14,0),
       new THREE.BoxGeometry(0.024,0.20,0.152).translate(-0.138,-0.14,0),
-      new THREE.BoxGeometry(0.30,0.016,0.176).translate(0,-0.245,0),
-      blt(0.1315,-0.005), blt(-0.1315,-0.005), blt(0,-0.30), blt(0,-0.38) ]);
+      new THREE.BoxGeometry(0.30,0.016,0.176).translate(0,-0.245,0) ];
+    if (!masa) piezasFk.push(blt(0.1315,-0.005), blt(-0.1315,-0.005), blt(0,-0.30), blt(0,-0.38));
+    var horquilla = merge(piezasFk);
     horquilla.rotateY(Math.PI/2);
 
     // --- virola: fleje-arco que cierra por encima del tambor ---
     var vi = new THREE.Shape();
     vi.moveTo(0.131*Math.cos(-0.2618),0.131*Math.sin(-0.2618)); vi.absarc(0,0,0.131,-0.2618,3.4034,false);
     vi.lineTo(0.117*Math.cos(3.4034),0.117*Math.sin(3.4034)); vi.absarc(0,0,0.117,3.4034,-0.2618,true); vi.closePath();
-    var virola = new THREE.ExtrudeGeometry(vi, { depth:0.15, bevelEnabled:false, curveSegments:22 });
+    var virola = new THREE.ExtrudeGeometry(vi, { depth:0.15, bevelEnabled:false, curveSegments:masa ? 8 : 22 });
     virola.translate(0,0,-0.075); virola.rotateY(Math.PI/2);
 
     // --- casquillo: boca CUADRADA que abraza la viga, exterior redondo ---
@@ -559,10 +568,11 @@
     var buh = new THREE.Path();
     buh.moveTo(0.0608,0.0608); buh.lineTo(0.0608,-0.0608); buh.lineTo(-0.0608,-0.0608); buh.lineTo(-0.0608,0.0608); buh.closePath();
     bu.holes.push(buh);
-    var casquillo = new THREE.ExtrudeGeometry(bu, { depth:0.19, bevelEnabled:false, curveSegments:24 });
+    var casquillo = new THREE.ExtrudeGeometry(bu, { depth:0.19, bevelEnabled:false, curveSegments:CS });
     casquillo.translate(0,0,-0.095); casquillo.rotateY(Math.PI/2);
 
-    return { poste:poste, tambor:tambor, horquilla:horquilla, virola:virola, casquillo:casquillo, postH:postH };
+    return { poste:poste, tambor:tambor, horquilla:horquilla, virola:virola, casquillo:casquillo,
+             postH:postH, detalle:masa ? 'mass' : 'full' };
   };
 
   /* Fusión de geometrías sin depender de BufferGeometryUtils (que no todas las
@@ -610,6 +620,6 @@
     };
   };
 
-  S.VERSION = '0.4.22';
+  S.VERSION = '0.4.23';
   root.Seguidor = S;
 })(typeof window !== 'undefined' ? window : this);
