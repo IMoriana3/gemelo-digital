@@ -126,6 +126,57 @@ ok(Math.abs(r.poa - 226.194055) / 226.194055 < 1e-3,
   '`poaAt` EN EL NAVEGADOR da el ancla de pvlib (' + r.poa.toFixed(4) + ' vs 226.1941)',
   r.poa.toFixed(6));
 
+/* ── 3) los 21 canónicos del panel salen del ESPEJO, no de un literal ──
+   Los 20 parámetros editables (más GCR) eran valores TECLEADOS que repetían lo
+   que `sim/fisica.js` ya publica. Coincidían todos —lo comprobé commit a commit
+   en los 18 que tienen los dos ficheros, y nunca han derivado—, pero nada lo
+   garantizaba: es el mecanismo de CENTINELA-01, una copia a mano que un día
+   deja de coincidir sin que salte nada. Ahora se leen del espejo y esto lo
+   exige. Se comprueba EN EL NAVEGADOR contra `CANON_FIS`, que es la foto que el
+   panel toma al cargar y a la que vuelve el botón de restaurar. */
+const cte = await pg.evaluate(() => {
+  const plano = {};
+  (function rec(o, pre) {
+    for (const [k, v] of Object.entries(o)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) rec(v, pre + k + '.');
+      else plano[pre + k] = v;
+    }
+  })(FISICA, '');
+  const norm = (x) => x.toLowerCase().replace(/_/g, '');
+  const claves = Object.keys(plano);
+  const mal = [], sinCanon = [];
+  const revisar = PARAMS_FIS.map((p) => p.k).concat(['GCR']);
+  for (const k of revisar) {
+    const hit = claves.find((c) => norm(c.split('.').pop()) === norm(k));
+    if (!hit) { sinCanon.push(k); continue; }
+    const aqui = (k === 'GCR') ? GCR : CANON_FIS[k];
+    if (aqui !== plano[hit]) mal.push(k + ': página ' + aqui + ' ≠ espejo ' + plano[hit]);
+  }
+  return { n: revisar.length, mal, sinCanon };
+});
+ok(cte.mal.length === 0,
+  'los ' + cte.n + ' canónicos del panel son EXACTAMENTE los del espejo',
+  cte.mal.join(' · '));
+/* Alcance de esto, dicho: recorre los parámetros del PANEL (`PARAMS_FIS`) más
+   `GCR`. Una constante suelta que alguien añada fuera del panel no la ve —lo
+   comprobé con un mutante y pasaba—, así que la frase dice «del panel» y no
+   «de la página». Un guard que promete más de lo que mira es peor que ninguno. */
+ok(cte.sinCanon.length === 0,
+  'y todo parámetro del PANEL tiene contraparte en el espejo (ninguno flota)',
+  'sin canon: ' + cte.sinCanon.join(', '));
+/* Y que se lean, no se tecleen: si vuelve un literal, esto lo dice aunque el
+   número coincida hoy — porque el problema es la copia, no el valor. */
+{
+  const bat2 = readFileSync(path.join(RAIZ, 'bateria.html'), 'utf8');
+  const tecleados = ['AXIS_MAX','NIGHT_POS','DEFENSE_POS','SLEW_DPS','HYST_DEG','DEG_H_NORMAL',
+    'DEG_H_WINTER','WIND_T1','WIND_T2','PARTIAL_STOW_DEG','DESTOW_HOLD_H','IDLE_W','SLEEP_W',
+    'K0','K1','ETA_CHG','V_NOM','ALBEDO','JEITA_T3','JEITA_T4','GCR']
+    .filter((k) => new RegExp('\\b' + k + '\\s*=\\s*[-\\d.]').test(bat2));
+  ok(tecleados.length === 0,
+    'y ninguno se teclea: los 21 se leen de FISICA',
+    'tecleados: ' + tecleados.join(', '));
+}
+
 await nav.close();
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, no pisa nada sin declarar y su poaAt es Perez'));
 process.exit(fallos ? 1 : 0);

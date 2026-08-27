@@ -242,7 +242,13 @@ var LOCS=[
 ];
 
 /* ═══════════ Perfiles TCU — 00.2t (medidos por Factiun, campaña "Consumos motor_02 @24V") ═══════════ */
-var K0=0.0503, K1=0.000845, IDLE_W=0.64, SLEEP_W=0.64, ETA_CHG=0.90, V_NOM=25.6;
+/* NO SE COPIAN: se leen del espejo (GEM-CONST-01). Esta página ya carga
+   `sim/fisica.js`, que es el espejo vigilado del core, así que teclear aquí el
+   valor otra vez sólo servía para que un día dejara de coincidir. Siguen siendo
+   `var` porque el panel las toca EN CALIENTE: lo que viene del canon es el
+   valor por defecto, no una cadena. */
+var K0=FISICA.motor.K0, K1=FISICA.motor.K1, IDLE_W=FISICA.idleW,
+    SLEEP_W=FISICA.sleepW, ETA_CHG=FISICA.e.ETA_CHG, V_NOM=FISICA.vNom;
 /* Curva de corriente del motor MEDIDA — «Consumos motor_02.xlsx», TCU 33, media de los
    barridos E→O y O→E a 24 V. Es el dato primario del que salió el ajuste Wh/° = K0+K1·|θ|,
    que corre un 9-16 % por debajo.
@@ -266,7 +272,7 @@ function motorW(ang){
   f=Math.max(0,Math.min(1,f));
   return (MOTOR_MA[i]+(MOTOR_MA[i+1]-MOTOR_MA[i])*f)/1000*MOTOR_V_MEAS;
 }
-var SLEW_DPS=0.17;                      /* velocidad real de giro (°/s) — misma que el gemelo */
+var SLEW_DPS=FISICA.e.SLEW_DPS;                      /* velocidad real de giro (°/s) — misma que el gemelo */
 var PROFILES=[
  {id:"SP_45W_3Ah",       n:"SP · panel 45 W · 3 Ah (76,8 Wh)",       wh:76.8,  chgW:45},
  {id:"SP_45W_6Ah",       n:"SP · panel 45 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:45},
@@ -278,11 +284,12 @@ var PROFILES=[
 ];
 
 /* ═══════════ Tracker (constantes del estudio SUNNER + gemelo) ═══════════ */
-var AXIS_MAX=55, GCR=2.382/6.0, NIGHT_POS=-5, DEFENSE_POS=55;
+var AXIS_MAX=FISICA.e.AXIS_MAX, GCR=FISICA.e.GCR, NIGHT_POS=FISICA.e.NIGHT_POS, DEFENSE_POS=FISICA.e.DEFENSE_POS;
 /* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies):
    parcial ≥40 km/h (±30° mín), full ≥60 km/h (±55°), histéresis destow ~30 min (1 h aquí),
    signo hacia el sol (az<0 este → θ negativo) */
-var WIND_T1=11.111, WIND_T2=16.667, PARTIAL_STOW_DEG=30, DESTOW_HOLD_H=0.5;
+var WIND_T1=FISICA.e.WIND_T1, WIND_T2=FISICA.e.WIND_T2,
+    PARTIAL_STOW_DEG=FISICA.e.PARTIAL_STOW_DEG, DESTOW_HOLD_H=FISICA.e.DESTOW_HOLD_H;
 
 /* ═══════════ CONSUMO DEL TCU — canónico, un solo sitio ═══════════
    Lo que gasta un TCU en un paso: electrónica, motor y calefactor. La FUENTE DE AUTORIDAD
@@ -325,15 +332,15 @@ function consumoTCU(o){
 /* Calefactor -LT (PS26002_RevA): P = 1,0 + 0,15·|T| W si T<0°C, solo de día; desbloquea carga (T efectiva ≥1°C) */
 function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
 /* JEITA lado caliente (§04.1a): T3=35°C reduce, T4=45°C bloquea carga */
-var JEITA_T3=35, JEITA_T4=45;
+var JEITA_T3=FISICA.e.JEITA_T3, JEITA_T4=FISICA.e.JEITA_T4;
 function hotDerate(t){if(t>=JEITA_T4)return 0;if(t>JEITA_T3)return 1-0.7*(t-JEITA_T3)/(JEITA_T4-JEITA_T3);return 1;}
-var DEG_H_NORMAL=10.0, DEG_H_WINTER=3.0;      /* °/h solar por modo (11.5b) */
-var HYST_DEG=1.0;                             /* banda muerta del lazo, en grados.
+var DEG_H_NORMAL=FISICA.e.DEG_H_NORMAL, DEG_H_WINTER=FISICA.e.DEG_H_WINTER;      /* °/h solar por modo (11.5b) */
+var HYST_DEG=FISICA.e.HYST_DEG;                             /* banda muerta del lazo, en grados.
    2026-08-27: era 2,5° «del estudio SUNNER» mientras el core corría a 1,0° y el
    registro del firmware publicaba 1,296°. Tres números distintos diciendo ser el
    mismo. Decidido por el mantenedor: 1,0° en todo el ecosistema. Ver la nota en
    sim/planta.js sobre lo que cuesta. */
-var ALBEDO=0.2;
+var ALBEDO=FISICA.e.ALBEDO;
 
 /* ═══════════ Sol y seguimiento — hora en UTC (hora solar = UTC + lon/15 + EoT) ═══════════ */
 function declOf(N){return 23.45*Math.sin(2*Math.PI*(284+N)/365)*D2R;}

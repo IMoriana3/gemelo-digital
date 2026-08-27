@@ -674,10 +674,21 @@ ok(wOn.peorRetraso > 10,
    acomodarse en silencio. */
 {
   const html = fs.readFileSync(new URL('../bateria.html', import.meta.url), 'utf8');
-  const mConst = html.match(/DEG_H_WINTER\s*=\s*([0-9.]+)/);
-  ok(!!mConst && Math.abs(parseFloat(mConst[1]) - SIM.K.DEG_H_WINTER) < 1e-9,
-     'el canon y el simulador usan el MISMO DEG_H_WINTER',
-     (mConst ? mConst[1] : '?') + ' vs ' + SIM.K.DEG_H_WINTER);
+  /* Esto raspaba el literal `DEG_H_WINTER = 3.0` del HTML y lo comparaba con el
+     del simulador. Desde GEM-CONST-01 no hay literal que raspar: la ficha lee la
+     constante del ESPEJO, igual que `planta.js` (F.e.DEG_H_WINTER). O sea que la
+     propiedad pasó de COMPROBADA a ESTRUCTURAL, y lo que hay que exigir ya no es
+     que los dos números coincidan —no puede haber dos— sino que ninguno de los
+     dos lados vuelva a teclearlo. Un raspador que se queda sin nada que raspar
+     devuelve `?` y hay que reescribirlo, no aflojarlo. */
+  const lit = html.match(/\bDEG_H_WINTER\s*=\s*[0-9.]/);
+  ok(!lit, 'la ficha NO teclea DEG_H_WINTER: lo lee del espejo',
+     lit ? 'ha vuelto un literal: ' + lit[0] : '');
+  ok(/DEG_H_WINTER\s*=\s*FISICA\.e\.DEG_H_WINTER/.test(html),
+     'y lo lee de la MISMA fuente que el simulador (FISICA.e)');
+  ok(Math.abs(SIM.K.DEG_H_WINTER - SIM.FISICA.e.DEG_H_WINTER) < 1e-9,
+     'y el simulador tampoco lo teclea (' + SIM.K.DEG_H_WINTER + ' °/h)',
+     SIM.K.DEG_H_WINTER + ' vs ' + SIM.FISICA.e.DEG_H_WINTER);
   const bloque = html.match(/Winter mode \(11\.5b\)[\s\S]{0,700}/);
   ok(!!bloque && /target\s*=\s*prevPos\s*\+/.test(bloque[0]),
      'y el canon sigue aplicándolo a la POSICIÓN (`target = prevPos + …`), no a la energía',
