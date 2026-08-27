@@ -35,6 +35,21 @@
    `carea_fisica.mjs` la mantiene en su lista: son dos coberturas distintas y conviene
    que no se confundan.
 */
+/* ENVUELTO EN IIFE (GEM-AMBITO-01). Este fichero se carga con <script src> en
+   `simulador.html` y en `bateria.html`, o sea como script CLÁSICO: sin esta
+   envoltura sus 22 declaraciones de nivel superior caían al ámbito global de la
+   página, y cualquier página que declarase uno de esos nombres lo PISABA sin
+   que JS dijera nada. No es hipotético: al portar Perez copié `PEREZ_F`,
+   `airmass`, `e0De` y `perezCielo` en `bateria.html` y los pisé (GEM-CIELO-02).
+   Coincidían carácter a carácter, así que no cambió ningún número — hasta que
+   alguien tocara uno de los dos.
+
+   Los otros diez módulos del gemelo ya iban envueltos; éste era el único de
+   física escrito a mano que no. Fuera sólo salen `window.FISICA` y
+   `module.exports`, que es lo que todo el mundo usa. */
+(function (global) {
+'use strict';
+
 var FISICA = {
  /* ── constantes medidas (tcu.py) ── */
  motor: { K0: 0.0503, K1: 0.000845, picoW: 50 },
@@ -241,3 +256,4 @@ FISICA.consumoTCU = consumoTCU;
 
 if (typeof window !== "undefined") window.FISICA = FISICA;
 if (typeof module !== "undefined") module.exports = FISICA;
+})(this);
