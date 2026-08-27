@@ -65,6 +65,39 @@ const PAG = pathToFileURL(path.join(RAIZ, 'simulador.html')).href;
               oyentes.length + ' oyentes, todos únicos');
 }
 
+/* ── Y EL MISMO PROBLEMA UNA CAPA MÁS ARRIBA (GEM-AMBITO-01) ───────────────────
+   Lo de arriba mira duplicados DENTRO de este fichero. Pero la página carga trece
+   módulos con <script src>, o sea como scripts clásicos, y los que no van
+   envueltos en IIFE derraman TODAS sus declaraciones al mismo ámbito global. Ahí
+   se pisan entre ellos igual de mudos.
+
+   No es hipotético: `sim/fisica.js` iba desnudo y al portar Perez a
+   `bateria.html` copié allí cuatro de sus nombres y los pisé. Ya va envuelto.
+   Los que quedan tienen su motivo escrito, y una lista de exenciones sin motivo
+   es una lista que nadie vuelve a mirar. */
+{
+  const { desnudos } = await import('./ambito.mjs');
+  const PERMITIDO = {
+    'seguidor.js':    'FUENTE ÚNICA del modelo del seguidor, compartida con otros tres repos: ' +
+                      'envolverla es un cambio que no se decide desde aquí',
+    'modbus-map.js':  'generado por tools/extrae_mapa.mjs — datos, no física',
+    'plantas.js':     'generado por tools/extrae_plantas.mjs — datos, no física',
+  };
+  const hoy = desnudos(path.join(RAIZ, 'simulador.html'));
+  const sinMotivo = hoy.filter((f) => !(f in PERMITIDO));
+  if (sinMotivo.length) {
+    console.error('\n✗ módulos SIN envolver y sin motivo declarado: ' + sinMotivo.join(', '));
+    console.error('  van con <script src>, así que derraman sus declaraciones al ámbito de la página');
+    process.exit(1);
+  }
+  const zombis = Object.keys(PERMITIDO).filter((f) => !hoy.includes(f));
+  if (zombis.length) {
+    console.error('\n✗ exenciones zombis (ya van envueltos): ' + zombis.join(', '));
+    process.exit(1);
+  }
+  console.log('  ✓ de los 13 módulos, ' + hoy.length + ' van sin envolver y los tres con su motivo');
+}
+
 let chromium;
 try {
   ({ chromium } = await import('playwright'));

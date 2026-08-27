@@ -25,44 +25,26 @@ const PAG = pathToFileURL(path.join(RAIZ, 'bateria.html')).href;
 let fallos = 0;
 const ok = (c, m, x) => { console.log((c ? '  ✓ ' : '  ✗ ') + m + (!c && x ? '  → ' + x : '')); if (!c) fallos++; };
 
-/* ── 1) pisado del ámbito global, con su lista de exenciones y el motivo ──
-   `sim/fisica.js` es un script CLÁSICO: todo lo que declara arriba cae al global
-   de esta página. Redefinir uno de esos nombres aquí lo PISA, y en JS eso no da
-   error: gana el último. Las que están permitidas lo están por una razón, y la
-   razón se escribe; lo que no esté en la lista es un pisado por descuido. */
-const PERMITIDO = {
-  poaAt:        'lee el ALBEDO editable de la página; el cielo lo delega a FISICA.perezCielo',
-  cRateSafeLFP: 'curva de admisión, sin contraparte en main (tcu_availability)',
-  hotDerate:    'lee JEITA_T3/T4, editables en el panel «Batería»',
-  heaterW:      'perfiles LT calefactados propios de esta ficha',
-  motorW:       'lee la curva de mA editable en el panel «Motor»',
-  consumoTCU:   'compone con los consumos editables de la página',
-  etaCharger:   'delega: return FISICA.etaCharger(G)',
-  D2R: 'constante trivial', K0: 'constante del motor, careada abajo',
-  MOTOR_ANG: 'curva editable', MOTOR_MA: 'curva editable',
-  MOTOR_V_MEAS: 'tensión de la campaña de medida', JEITA_T3: 'editable en el panel',
-};
-{
-  const esp = readFileSync(path.join(RAIZ, 'sim/fisica.js'), 'utf8');
-  const bat = readFileSync(path.join(RAIZ, 'bateria.html'), 'utf8');
-  const decl = (s) => new Set([
-    ...[...s.matchAll(/^function\s+(\w+)\s*\(/gm)].map((m) => m[1]),
-    ...[...s.matchAll(/^var\s+(\w+)\s*=/gm)].map((m) => m[1]),
-  ]);
-  const globEspejo = decl(esp);
-  const pisadas = [...decl(bat)].filter((n) => globEspejo.has(n));
-  const sinMotivo = pisadas.filter((n) => !(n in PERMITIDO));
-  ok(sinMotivo.length === 0,
-    'los ' + pisadas.length + ' pisados del espejo están todos declarados con su motivo',
-    'sin motivo: ' + sinMotivo.join(', '));
-  /* Y el zombi de la lista: una exención que ya no corresponde a nada es tan
-     mala como un pisado sin declarar, porque hace pasar el guard por costumbre. */
-  const zombis = Object.keys(PERMITIDO).filter((n) => !pisadas.includes(n));
-  ok(zombis.length === 0, 'y la lista no tiene zombis (' + Object.keys(PERMITIDO).length + ' entradas)',
-    'ya no se pisan: ' + zombis.join(', '));
-  ok(!/function\s+perezCielo\s*\(|var\s+PEREZ_F\s*=/.test(bat),
-    'el cielo de Perez NO se copia aquí (no redefine perezCielo ni PEREZ_F)');
-}
+/* ── 1) el espejo no derrama: la comprobación se hace EN EL NAVEGADOR ──
+   Aquí había una lista declarada de «globales del espejo que esta página pisa»,
+   con su motivo. Era el parche correcto para el problema equivocado: la causa
+   no era que la página declarase esos nombres, era que `sim/fisica.js` los
+   soltaba al ámbito global por no ir envuelto. Envuelto en IIFE
+   (GEM-AMBITO-01), no hay nada que pisar, y la lista sobra.
+
+   Lo que se exige ahora es la propiedad, no la lista: de las 22 declaraciones
+   del espejo, en `window` no debe haber NINGUNA — sólo `FISICA`. Y se mide
+   cargando la página de verdad, que es lo único que distingue un `var` dentro
+   de un IIFE de uno fuera. Un guard de texto no puede: los dos van a columna 0.
+   (Lo comprobé: mi contador de derrames seguía diciendo 22 con el IIFE puesto.) */
+const DECL_ESPEJO = ['cRateSafeLFP','hotDerate','heaterW','etaCharger','airmass','e0De',
+  'perezCielo','poaAt','motorW','consumoTCU','D2R','JEITA_T3','K0','MOTOR_ANG','MOTOR_MA',
+  'MOTOR_V_MEAS','V_NOM','IDLE_W','ETA_G','ETA_V','PEREZ_F'];
+/* Los que la PÁGINA declara por su cuenta —porque leen parámetros editables en
+   caliente— sí estarán en `window`, y son suyos: con el espejo envuelto ya no
+   pisan nada. Los que no declara no pueden estar, y si aparecen es que el IIFE
+   se ha caído. */
+const SOLO_DEL_ESPEJO = ['airmass','e0De','perezCielo','ETA_G','ETA_V','PEREZ_F'];
 
 /* ── 2) que la página abra y que `poaAt` dé Perez de verdad ── */
 let chromium;
@@ -91,6 +73,14 @@ const r = await pg.evaluate(() => {
   };
 });
 ok(r.delega, '`FISICA.perezCielo` está disponible en la página');
+{
+  const enWin = await pg.evaluate((ns) => ns.filter(
+    (n) => Object.prototype.hasOwnProperty.call(window, n)), SOLO_DEL_ESPEJO);
+  ok(enWin.length === 0,
+    'el espejo NO derrama al ámbito global: 0 de sus ' + DECL_ESPEJO.length +
+    ' declaraciones en `window`',
+    'derrama ' + enWin.join(', ') + ' — el IIFE de sim/fisica.js se ha caído');
+}
 
 /* Los dos de arriba son de TEXTO, y el texto se puede satisfacer sin que la
    propiedad se cumpla: dos mutantes —volver a llamar al global sin delegar, y
@@ -178,5 +168,5 @@ ok(cte.sinCanon.length === 0,
 }
 
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, no pisa nada sin declarar y su poaAt es Perez'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez y sus 21 canónicos salen del espejo'));
 process.exit(fallos ? 1 : 0);
