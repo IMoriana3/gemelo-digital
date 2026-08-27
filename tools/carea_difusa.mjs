@@ -111,9 +111,16 @@ console.log('\n1b) las DOS copias de poaAt, y el día del año');
       if (src[k] === '{') d++; else if (src[k] === '}') { d--; if (!d) return src.slice(i, k + 1); }
     }
   };
-  check('sim/fisica.js y bateria.html llevan la MISMA poaAt, carácter a carácter',
-    txt('../sim/fisica.js') === txt('../bateria.html'),
-    'dos copias que se separan son dos físicas');
+  /* Aquí hubo un careo TEXTUAL de las dos copias de `poaAt`, y estaba mal
+     planteado: `bateria.html` no debe llevar el mismo texto, debe llevar el
+     mismo CIELO. Su `poaAt` existe aparte porque lee el ALBEDO editable de la
+     página, y el cielo lo delega a `FISICA.perezCielo` en vez de copiarlo —si
+     lo copiara PISARÍA los globales del espejo, que la página carga con
+     <script src>. Eso lo comprueba ahora `tools/prueba_bateria.mjs`, que
+     además lo ejecuta en un navegador de verdad. */
+  check('el cuerpo de poaAt del espejo sigue siendo el que se carea aquí',
+    /perezCielo\(/.test(txt('../sim/fisica.js') || ''),
+    'si el espejo dejó de llamar a perezCielo, este fichero carea otra cosa');
   /* Si el día se ignorase, esto daría 0 y nadie se enteraría: el factor orbital
      es pequeño y mudo. Medido sobre el peor caso conocido, 2,39 %. */
   const c = ANCLAS.casos.find(x => x.tilt === 30);

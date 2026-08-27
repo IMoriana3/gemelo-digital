@@ -347,11 +347,16 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `../tools/extrae_plantas.mjs` | regenera `plantas.js` desde `cobertura-zigbee/<planta>_layout.json`, contrastando con overcast |
 | `../tools/prueba_simulador.mjs` | banco de la interfaz: renders, mandos y reproductor — lo que no se ve en una captura |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
-| `../tools/carea_fisica.mjs` | **arnés**: carea `fisica.js` contra los goldens del core (3/6 funciones hoy, y lo imprime) |
+| `../tools/carea_fisica.mjs` | **arnés**: carea `fisica.js` contra los goldens del core (4/7 funciones hoy, y lo imprime) |
+| `../tools/carea_difusa.mjs` | **arnés**: carea `poaAt` —la transposición con la que se PUNTÚA la política de difusa— contra 27 anclas de pvlib y contra una implementación independiente sobre 6930 condiciones |
+| `../tools/prueba_bateria.mjs` | banco de `bateria.html`: qué globales del espejo pisa (con su lista declarada), que abre sin errores y que su `poaAt` da Perez en el navegador |
+| `../bateria.html` | la ficha de batería — el único fichero que MEZCLA el espejo con código propio, por eso tiene banco aparte |
 
 ```bash
 node sim/prueba.mjs           # física + codificación de registros
 node tools/prueba_simulador.mjs # la interfaz (necesita playwright-core y Chromium)
+node tools/prueba_bateria.mjs   # bateria.html: pisado del espejo + Perez en el navegador
+node tools/carea_difusa.mjs     # poaAt contra pvlib, tras tocar la transposición
 node tools/extrae_plantas.mjs   # si cambia un layout del DWG
 node tools/extrae_mapa.mjs    # si cambia la ficha del mapa
 node tools/carea_fisica.mjs  # si cambia la gestión de batería en SolarGPT
