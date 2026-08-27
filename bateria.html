@@ -328,7 +328,11 @@ function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
 var JEITA_T3=35, JEITA_T4=45;
 function hotDerate(t){if(t>=JEITA_T4)return 0;if(t>JEITA_T3)return 1-0.7*(t-JEITA_T3)/(JEITA_T4-JEITA_T3);return 1;}
 var DEG_H_NORMAL=10.0, DEG_H_WINTER=3.0;      /* °/h solar por modo (11.5b) */
-var HYST_DEG=2.5;                             /* histéresis: grados corregidos por movimiento (estudio SUNNER) */
+var HYST_DEG=1.0;                             /* banda muerta del lazo, en grados.
+   2026-08-27: era 2,5° «del estudio SUNNER» mientras el core corría a 1,0° y el
+   registro del firmware publicaba 1,296°. Tres números distintos diciendo ser el
+   mismo. Decidido por el mantenedor: 1,0° en todo el ecosistema. Ver la nota en
+   sim/planta.js sobre lo que cuesta. */
 var ALBEDO=0.2;
 
 /* ═══════════ Sol y seguimiento — hora en UTC (hora solar = UTC + lon/15 + EoT) ═══════════ */

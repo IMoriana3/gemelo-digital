@@ -86,8 +86,15 @@ var K = {
   SNOW_ALARM_M: 0.03,           /* 3 cm de nieve → alarma de nieve */
   /* ---- entradas físicas del TCU (ver el bloque de más abajo) ---- */
   PULSOS_TOPE: 1910,            /* 41037/41038: ±1910 pulsos = ±55° → 34,7 pulsos/° */
-  DB_PULSOS: 45,                /* 41060/41061: deadband normal, en pulsos */
-  DB_PULSOS_BAJA: 90,           /* 41063: deadband con alarma de baja capacidad */
+  /* Desde TRACKER-BUG-01 estos dos NO son el valor de los registros: 41060 y
+     41061 salen de la banda muerta EN VIGOR (`HYST_DEG`, o `cfg.deadband` si se
+     pasa). Lo único que sobrevive de ellos es la RAZÓN 2× entre la banda normal
+     y la de baja capacidad, que es la que declara el firmware. Se dejan los dos
+     números por eso, y no porque 45 pulsos signifiquen ya nada: a 34,727
+     pulsos/° eran 1,2958°, uno de los tres valores distintos que decían ser la
+     misma banda muerta antes de que se unificaran en 1,00° el 2026-08-27. */
+  DB_PULSOS: 45,                /* 41060/41061: solo como denominador de la razón */
+  DB_PULSOS_BAJA: 90,           /* 41063: 2× la normal, como el firmware */
   ANTIRREBOTE_S: 0.05,          /* la línea de la seta tiene que estar estable 50 ms */
   EVAL_MOTOR_S: 5,              /* 41039: ventana para juzgar si el motor se mueve */
   REINTENTOS_MOTOR: 3,          /* 41065: reintentos antes de enclavar el eje bloqueado */

@@ -1328,22 +1328,38 @@ console.log('\n── 41060 y 41061 son DOS márgenes, uno por sentido ──');
 }
 
 {
-  /* HALLAZGO ABIERTO — tres banda-muerta distintas dicen ser la misma:
-       · el lazo del gemelo   HYST_DEG      = 2,50°
-       · el firmware Sunner   45 pulsos     = 1,296°   (41060/41061)
-       · el core SolarGPT     CANONICAL_DEADBAND_DEG = 1,00°
-     Esta corrección NO elige: deja el valor EN VIGOR (2,5°) y solo hace que
-     los registros dejen de mentir. Elegir cuál es la buena necesita evidencia
-     de campo y es del mantenedor.
-     SI ESTE TEST FALLA porque los tres números ya coinciden: la decisión se
-     tomó, BORRA este bloque y anota dónde quedó registrada. */
+  /* HALLAZGO CERRADO — las tres banda-muerta eran una decisión, y se tomó.
+       antes:  lazo del gemelo 2,50°  ·  firmware 45 pulsos = 1,296°  ·  core 1,00°
+       ahora:  1,00° en todo el ecosistema (decisión del mantenedor, 2026-08-27)
+
+     Queda un residuo que NO es un descuido y por eso se comprueba en vez de
+     redondearlo: el registro del firmware lleva PULSOS enteros, y a 34,727
+     pulsos/° no existe ningún entero que valga exactamente 1,00°. El más
+     cercano son 35 pulsos = 1,0079°. Esos 0,0079° son el suelo de cuantización
+     del hardware, no una discrepancia de criterio: el lazo pide 1,00° y el
+     eje solo sabe contar pulsos.
+
+     Por eso la tolerancia es 0,01° y no 1e-9: separa «coinciden dentro de lo
+     que el hardware sabe expresar» de «alguien ha vuelto a poner otro número».
+     El bloque anterior exigía justamente lo contrario —que discreparan— y
+     decía que al coincidir había que sustituirlo. Esto es esa sustitución. */
   const t = bancoDir().t;
   const lazo = margenOeste(t);
   const firmware = SIM.K.DB_PULSOS / t.sensor.pulsosGrado;
-  ok(Math.abs(lazo - firmware) > 0.01,
-     'HALLAZGO ABIERTO: lazo y firmware siguen discrepando en la banda muerta',
-     'lazo ' + lazo.toFixed(3) + '° · firmware ' + firmware.toFixed(3) +
-     '° · core 1,000° — decisión pendiente del mantenedor');
+  const pulsosDe1 = Math.round(1.0 * t.sensor.pulsosGrado);
+  ok(Math.abs(lazo - 1.0) < 0.01,
+     'el lazo del gemelo corre a 1,00°', lazo.toFixed(4) + '°');
+  ok(Math.abs(pulsosDe1 / t.sensor.pulsosGrado - 1.0) < 0.01,
+     'y el registro del firmware dice lo mismo dentro de la cuantización',
+     pulsosDe1 + ' pulsos = ' + (pulsosDe1 / t.sensor.pulsosGrado).toFixed(4) +
+     '° · residuo ' + Math.abs(pulsosDe1 / t.sensor.pulsosGrado - 1.0).toFixed(4) + '°');
+  ok(Math.abs(pulsosDe1 / t.sensor.pulsosGrado - 1.0) > 1e-9,
+     'y ese residuo EXISTE: 1,00° no es representable en pulsos enteros',
+     'si esto se pone rojo, o cambió la resolución del eje o alguien redondeó ' +
+     'el residuo en vez de declararlo');
+  ok(firmware > 0,
+     'K.DB_PULSOS sobrevive solo como RAZÓN (baja/normal), no como valor absoluto',
+     '41060/41061 salen de la banda muerta en vigor desde TRACKER-BUG-01');
 }
 
 
