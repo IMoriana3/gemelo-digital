@@ -17,9 +17,22 @@
    a 1e-9. Si difieren, se corrige AQUÍ: el Python manda. Si el core cambió a
    propósito, se regeneran los goldens y el cambio se ve en el diff.
 
-   COBERTURA HOY: 4 de las 7 funciones (motorW, heaterW, etaCharger, consumoTCU). Las otras
-   tres —cRateSafeLFP, hotDerate, poaAt— esperan a que el core publique su contraparte, y
-   el arnés lo imprime en cada ejecución en vez de dejarlo implícito.
+   COBERTURA HOY: 4 de las 7 funciones (motorW, heaterW, etaCharger, consumoTCU) las
+   carea `tools/carea_fisica.mjs` contra los goldens del core. Las otras tres
+   —cRateSafeLFP, hotDerate, poaAt— esperan a que el core publique su contraparte, y el
+   arnés lo imprime en cada ejecución en vez de dejarlo implícito.
+
+   PERO OJO CON `poaAt` (GEM-CIELO-01): esa exención es por FUNCIÓN y `poaAt` tiene DOS
+   usos. Como auxiliar de disponibilidad de batería, cierto: su contraparte solo está en
+   `tcu_availability`, sin mergear. Como PUNTUADOR de la política de difusa —`TCU.poaDe`
+   en planta.js, que es de donde sale el ángulo al que apunta el seguidor— su contraparte
+   SÍ está en `main`: `poa_switch_flat_mode` puntúa con `_poa_perez_for_theta`. O sea que
+   el core decide con Perez y aquí se decide con una transposición ISÓTROPA, y la mitad
+   vigilable llevaba sin vigilarse porque la exención tapaba la función entera.
+   `tools/carea_difusa.mjs` mide esa separación y la fija: hoy 8,4 % de las condiciones de
+   cielo cerrado deciden distinto, con el hueco medio del cociente a ×2 de la banda de
+   histéresis. NO está corregida — portar Perez aquí es una decisión de física, no de
+   arnés, y va aparte.
 */
 var FISICA = {
  /* ── constantes medidas (tcu.py) ── */
