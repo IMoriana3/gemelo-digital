@@ -74,7 +74,7 @@ var FISICA = {
   "DEFENSE_POS": 55,
   "GCR": 0.397,
   "SLEW_DPS": 0.17,
-  "HYST_DEG": 2.5,
+  "HYST_DEG": 1.0,
   "ALBEDO": 0.2,
   "WIND_T1": 11.111,
   "WIND_T2": 16.667,
