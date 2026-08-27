@@ -1013,10 +1013,13 @@ TCU.prototype.cielo = function (ang) {
   return this.sky;
 };
 /* devuelve la función θ → POA que la política de difusa necesita para puntuar
-   candidatos. La transposición es la canónica (poaAt, de bateria.html). */
+   candidatos. La transposición es la del CANON: Perez 1990, la misma con la que
+   el core puntúa esta decisión (`poa_switch_flat_mode` → `_poa_perez_for_theta`).
+   Lo era isótropa hasta GEM-CIELO-02, y de aquí sale el ángulo, así que el día
+   del año va con ella: sin él Perez pierde hasta un 2,39 % (E0 del perihelio). */
 TCU.prototype.poaDe = function (ang) {
-  var s = this.sky, sol = ang.sol;
-  return function (th) { return poaAt(th, sol.el, sol.az, s.bh, s.dhi, s.ghi); };
+  var s = this.sky, sol = ang.sol, dia = this.p.t.dia;
+  return function (th) { return poaAt(th, sol.el, sol.az, s.bh, s.dhi, s.ghi, dia); };
 };
 
 TCU.prototype.energia = function (dt, ang, whMotor) {
@@ -1064,7 +1067,7 @@ TCU.prototype.energia = function (dt, ang, whMotor) {
        string es tan grande que el regulador satura en su tope en cuanto amanece
        del todo, y solo se queda corto con muy poca luz. */
     /* la irradiancia la recoge la MESA, no lo que el TCU cree que mide */
-    poaChg = poaAt(this.repetidor ? 0 : this.anguloReal, ang.sol.el, ang.sol.az, bh, dhi, ghi);
+    poaChg = poaAt(this.repetidor ? 0 : this.anguloReal, ang.sol.el, ang.sol.az, bh, dhi, ghi, this.p.t.dia);
     if (m.nieve >= 0.02) poaChg *= 0.05;         /* panel o módulos nevados */
     var frac = pf.tipo === 'string' ? Math.min(poaChg / 150, 1) : Math.min(poaChg / 1000, 1);
     pEntrada = pf.chgW * frac * K.ETA_CHG;

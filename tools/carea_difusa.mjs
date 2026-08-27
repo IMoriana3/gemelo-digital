@@ -1,24 +1,27 @@
 #!/usr/bin/env node
-/* CAREO DE LA TRANSPOSICIÓN QUE DECIDE (GEM-CIELO-01)
-   ===================================================
+/* CAREO DE LA TRANSPOSICIÓN QUE DECIDE (GEM-CIELO-01 → 02)
+   =========================================================
    `TCU.poaDe` (sim/planta.js) le da a la política de difusa la función θ → POA
    con la que PUNTÚA candidatos, y de ahí sale el ángulo al que apunta el
-   seguidor. Esa función es `poaAt`, y `poaAt` transpone la difusa de forma
-   ISÓTROPA — lo dice su propio comentario en `bateria.html`.
+   seguidor. El core puntúa esa MISMA decisión con Perez 1990
+   (`poa_switch_flat_mode` → `_poa_perez_for_theta`, solargpt_core/poa.py).
 
-   El core toma esa MISMA decisión con Perez: `poa_switch_flat_mode` puntúa con
-   `_poa_perez_for_theta` (solargpt_core/poa.py), y eso está en `main` hoy.
+   HASTA GEM-CIELO-02 `poaAt` repartía la difusa de forma ISÓTROPA. Este arnés
+   nació midiendo ese hueco —8,43 % de las condiciones de cielo cerrado decidían
+   distinto, con el hueco medio del cociente a ×2 de la banda de histéresis— y
+   fijándolo para que no creciera en silencio. Portado Perez, ese hueco es CERO
+   y el arnés cambia de trabajo: ya no mide una separación, CAREA `poaAt` contra
+   pvlib. Los listones de entonces se pusieron para ponerse rojos justo cuando
+   alguien portara Perez; se pusieron rojos, y aquí están sustituidos.
 
-   POR QUÉ NO LO VEÍA NADIE. `tools/carea_fisica.mjs` deja `poaAt` fuera con la
-   nota «contraparte solo en tcu_availability (sin mergear)». Es cierto para su
-   uso como auxiliar de disponibilidad de batería. Pero `poaAt` tiene DOS usos,
-   y el otro —puntuar la decisión de difusa— sí tiene contraparte en `main`. La
-   exención es por FUNCIÓN y el hueco es por USO, así que la mitad que sí se
-   puede vigilar llevaba sin vigilarse.
-
-   ESTO NO CAMBIA LA FÍSICA. Mide la separación y la fija, para que deje de
-   crecer en silencio y para que la decisión de portar Perez al gemelo se tome
-   con el número delante, no de oído.
+   Lo que se comprueba ahora, en este orden:
+     1. `poaAt` reproduce pvlib en 27 anclas — la única verdad EXTERNA del
+        fichero, y la que caza un error conceptual compartido;
+     2. las dos copias de `poaAt` (sim/fisica.js y bateria.html) son la misma;
+     3. el día del año se USA de verdad — si no, Perez pierde hasta 2,39 %;
+     4. y sobre 6930 condiciones, `poaAt` y una implementación INDEPENDIENTE de
+        Perez escrita aquí deciden lo mismo. Es el careo de espejo: textos
+        distintos, misma física.
 
        node tools/carea_difusa.mjs
 */
@@ -71,18 +74,55 @@ function poaPerez(zenDeg, azNdeg, tiltDeg, sazDeg, ghi, dni, dhi, e0, am) {
          ALB * Math.max(0, ghi) * (1 - cb) / 2;
 }
 
-console.log('\n1) el oráculo contra pvlib — si esto falla, lo de abajo no dice nada');
+const ANCLAS = JSON.parse(fs.readFileSync(new URL('./_anclas_perez.json', import.meta.url)));
+/* puente: las anclas hablan en (tilt, surface_azimuth) y `poaAt` en rotación de
+   eje N-S. θ NEGATIVO mira al ESTE (surface_azimuth 90) — comprobado contra
+   pvlib.tracking.singleaxis, no deducido. Las anclas van con E0 = 1367, así que
+   se llama SIN día para no meter el factor orbital en el careo. */
+const anclaAPoaAt = (c) => {
+  const R = c.tilt === 0 ? 0 : (c.saz === 90 ? -c.tilt : c.tilt);
+  const el = (90 - c.zen) * D2R, az = (c.azN - 180) * D2R;
+  return poaAt(R, el, az, c.dni * Math.cos(c.zen * D2R), c.dhi, c.ghi);
+};
+
+console.log('\n1) `poaAt` contra pvlib — la única verdad EXTERNA del fichero');
 {
-  const A = JSON.parse(fs.readFileSync(new URL('./_anclas_perez.json', import.meta.url)));
-  let peor = 0, arg = null;
-  for (const c of A.casos) {
-    const got = poaPerez(c.zen, c.azN, c.tilt, c.saz, c.ghi, c.dni, c.dhi, c.e0, c.am);
-    const d = Math.abs(got - c.poa) / Math.max(c.poa, 1);
-    if (d > peor) { peor = d; arg = [c, got]; }
+  let peorP = 0, peorO = 0, arg = null;
+  for (const c of ANCLAS.casos) {
+    const dP = Math.abs(anclaAPoaAt(c) - c.poa) / Math.max(c.poa, 1);
+    const dO = Math.abs(poaPerez(c.zen, c.azN, c.tilt, c.saz, c.ghi, c.dni, c.dhi, c.e0, c.am) - c.poa) / Math.max(c.poa, 1);
+    if (dP > peorP) { peorP = dP; arg = c; }
+    if (dO > peorO) peorO = dO;
   }
-  check('Perez portado reproduce pvlib en las ' + A.casos.length + ' anclas (peor ' +
-    (100 * peor).toFixed(4) + ' %)', peor < 1e-3,
-    arg ? arg[1].toFixed(3) + ' vs ' + arg[0].poa.toFixed(3) : '');
+  check('`poaAt` reproduce pvlib en las ' + ANCLAS.casos.length + ' anclas (peor ' +
+    (100 * peorP).toFixed(4) + ' %)', peorP < 1e-3,
+    arg ? 'peor en zen=' + arg.zen + ' tilt=' + arg.tilt + ' saz=' + arg.saz : '');
+  check('y el oráculo independiente también (peor ' + (100 * peorO).toFixed(4) + ' %)',
+    peorO < 1e-3);
+}
+
+console.log('\n1b) las DOS copias de poaAt, y el día del año');
+{
+  const txt = f => {
+    const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
+    const i = src.indexOf('function poaAt(');
+    let d = 0, j = src.indexOf('{', i);
+    for (let k = j; k < src.length; k++) {
+      if (src[k] === '{') d++; else if (src[k] === '}') { d--; if (!d) return src.slice(i, k + 1); }
+    }
+  };
+  check('sim/fisica.js y bateria.html llevan la MISMA poaAt, carácter a carácter',
+    txt('../sim/fisica.js') === txt('../bateria.html'),
+    'dos copias que se separan son dos físicas');
+  /* Si el día se ignorase, esto daría 0 y nadie se enteraría: el factor orbital
+     es pequeño y mudo. Medido sobre el peor caso conocido, 2,39 %. */
+  const c = ANCLAS.casos.find(x => x.tilt === 30);
+  const sinDia = anclaAPoaAt(c);
+  const enero = poaAt(-c.tilt, (90 - c.zen) * D2R, (c.azN - 180) * D2R,
+    c.dni * Math.cos(c.zen * D2R), c.dhi, c.ghi, 3);
+  check('el día del año se USA (sin día ' + sinDia.toFixed(3) + ' · en perihelio ' +
+    enero.toFixed(3) + ')', Math.abs(enero - sinDia) > 1e-6,
+    'si son iguales, el parámetro está muerto y Perez pierde hasta 2,39 %');
 }
 
 /* ── la rejilla donde la política de difusa vive: cielo cerrado ── */
@@ -117,7 +157,7 @@ for (let elev = 5; elev <= 85; elev += 2.5)
       const pT = poaPerez(zen, azN, Math.abs(th), th >= 0 ? 270 : 90, ghi, dni, dhi, e0, am);
       const pF = poaPerez(zen, azN, 0, 180, ghi, dni, dhi, e0, am);
       if (iT < 1 || pT < 1) continue;
-      malla.push({ elev, kt, azS, th, rIso: iF / iT, rPz: pF / pT, iT, pT });
+      malla.push({ elev, kt, azS, th, rIso: iF / iT, rPz: pF / pT, iT, pT, poaAtT: iT });
     }
 const disc = malla.filter(m => (m.rIso >= ENTRA) !== (m.rPz >= ENTRA));
 const nIso = malla.filter(m => m.rIso >= ENTRA).length;
@@ -128,54 +168,46 @@ const gapsOrd = malla.map(m => Math.abs(m.rIso - m.rPz)).sort((x, y) => x - y);
 const gapP95 = gapsOrd[Math.floor(0.95 * gapsOrd.length)];
 const pctDisc = 100 * disc.length / malla.length;
 
-console.log('\n2) la separación, medida — no cambia nada, la fija');
+console.log('\n2) careo de espejo: `poaAt` contra la implementación independiente');
 console.log('   rejilla: ' + malla.length + ' combinaciones (elev 5..85°, kt 0,05..0,78, 7 azimutes)');
-console.log('   entra en PLANO:  isótropa ' + nIso + '   ·   Perez ' + nPz);
-console.log('   decisiones que difieren: ' + disc.length + '  (' + pctDisc.toFixed(1) + ' %)');
-console.log('   |r_iso − r_perez|: máx ' + gapMax.toFixed(3) + ' · media ' + gapMed.toFixed(3) +
-  '   (la banda de histéresis mide 0,02)');
+console.log('   entra en PLANO:  poaAt ' + nIso + '   ·   oráculo ' + nPz);
+console.log('   decisiones que difieren: ' + disc.length + '  (' + pctDisc.toFixed(2) + ' %)');
+console.log('   |r_poaAt − r_oráculo|: máx ' + gapMax.toFixed(6) + ' · media ' + gapMed.toFixed(6));
+/* Antes de GEM-CIELO-02 esto medía un hueco de 8,43 % de decisiones y lo fijaba
+   por arriba para que no creciera. Portado Perez el hueco es CERO, así que el
+   listón se da la vuelta: ya no acota cuánto puede separarse, exige que NO se
+   separe. Dos textos distintos, la misma física — que es lo que pide el espejo. */
+check('ninguna de las ' + malla.length + ' condiciones decide distinto (' + disc.length + ')',
+  disc.length === 0, disc.length + ' desacuerdos: el porte de Perez está incompleto');
+check('y el cociente coincide hasta ' + gapMax.toExponential(1) + ' (≤ 1e-9)',
+  gapMax <= 1e-9, gapMax.toExponential(3));
 
-const soloIso = disc.filter(m => m.rIso >= ENTRA).length;
-const soloPz = disc.filter(m => m.rPz >= ENTRA).length;
-const ktMax = Math.max(...disc.map(m => m.kt));
-console.log('   y va en las DOS direcciones: la isótropa aplana y Perez no en ' + soloIso +
-  ' · al revés en ' + soloPz);
-console.log('   todos con kt ≤ ' + ktMax.toFixed(2) + ' — cielo cerrado, que es donde vive la política');
-/* Los listones van POR ENCIMA de lo medido hoy y CERCA: no son un objetivo, son
-   una alarma de que la separación CRECE. Si alguien porta Perez al gemelo se
-   desploman, y entonces hay que apretarlos — igual que en CENTINELA-01. */
-check('la separación de decisión no ha crecido (' + pctDisc.toFixed(2) + ' % ≤ 12 %)',
-  pctDisc <= 12, pctDisc.toFixed(2) + ' %');
-/* Lo que convierte esto en un hallazgo y no en ruido: el hueco MEDIO del
-   cociente es mayor que la banda de histéresis entera sobre la que la política
-   está afinada. O sea que no es un temblor dentro del margen — mueve la
-   decisión. */
-check('el hueco medio (' + gapMed.toFixed(4) + ') SUPERA la banda de histéresis (0,0200): ×' +
-  (gapMed / 0.02).toFixed(1), gapMed > 0.02 && gapMed <= 0.08,
-  gapMed.toFixed(4) + ' contra 0,0200');
-check('el p95 del hueco es ' + (gapP95 / 0.02).toFixed(1) + '× la banda (' + gapP95.toFixed(4) + ')',
-  gapP95 > 0.02 && gapP95 <= 0.30, gapP95.toFixed(4));
-/* El desacuerdo NO es sistemático en un sentido: si lo fuera bastaría un sesgo
-   constante para taparlo, y no basta. Van los dos sentidos. */
-check('el desacuerdo va en las dos direcciones (' + soloIso + ' / ' + soloPz + ')',
-  soloIso > 0 && soloPz > 0);
-check('y está confinado al cielo CERRADO (kt ≤ ' + ktMax.toFixed(2) + ' ≤ 0,45)',
-  ktMax <= 0.45, 'kt máximo con desacuerdo ' + ktMax.toFixed(3));
-
-console.log('\n3) y en cielo DESPEJADO la separación es de energía, no de decisión');
+console.log('\n3) el circunsolar está DENTRO, que era el 3,67 % que faltaba');
 {
+  /* La prueba de que el porte sigue puesto no es que Perez y Perez coincidan
+     —eso lo haría también si alguien revirtiera las DOS copias a la vez—, sino
+     que `poaAt` está POR ENCIMA de un cielo isótropo en la medida conocida. La
+     isótropa se calcula aquí, y es literalmente el término que se sustituyó. */
   const claros = malla.filter(m => m.kt >= 0.70);
-  const rel = claros.map(m => (m.iT - m.pT) / m.pT);
-  const med = rel.reduce((a, b) => a + b, 0) / rel.length;
-  const discClaro = claros.filter(m => (m.rIso >= ENTRA) !== (m.rPz >= ENTRA)).length;
-  console.log('   kt ≥ 0,70: ' + claros.length + ' pasos · la isótropa da ' +
-    (100 * med).toFixed(2) + ' % de POA (se deja el circunsolar)');
-  check('con cielo claro casi no cambia la DECISIÓN (' + discClaro + ' de ' + claros.length + ')',
-    discClaro / claros.length < 0.15, discClaro + '/' + claros.length);
-  check('pero sí la ENERGÍA, y siempre por debajo (' + (100 * med).toFixed(2) + ' %)',
-    med < 0 && med > -0.15, (100 * med).toFixed(2) + ' %');
+  let suma = 0;
+  for (const m of claros) {
+    const z = 90 - m.elev, e0 = 1367, ghi = e0 * Math.cos(z * D2R) * m.kt;
+    const dhi = ghi * erbsKd(m.kt), bh = ghi - dhi;
+    const azG = m.azS * D2R, el = m.elev * D2R;
+    const R = m.th * D2R, sx = Math.cos(el) * Math.sin(azG), sz = Math.sin(el);
+    const cosAOI = Math.max(0, sx * Math.sin(R) + sz * Math.cos(R));
+    const cb = Math.cos(Math.abs(R));
+    const iso = Math.max(0, bh) * cosAOI / Math.max(Math.sin(el), 0.087) +
+                Math.max(0, dhi) * (1 + cb) / 2 + ALB * Math.max(0, ghi) * (1 - cb) / 2;
+    suma += (m.poaAtT - iso) / iso;
+  }
+  const med = 100 * suma / claros.length;
+  console.log('   kt ≥ 0,70: ' + claros.length + ' pasos · `poaAt` da ' + med.toFixed(2) +
+    ' % más que el cielo isótropo que había antes');
+  check('el circunsolar aporta lo medido en GEM-CIELO-01 (+' + med.toFixed(2) + ' %, esperado ~+3,8 %)',
+    med > 3.0 && med < 4.5, med.toFixed(3) + ' %');
 }
 
 console.log('\n' + (ko ? 'FALLOS: ' + ko + ' (de ' + (ok + ko) + ')'
-  : 'OK — ' + ok + '/' + ok + ' · la separación está medida y fijada, no corregida'));
+  : 'OK — ' + ok + '/' + ok + ' · `poaAt` es Perez, y lo dice pvlib'));
 process.exit(ko ? 1 : 0);

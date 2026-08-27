@@ -22,17 +22,18 @@
    —cRateSafeLFP, hotDerate, poaAt— esperan a que el core publique su contraparte, y el
    arnés lo imprime en cada ejecución en vez de dejarlo implícito.
 
-   PERO OJO CON `poaAt` (GEM-CIELO-01): esa exención es por FUNCIÓN y `poaAt` tiene DOS
-   usos. Como auxiliar de disponibilidad de batería, cierto: su contraparte solo está en
-   `tcu_availability`, sin mergear. Como PUNTUADOR de la política de difusa —`TCU.poaDe`
-   en planta.js, que es de donde sale el ángulo al que apunta el seguidor— su contraparte
-   SÍ está en `main`: `poa_switch_flat_mode` puntúa con `_poa_perez_for_theta`. O sea que
-   el core decide con Perez y aquí se decide con una transposición ISÓTROPA, y la mitad
+   `poaAt` YA NO ESTÁ SIN VIGILAR (GEM-CIELO-01 → 02). La exención era por FUNCIÓN y
+   `poaAt` tiene DOS usos: como auxiliar de disponibilidad de batería su contraparte
+   sigue solo en `tcu_availability`, sin mergear; pero como PUNTUADOR de la política de
+   difusa —`TCU.poaDe` en planta.js, de donde sale el ángulo al que apunta el seguidor—
+   su contraparte SÍ está en `main` (`poa_switch_flat_mode` → `_poa_perez_for_theta`).
+   Ahí se decidía con una transposición ISÓTROPA contra el Perez del core, y la mitad
    vigilable llevaba sin vigilarse porque la exención tapaba la función entera.
-   `tools/carea_difusa.mjs` mide esa separación y la fija: hoy 8,4 % de las condiciones de
-   cielo cerrado deciden distinto, con el hueco medio del cociente a ×2 de la banda de
-   histéresis. NO está corregida — portar Perez aquí es una decisión de física, no de
-   arnés, y va aparte.
+   Portado Perez, `tools/carea_difusa.mjs` la carea contra 27 anclas de pvlib —verdad
+   EXTERNA, no otro espejo— y contra una implementación independiente sobre 6930
+   condiciones. Lo que sigue sin golden del core es el uso de batería, y por eso
+   `carea_fisica.mjs` la mantiene en su lista: son dos coberturas distintas y conviene
+   que no se confundan.
 */
 var FISICA = {
  /* ── constantes medidas (tcu.py) ── */
@@ -143,13 +144,66 @@ function etaCharger(G){
   var i = 0; while (i < ETA_G.length-2 && ETA_G[i+1] < g) i++;
   return ETA_V[i] + (ETA_V[i+1]-ETA_V[i]) * ((g-ETA_G[i])/(ETA_G[i+1]-ETA_G[i]));
 }
-function poaAt(Rdeg,el,az,bh,dh,gh){
+/* ── Perez 1990 (allsitescomposite1990): la difusa del cielo NO es isótropa ──
+   `poaAt` repartía la DHI con `dh·(1+cos β)/2`, o sea cielo uniforme. El core
+   transpone esa misma difusa con Perez (`_poa_perez_for_theta`, poa.py), y no
+   es un detalle de precisión: `TCU.poaDe` usa esta función para PUNTUAR los
+   candidatos de la política de difusa, así que de aquí sale el ángulo al que
+   apunta el seguidor. Medido antes del porte (GEM-CIELO-01): 8,43 % de las
+   condiciones de cielo cerrado decidían distinto que el core, con el hueco
+   medio del cociente a ×2 de la banda de histéresis, y −3,67 % de POA con
+   cielo claro por dejarse el circunsolar.
+
+   Se porta SOLO el término de cielo. El haz y el albedo del suelo ya eran los
+   del canon y se quedan igual — un porte que aprovecha para tocar el haz sería
+   otra incidencia metida de matute. */
+var PEREZ_F = [
+  [1.065,-0.008, 0.588,-0.062,-0.060, 0.072,-0.022],
+  [1.230, 0.130, 0.683,-0.151,-0.019, 0.066,-0.029],
+  [1.500, 0.330, 0.487,-0.221, 0.055,-0.064,-0.026],
+  [1.950, 0.568, 0.187,-0.295, 0.109,-0.152,-0.014],
+  [2.800, 0.873,-0.392,-0.362, 0.226,-0.462, 0.001],
+  [4.500, 1.132,-1.237,-0.412, 0.288,-0.823, 0.056],
+  [6.200, 1.060,-1.600,-0.359, 0.264,-1.127, 0.131],
+  [Infinity,0.678,-0.327,-0.250,0.156,-1.377, 0.251]
+];
+/* masa de aire relativa de Kasten-Young 1989, la que usa el core */
+function airmass(zenDeg){
+  if(zenDeg>=90)return NaN;
+  return 1/(Math.cos(zenDeg*D2R)+0.50572*Math.pow(96.07995-zenDeg,-1.6364));
+}
+/* irradiancia extraterrestre del día. Vale 1367 si no se pasa el día, y eso
+   NO es gratis: medido, hasta 2,39 % de desviación en el peor caso (perihelio,
+   sol bajo, cielo medio). Por eso los dos llamantes —bateria.html y planta.js—
+   sí lo pasan; el defecto es para quien llame sin fecha. */
+function e0De(diaN){
+  return (diaN==null)?1367:1367*(1+0.033*Math.cos(2*Math.PI*diaN/365));
+}
+function perezCielo(dh,dni,e0,zenDeg,cosAOI,tiltDeg){
+  if(!(dh>0))return 0;
+  var am=airmass(zenDeg); if(!isFinite(am))return 0;
+  var z=zenDeg*D2R, k=1.041;
+  var eps=((dh+Math.max(0,dni))/dh+k*z*z*z)/(1+k*z*z*z);
+  var delta=dh*am/Math.max(e0,1);
+  var r=PEREZ_F[PEREZ_F.length-1];
+  for(var i=0;i<PEREZ_F.length;i++){ if(eps<PEREZ_F[i][0]){r=PEREZ_F[i];break;} }
+  var F1=Math.max(0,r[1]+r[2]*delta+r[3]*z), F2=r[4]+r[5]*delta+r[6]*z;
+  var A=Math.max(0,cosAOI), B=Math.max(Math.cos(85*D2R),Math.cos(z));
+  var cb=Math.cos(tiltDeg*D2R), sb=Math.sin(tiltDeg*D2R);
+  return dh*0.5*(1-F1)*(1+cb) + dh*F1*A/B + dh*F2*sb;   /* isótropa + circunsolar + horizonte */
+}
+function poaAt(Rdeg,el,az,bh,dh,gh,diaN){
   if(el<=0)return 0;
   var R=Rdeg*D2R, sx=Math.cos(el)*Math.sin(az), sz=Math.sin(el);
   var cosAOI=Math.max(0,sx*Math.sin(R)+sz*Math.cos(R));
-  var rb=cosAOI/Math.max(Math.sin(el),0.087);
-  var cb=Math.cos(Math.abs(R));
-  return Math.max(0,bh)*rb + Math.max(0,dh)*(1+cb)/2 + ALBEDO*Math.max(0,gh)*(1-cb)/2;
+  /* el suelo del seno es el de siempre: por debajo de 5° de elevación, deducir
+     la DNI de la horizontal amplifica el ruido sin límite. Se usa la MISMA DNI
+     para el haz y para Perez, que si no el ε del cielo describiría otro sol. */
+  var senEl=Math.max(Math.sin(el),0.087), dni=Math.max(0,bh)/senEl;
+  var cb=Math.cos(Math.abs(R)), zenDeg=90-el/D2R;
+  return dni*cosAOI
+       + perezCielo(dh,dni,e0De(diaN),zenDeg,cosAOI,Math.abs(Rdeg))
+       + ALBEDO*Math.max(0,gh)*(1-cb)/2;
 }
 function motorW(ang){
   var a=Math.min(MOTOR_ANG[MOTOR_ANG.length-1],Math.abs(ang||0)), i=0;
