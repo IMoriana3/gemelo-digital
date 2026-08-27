@@ -357,14 +357,29 @@ function trackAngleFrom(el,az){
   return Math.max(-AXIS_MAX,Math.min(AXIS_MAX,Rbt/D2R));
 }
 /* Transposición isotrópica: POA en el plano girado R (grados) */
-function poaAt(Rdeg,el,az,bh,dh,gh){
+/* ── Perez 1990: la difusa del cielo NO es isótropa (GEM-CIELO-02) ──
+   El reparto de la DHI lo pone el ESPEJO (sim/fisica.js), que el arnés carea
+   contra 27 anclas de pvlib. Aquí NO se copia: `sim/fisica.js` es un script
+   clásico y sus `PEREZ_F`, `airmass`, `e0De` y `perezCielo` ya están en el
+   ámbito global de esta página, así que copiarlos los PISARÍA — dos textos que
+   hoy coinciden y mañana no, y con `airmass` de nombre global. Se llaman.
+
+   Lo único que esta página pone de su parte es el ALBEDO, que aquí SÍ es un
+   parámetro editable en caliente (panel «Energía») mientras que el espejo usa
+   el del canon. Por eso `poaAt` vive aquí y el cielo no. */
+function poaAt(Rdeg,el,az,bh,dh,gh,diaN){
   if(el<=0)return 0;
   var R=Rdeg*D2R, sx=Math.cos(el)*Math.sin(az), sz=Math.sin(el);
   var cosAOI=Math.max(0,sx*Math.sin(R)+sz*Math.cos(R));
-  var rb=cosAOI/Math.max(Math.sin(el),0.087);
-  var cb=Math.cos(Math.abs(R));
-  return Math.max(0,bh)*rb + Math.max(0,dh)*(1+cb)/2 + ALBEDO*Math.max(0,gh)*(1-cb)/2;
+  /* misma DNI para el haz y para el ε de Perez, con el suelo del seno a 5°:
+     si no, el cielo describiría otro sol que el haz */
+  var dni=Math.max(0,bh)/Math.max(Math.sin(el),0.087);
+  var cb=Math.cos(Math.abs(R)), zenDeg=90-el/D2R;
+  return dni*cosAOI
+       + FISICA.perezCielo(dh,dni,FISICA.e0De(diaN),zenDeg,cosAOI,Math.abs(Rdeg))
+       + ALBEDO*Math.max(0,gh)*(1-cb)/2;
 }
+
 
 /* ═══════════ Rendimiento del regulador de carga η(G) — PS26002_RevA ═══════════
    η = 0,96·(1 − e^(−G/100)) con η(0)=0, interpolada sobre los puntos digitalizados.
@@ -594,7 +609,7 @@ function simulate(meteo,prof,loc,soc0,opts){
     var poaChg;
     if(opts.mountTilt!=null) poaChg=poaFixed(opts.mountTilt,sun.el,sun.az,bh,m.dhi,m.ghi,loc.lat);
     else if(target===trackPos && m.poa!=null) poaChg=m.poa;
-    else if(sun.el>0 && m.dhi>0) poaChg=poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi);
+    else if(sun.el>0 && m.dhi>0) poaChg=poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi,N);
     else poaChg=(m.poa!=null)?m.poa:m.ghi;
     var chgWh=0, cRateNow=0;
     if(day && tEff>=opts.tMin && poaChg>=opts.poaMin){   /* cut-in del regulador: bajo el umbral no carga */
@@ -632,20 +647,20 @@ function simulate(meteo,prof,loc,soc0,opts){
     /* — Producción perdida: POA seguimiento vs POA defensa en horas no disponibles — */
     var poaPot=0, poaLost=0, poaReal=0;
     if(sun.el>0){
-      poaPot=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
+      poaPot=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi,N);
       /* POA en la posición REAL del seguidor: recoge TODA la pérdida de producción de la
          planta — defensa por batería, abanderamiento y el seguimiento grueso del winter
          mode —, no sólo la imputable a la batería. */
       if(Math.abs(target-trackPos)<0.01) poaReal=poaPot;
       else{
-        var pIdeal=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
-        poaReal=pIdeal>0?poaPot*(poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi)/pIdeal):0;
+        var pIdeal=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi,N);
+        poaReal=pIdeal>0?poaPot*(poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi,N)/pIdeal):0;
       }
       if(parked && !stow){                        /* pérdida por batería; el abanderamiento no cuenta */
         /* La fracción perdida se calcula SIEMPRE con el mismo modelo de transposición y se
            aplica al POA potencial real: así no se mezcla el GlobEff medido con el calculado. */
-        var poaTrkM=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi);
-        var poaDefM=poaAt(opts.defPos!=null?opts.defPos:DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi);
+        var poaTrkM=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi,N);
+        var poaDefM=poaAt(opts.defPos!=null?opts.defPos:DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi,N);
         var fracLost=poaTrkM>0?Math.max(0,(poaTrkM-poaDefM)/poaTrkM):0;
         poaLost=poaPot*fracLost;
       }
