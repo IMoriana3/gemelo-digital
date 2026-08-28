@@ -350,6 +350,8 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `../tools/carea_fisica.mjs` | **arnés**: carea `fisica.js` contra los goldens del core (4/7 funciones hoy, y lo imprime) |
 | `../tools/carea_difusa.mjs` | **arnés**: carea `poaAt` —la transposición con la que se PUNTÚA la política de difusa— contra 27 anclas de pvlib y contra una implementación independiente sobre 6930 condiciones |
 | `../tools/prueba_bateria.mjs` | banco de `bateria.html`: que el espejo NO derrama al ámbito global, que abre sin errores, que su `poaAt` da Perez en el navegador y que sus 21 canónicos salen del espejo |
+| `../tools/carea_resultado.mjs` | **arnés de cierre**: corre el MISMO día en el gemelo y en el core (`run_tcu_sim`) con las mismas entradas y falla si se separan — θ, POA, SOC y consumo. Lo pedía la hoja de ruta del portal: «hoy el cotejo cubre las constantes, no el resultado» |
+| `../tools/carea_resultado.py` | el lado Python del anterior: recibe el volcado del gemelo por stdin y devuelve lo que el core saca con esas mismas entradas |
 | `../tools/ambito.mjs` | qué módulos de una página van **sin envolver** en IIFE, o sea cuáles derraman sus declaraciones al ámbito global. Lo usa el banco del simulador |
 | `../bateria.html` | la ficha de batería — el único fichero que MEZCLA el espejo con código propio, por eso tiene banco aparte |
 
@@ -358,6 +360,7 @@ node sim/prueba.mjs           # física + codificación de registros
 node tools/prueba_simulador.mjs # la interfaz (necesita playwright-core y Chromium)
 node tools/prueba_bateria.mjs   # bateria.html: pisado del espejo + Perez en el navegador
 node tools/carea_difusa.mjs     # poaAt contra pvlib, tras tocar la transposición
+node tools/carea_resultado.mjs  # el día entero contra el core (necesita el clon de SolarGPT al lado)
 node tools/extrae_plantas.mjs   # si cambia un layout del DWG
 node tools/extrae_mapa.mjs    # si cambia la ficha del mapa
 node tools/carea_fisica.mjs  # si cambia la gestión de batería en SolarGPT
