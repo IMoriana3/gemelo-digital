@@ -385,6 +385,12 @@
     return !!(p.spin || p.twin);                        // del slew, en la gemela solo las twin
   }
   S.SOLO_OESTE = SOLO_OESTE;
+  /* Y la regla, no solo la lista. `instancePlan` describe UNA viga; quien dibuja
+     un campo entero instancia ese plan por FILA, y ahí vuelve a hacer falta
+     saber qué pieza va en la gemela y cuál no —si no, cada fila se lleva su TCU,
+     su seccionador y su motor, y una bífila se dibuja como dos monofilas—. La
+     regla es esta, y es una. */
+  S.esDeEstaViga = esDeEstaViga;
 
   /* ====================================================================
    * LOS PILOTES: dónde se apoya el tubo a lo largo de su eje
