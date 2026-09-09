@@ -5,12 +5,14 @@
    "_que_es": "Cartera de proyectos con coordenadas. GENERADO por tools/genera_plantas.mjs desde proyectos/cartera-tabla.html (SEED) y los *_layout.json de cobertura-zigbee. NO editar a mano: se rellena lat/lon EN LA CARTERA y se regenera.",
    "_fuentes": {
     "cartera": "proyectos/cartera-tabla.html · const SEED",
+    "emparejado": "cobertura-zigbee/plantas_indice.json · código de cartera y huso por layout",
     "layouts": "cobertura-zigbee/<planta>_layout.json · clat/clon (centroide real)"
    },
-   "n_total": 22,
-   "n_con_coordenadas": 13,
+   "n_total": 23,
+   "n_con_coordenadas": 14,
    "n_sin_coordenadas": 9,
    "n_homonimos": 2,
+   "n_fuera_de_cartera": 1,
    "plantas": [
     {
      "num": "23003",
@@ -26,6 +28,7 @@
      "lat": 41.57634197288531,
      "lon": -0.7981388191435679,
      "fuente": "layout:elburgo",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -44,6 +47,7 @@
      "lat": 41.2269358,
      "lon": 0.3241528,
      "fuente": "layout:fayon",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -62,6 +66,7 @@
      "lat": -16.5957735,
      "lon": -71.8064406,
      "fuente": "layout:sanjose",
+     "en_cartera": true,
      "tz": -5,
      "dst": false,
      "homonimo_de": null
@@ -80,6 +85,7 @@
      "lat": 33.879238,
      "lon": 9.8736462,
      "fuente": "layout:tunez",
+     "en_cartera": true,
      "tz": 1,
      "dst": false,
      "homonimo_de": [
@@ -100,6 +106,7 @@
      "lat": 39.1182081,
      "lon": -1.1598527,
      "fuente": "layout:ayora",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -118,6 +125,7 @@
      "lat": 41.254,
      "lon": 16.351,
      "fuente": "pendiente",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -136,6 +144,7 @@
      "lat": 41.5156065,
      "lon": 15.2676234,
      "fuente": "layout:bagnarelli",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -154,6 +163,7 @@
      "lat": 42.3205897,
      "lon": -5.5998076,
      "fuente": "layout:paramo",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -172,6 +182,7 @@
      "lat": 38.8411992,
      "lon": -6.9996917,
      "fuente": "layout:polvorin",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -190,6 +201,7 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -208,6 +220,7 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -226,6 +239,7 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -244,6 +258,7 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -262,6 +277,7 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -276,10 +292,11 @@
      "estado_pem": "Sin comenzar",
      "alim_tcu": "Selfpowered",
      "bateria_tcu": "6Ah",
-     "trk_total": null,
+     "trk_total": 730,
      "lat": 37.3755148,
      "lon": 14.9043744,
      "fuente": "layout:benante",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -294,10 +311,11 @@
      "estado_pem": "Sin comenzar",
      "alim_tcu": "Selfpowered",
      "bateria_tcu": "6Ah",
-     "trk_total": null,
+     "trk_total": 1476,
      "lat": 37.3710751,
      "lon": 14.8910762,
      "fuente": "layout:panbianco",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -316,6 +334,7 @@
      "lat": 39.21,
      "lon": -8.774,
      "fuente": "pendiente",
+     "en_cartera": true,
      "tz": 0,
      "dst": true,
      "homonimo_de": null
@@ -334,6 +353,7 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -352,6 +372,7 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -370,6 +391,7 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
@@ -388,6 +410,7 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "en_cartera": true,
      "tz": 1,
      "dst": false,
      "homonimo_de": [
@@ -408,9 +431,30 @@
      "lat": 41.85,
      "lon": -0.15,
      "fuente": "pendiente",
+     "en_cartera": true,
      "tz": 1,
      "dst": true,
      "homonimo_de": null
+    },
+    {
+     "num": null,
+     "num_cartera": null,
+     "proyecto": "El Naranjo Dicayagua",
+     "emplazamiento": null,
+     "provincia": null,
+     "pais": null,
+     "estado_pem": "oferta",
+     "alim_tcu": null,
+     "bateria_tcu": null,
+     "trk_total": 5493,
+     "lat": 19.4229387,
+     "lon": -70.7723283,
+     "fuente": "layout:dicayagua",
+     "tz": -4,
+     "dst": false,
+     "homonimo_de": null,
+     "en_cartera": false,
+     "nota": "no figura en el SEED de la cartera; si se da de alta, ponerle aquí su número"
     }
    ]
   };
@@ -435,6 +479,13 @@
        como duplicado y simule uno creyendo que es el otro. */
     var aviso = p.homonimo_de && p.homonimo_de.length
               ? ' — otro proyecto, no es el ' + p.homonimo_de.join(' ni el ') : '';
+    /* Las que tienen layout pero no ficha en la cartera no llevan número, y se
+       dice por qué: si no, parecen un proyecto al que se le ha perdido el suyo. */
+    if (p.en_cartera === false) {
+      return p.proyecto + (donde ? ' (' + donde + ')' : '')
+           + ' — con layout, sin ficha en la cartera'
+           + (p.estado_pem ? ' (' + p.estado_pem + ')' : '');
+    }
     return p.num + ' · ' + p.proyecto + (donde ? ' (' + donde + ')' : '') + aviso;
   };
   if (typeof window !== "undefined") window.CARTERA = CARTERA;
