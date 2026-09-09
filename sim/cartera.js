@@ -26,6 +26,8 @@
      "lat": 41.57634197288531,
      "lon": -0.7981388191435679,
      "fuente": "layout:elburgo",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -42,6 +44,8 @@
      "lat": 41.2269358,
      "lon": 0.3241528,
      "fuente": "layout:fayon",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -58,6 +62,8 @@
      "lat": -16.5957735,
      "lon": -71.8064406,
      "fuente": "layout:sanjose",
+     "tz": -5,
+     "dst": false,
      "homonimo_de": null
     },
     {
@@ -74,6 +80,8 @@
      "lat": 33.879238,
      "lon": 9.8736462,
      "fuente": "layout:tunez",
+     "tz": 1,
+     "dst": false,
      "homonimo_de": [
       "26322"
      ]
@@ -92,6 +100,8 @@
      "lat": 39.1182081,
      "lon": -1.1598527,
      "fuente": "layout:ayora",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -107,7 +117,9 @@
      "trk_total": 19,
      "lat": 41.254,
      "lon": 16.351,
-     "fuente": "gemelo:LOCS",
+     "fuente": "pendiente",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -124,6 +136,8 @@
      "lat": 41.5156065,
      "lon": 15.2676234,
      "fuente": "layout:bagnarelli",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -140,6 +154,8 @@
      "lat": 42.3205897,
      "lon": -5.5998076,
      "fuente": "layout:paramo",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -156,6 +172,8 @@
      "lat": 38.8411992,
      "lon": -6.9996917,
      "fuente": "layout:polvorin",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -172,6 +190,8 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -188,6 +208,8 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -204,6 +226,8 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -220,6 +244,8 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -236,6 +262,8 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -252,6 +280,8 @@
      "lat": 37.3755148,
      "lon": 14.9043744,
      "fuente": "layout:benante",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -268,6 +298,8 @@
      "lat": 37.3710751,
      "lon": 14.8910762,
      "fuente": "layout:panbianco",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -283,7 +315,9 @@
      "trk_total": null,
      "lat": 39.21,
      "lon": -8.774,
-     "fuente": "gemelo:LOCS",
+     "fuente": "pendiente",
+     "tz": 0,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -300,6 +334,8 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -316,6 +352,8 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -332,6 +370,8 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     },
     {
@@ -348,6 +388,8 @@
      "lat": null,
      "lon": null,
      "fuente": null,
+     "tz": 1,
+     "dst": false,
      "homonimo_de": [
       "24021"
      ]
@@ -365,10 +407,35 @@
      "trk_total": null,
      "lat": 41.85,
      "lon": -0.15,
-     "fuente": "gemelo:LOCS",
+     "fuente": "pendiente",
+     "tz": 1,
+     "dst": true,
      "homonimo_de": null
     }
    ]
+  };
+
+  /* Rótulo canónico de una planta. Lo consumen index.html y bateria.html; no se
+     escribe a mano en ninguna de las dos. */
+  CARTERA.PAIS_ISO = {'España':'ES','Italia':'IT','Portugal':'PT','Perú':'PE','Túnez':'TN'};
+  CARTERA.rotulo = function (p) {
+    var partes = [], vistos = {};
+    /* «Zaragoza, Zaragoza» no, y tampoco «El polvorin + Higueras (El polvorin +
+       Higueras)»: se descarta lo que ya dice el nombre del proyecto. */
+    var proy = (p.proyecto || '').toLowerCase();
+    [p.emplazamiento, p.provincia].forEach(function (x) {
+      if (!x || vistos[x]) return;
+      if (proy.indexOf(x.toLowerCase()) >= 0) return;
+      vistos[x] = 1; partes.push(x);
+    });
+    var iso = CARTERA.PAIS_ISO[p.pais] || p.pais || '';
+    var donde = partes.concat(iso ? [iso] : []).join(', ');
+    /* Dos proyectos con el mismo nombre son dos PLANTAS: la cartera tiene dos
+       «Túnez», el 24021 y el 26322. Se dice en el rótulo para que nadie los lea
+       como duplicado y simule uno creyendo que es el otro. */
+    var aviso = p.homonimo_de && p.homonimo_de.length
+              ? ' — otro proyecto, no es el ' + p.homonimo_de.join(' ni el ') : '';
+    return p.num + ' · ' + p.proyecto + (donde ? ' (' + donde + ')' : '') + aviso;
   };
   if (typeof window !== "undefined") window.CARTERA = CARTERA;
   if (typeof module !== "undefined") module.exports = CARTERA;

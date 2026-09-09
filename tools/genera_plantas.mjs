@@ -18,11 +18,11 @@
                         MANDA cuando existe: sale de las posiciones reales de los
                         seguidores, mientras que la cartera es una transcripción.
      · "cartera"      — lat/lon rellenados en la cartera. Respaldo.
-     · "gemelo:LOCS"  — la lista de emplazamientos de `index.html`, a 3 decimales
-                        (~110 m) y de procedencia no declarada: puede ser el
+     · "pendiente"    — venían del `LOCS` a mano de index.html, a 3 decimales
+                        (~110 m) y sin procedencia declarada: pueden ser el
                         centroide del pueblo y no el de la planta. Es lo más
-                        grueso de las tres y por eso va la ÚLTIMA y etiquetada.
-                        PENDIENTE de confirmar con quien las puso.
+                        grueso de las tres, va la ÚLTIMA y etiquetada, y su sitio
+                        definitivo es la cartera. PENDIENTE de confirmar.
      · null           — SIN COORDENADAS. La planta aparece en el desplegable pero
                         no se puede simular, y el desplegable dice por qué.
 
@@ -62,18 +62,34 @@ const CHECK = args.includes('--check');
    proyecto, no se sustituyen. */
 const DESTINO = join(RAIZ, 'sim/cartera.js');
 
-/* Mapa nº-de-proyecto → clave en el LOCS de index.html. También explícito: casar
-   por nombre entre catálogos es lo que puso a Benante en Panbianco, y da igual que
-   aquí los nombres coincidan exactamente — la coincidencia no es la decisión, la
-   decisión es esta tabla. Son las únicas tres de la cartera que aparecen ahí.
+/* Coordenadas que NO están en la cartera ni en un layout, y que hasta ahora vivían
+   en el `LOCS` a mano de index.html. Se traen aquí porque index.html pasa a CONSUMIR
+   este catálogo: si siguiera siendo su fuente, el generador leería de quien lee del
+   generador. Alguien tiene que tener el dato primero, y mientras la cartera no lo
+   lleve, lo tiene esta tabla.
 
-   OJO CON LA PRECISIÓN: 3 decimales y sin decir de dónde salen. Sirven para
-   simular el recurso solar —a 110 m la irradiancia no cambia— pero NO son el
-   centroide de la planta como sí lo son los layouts. Va dicho en `fuente`. */
-const GEMELO_LOCS = {
-  24024: 'Alconadre · Huesca (ES)',
-  25032: 'Trani · Apulia (IT)',
-  26009: 'Valle de Moinhos (PT)',
+   OJO CON LA PRECISIÓN: 3 decimales (~110 m) y sin procedencia declarada — pueden
+   ser el centroide del pueblo y no el de la planta. Sirven para el recurso solar;
+   no para llamarlas «la planta». Va dicho en `fuente` y en el tooltip.
+
+   SITIO PROVISIONAL: en cuanto estas tres tengan lat/lon en la cartera, esta tabla
+   se borra y se toman de allí, que es donde deben vivir. */
+const COORD_PENDIENTES = {
+  24024: { lat: 41.85,  lon: -0.15   },   /* Alconadre · Huesca */
+  25032: { lat: 41.254, lon: 16.351  },   /* Trani · Apulia */
+  26009: { lat: 39.210, lon: -8.774  },   /* Valle de Moinhos */
+};
+
+/* Huso y horario de verano por PAÍS. No es una suposición: son los nueve
+   emplazamientos que index.html tenía a mano, y en los nueve `tz` y `dst` quedan
+   determinados por el país sin una sola excepción — comprobado antes de derivarlos.
+   Y coinciden con la realidad: la UE aplica horario de verano; Túnez y Perú no. */
+const HUSO = {
+  'España':   { tz: 1,  dst: true  },
+  'Italia':   { tz: 1,  dst: true  },
+  'Portugal': { tz: 0,  dst: true  },
+  'Túnez':    { tz: 1,  dst: false },
+  'Perú':     { tz: -5, dst: false },
 };
 
 /* Mapa nº-de-proyecto → fichero de layout. EXPLÍCITO a propósito: ver cabecera. */
@@ -108,19 +124,6 @@ function leeCartera() {
   return { seed: JSON.parse(m[1]), nproy: JSON.parse(n[1].replace(/'/g, '"')) };
 }
 
-/* Lee el LOCS de index.html. No se copian los números aquí: se PARSEAN de su
-   fichero, para que si alguien los corrige allí lleguen solos. */
-function leeGemeloLocs() {
-  const f = join(RAIZ, 'index.html');
-  if (!existsSync(f)) return {};
-  const m = readFileSync(f, 'utf8').match(/var LOCS\s*=\s*\[([\s\S]*?)\];/);
-  if (!m) return {};
-  const out = {};
-  for (const e of m[1].matchAll(/\{\s*n\s*:\s*"([^"]+)"\s*,\s*lat\s*:\s*(-?[\d.]+)\s*,\s*lon\s*:\s*(-?[\d.]+)/g))
-    out[e[1]] = { lat: parseFloat(e[2]), lon: parseFloat(e[3]) };
-  return out;
-}
-
 function leeLayout(nombre) {
   const f = join(COBERTURA, `${nombre}_layout.json`);
   if (!existsSync(f)) return null;
@@ -129,7 +132,6 @@ function leeLayout(nombre) {
 }
 
 const { seed, nproy } = leeCartera();
-const gemelo = leeGemeloLocs();
 const plantas = seed.map(p => {
   const num = p.num;
   /* PRECEDENCIA: el layout ANTES que la cartera, porque es el dato más fino — el
@@ -144,9 +146,8 @@ const plantas = seed.map(p => {
   if (c) { lat = c.lat; lon = c.lon; fuente = `layout:${nom}`; }
   else if (p.lat != null && p.lon != null) { lat = p.lat; lon = p.lon; fuente = 'cartera'; }
   else {
-    const clave = GEMELO_LOCS[num] ?? GEMELO_LOCS[String(num)];
-    const g = clave ? gemelo[clave] : null;
-    if (g) { lat = g.lat; lon = g.lon; fuente = 'gemelo:LOCS'; }
+    const g = COORD_PENDIENTES[num] ?? COORD_PENDIENTES[String(num)];
+    if (g) { lat = g.lat; lon = g.lon; fuente = 'pendiente'; }
   }
   const rotulo = nproy[String(num)] || String(num);
   return {
@@ -160,6 +161,11 @@ const plantas = seed.map(p => {
     alim_tcu: p.alim_tcu || null, bateria_tcu: p.bateria_tcu || null,
     trk_total: p.trk_total ?? null,
     lat: lat ?? null, lon: lon ?? null, fuente,
+    /* Huso y DST por país. `null` cuando el país no está en la tabla: quien
+       consuma cae a su propio defecto (index.html usa round(lon/15)) en vez de
+       recibir un huso inventado. */
+    tz: (HUSO[p.pais] || {}).tz ?? null,
+    dst: (HUSO[p.pais] || {}).dst ?? null,
     homonimo_de: null,      /* se rellena abajo, por dato */
   };
 });
@@ -199,11 +205,44 @@ const salida = {
   plantas,
 };
 
+/* EL RÓTULO TAMBIÉN LO PRODUCE EL CATÁLOGO.
+   `bateria.html` tenía su `_rotulo` a mano y al enchufar `index.html` estuve a
+   punto de escribir el segundo — con el aviso de homónimo perdido por el
+   camino, que es exactamente el fallo que ese aviso existe para evitar. Dos
+   páginas rotulando la misma planta de dos maneras es la misma enfermedad que
+   las dos listas de emplazamientos, un escalón más abajo. Viaja aquí, con los
+   datos que lo alimentan. */
+const ROTULO = `
+  /* Rótulo canónico de una planta. Lo consumen index.html y bateria.html; no se
+     escribe a mano en ninguna de las dos. */
+  CARTERA.PAIS_ISO = {'España':'ES','Italia':'IT','Portugal':'PT','Perú':'PE','Túnez':'TN'};
+  CARTERA.rotulo = function (p) {
+    var partes = [], vistos = {};
+    /* «Zaragoza, Zaragoza» no, y tampoco «El polvorin + Higueras (El polvorin +
+       Higueras)»: se descarta lo que ya dice el nombre del proyecto. */
+    var proy = (p.proyecto || '').toLowerCase();
+    [p.emplazamiento, p.provincia].forEach(function (x) {
+      if (!x || vistos[x]) return;
+      if (proy.indexOf(x.toLowerCase()) >= 0) return;
+      vistos[x] = 1; partes.push(x);
+    });
+    var iso = CARTERA.PAIS_ISO[p.pais] || p.pais || '';
+    var donde = partes.concat(iso ? [iso] : []).join(', ');
+    /* Dos proyectos con el mismo nombre son dos PLANTAS: la cartera tiene dos
+       «Túnez», el 24021 y el 26322. Se dice en el rótulo para que nadie los lea
+       como duplicado y simule uno creyendo que es el otro. */
+    var aviso = p.homonimo_de && p.homonimo_de.length
+              ? ' — otro proyecto, no es el ' + p.homonimo_de.join(' ni el ') : '';
+    return p.num + ' · ' + p.proyecto + (donde ? ' (' + donde + ')' : '') + aviso;
+  };
+`;
+
 const CUERPO = '/* GENERADO por tools/genera_plantas.mjs — NO editar a mano.\n'
   + '   Se rellena lat/lon EN LA CARTERA (proyectos/cartera-tabla.html) y se regenera. */\n'
   + '(function (raiz) {\n  var CARTERA = '
   + JSON.stringify(salida, null, 1).split('\n').join('\n  ')
-  + ';\n  if (typeof window !== "undefined") window.CARTERA = CARTERA;\n'
+  + ';\n' + ROTULO
+  + '  if (typeof window !== "undefined") window.CARTERA = CARTERA;\n'
   + '  if (typeof module !== "undefined") module.exports = CARTERA;\n})(this);\n';
 
 if (CHECK) {

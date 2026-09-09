@@ -239,19 +239,14 @@ var D2R=Math.PI/180;
    SALEN IGUAL en el desplegable, deshabilitadas y diciendo por qué. Omitirlas
    escondería el hueco; inventar la coordenada del pueblo sería peor todavía —
    un número verosímil sobre el sitio equivocado no se ve, y el hueco sí. */
-var PAIS_ISO={'España':'ES','Italia':'IT','Portugal':'PT','Perú':'PE','Túnez':'TN'};
+/* El rótulo lo PRODUCE el catálogo (CARTERA.rotulo, en sim/cartera.js). Aquí
+   estaba escrito a mano, y al enchufar index.html iba camino de existir dos
+   veces: la segunda copia ya se había dejado por el camino el aviso de
+   homónimo, que es justo lo que ese aviso evita. */
 function _rotulo(p){
-  var partes=[],vistos={};
-  [p.emplazamiento,p.provincia].forEach(function(x){          /* Zaragoza, Zaragoza no */
-    if(x&&x!==p.proyecto&&!vistos[x]){vistos[x]=1;partes.push(x);}});
-  var donde=partes.join(', ');
-  var iso=PAIS_ISO[p.pais]||p.pais||'';
-  /* Dos proyectos con el mismo nombre son dos PLANTAS: la cartera tiene dos
-     «Túnez», el 24021 y el 26322. Se dice en el rótulo para que nadie los lea
-     como duplicado y simule uno creyendo que es el otro. */
-  var aviso=p.homonimo_de&&p.homonimo_de.length
-            ? ' — otro proyecto, no es el '+p.homonimo_de.join(' ni el ') : '';
-  return p.num+' · '+p.proyecto+(donde||iso?' ('+[donde,iso].filter(Boolean).join(', ')+')':'')+aviso;
+  return (window.CARTERA&&window.CARTERA.rotulo)
+       ? window.CARTERA.rotulo(p)
+       : (p.num+' · '+p.proyecto);   /* sin catálogo no hay lista que rotular */
 }
 
 /* Sitios que NO son de la cartera: el del gemelo y los dos de los estudios SUNNER
