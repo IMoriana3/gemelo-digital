@@ -218,6 +218,7 @@
 </div>
 </div>
 
+<script src="sim/cartera.js"></script><!-- CARTERA DE PROYECTOS, generada por tools/genera_plantas.mjs -->
 <script src="sim/fisica.js"></script><!-- ESPEJO del core Python, careado por tools/carea_fisica.mjs -->
 <script src="sim/canon.js"></script><!-- cliente del motor local de SolarGPT (POST /tcubalance) -->
 <script src="sim/viento.js"></script><!-- abanderamiento: el MISMO módulo que el simulador de planta y terreno.html -->
@@ -228,18 +229,49 @@ function fmt(n,d){return n.toFixed(d==null?0:d).replace('.',',')}
 var D2R=Math.PI/180;
 
 /* ═══════════ Emplazamientos — plantas Factiun con nº de proyecto (coords de cobertura-zigbee/<planta>_layout.json) ═══════════ */
-var LOCS=[
- {n:"23003 · El Burgo I (Zaragoza, ES)",lat:41.5763,lon:-0.7981},
- {n:"24007 · Fayón (Zaragoza, ES)",lat:41.2269,lon:0.3242},
- {n:"24019 · San José (Arequipa, PE)",lat:-16.5958,lon:-71.8064},
- {n:"24021 · Túnez (Gabès, TN)",lat:33.8792,lon:9.8736},
- {n:"24025 · Ayora (Valencia, ES)",lat:39.1182,lon:-1.1599},
- {n:"24030 · Bagnarelli (Apulia, IT)",lat:41.5156,lon:15.2676},
- {n:"25019 · Páramo (León, ES)",lat:42.3206,lon:-5.5998},
- {n:"Gorraiz · Navarra (ES)",lat:42.81,lon:-1.58},
- {n:"Latina · Lacio (IT)",lat:41.468,lon:12.904},
- {n:"Jodhpur · Rajastán (IN)",lat:26.264,lon:73.008}
+/* ═══════════ Emplazamientos — LA CARTERA DE PROYECTOS, no una lista a mano ═══════════
+   Sale de sim/plantas.js, que genera tools/genera_plantas.mjs desde la cartera
+   (proyectos/cartera-tabla.html) y los layouts reales de cobertura-zigbee. Aquí
+   había diez sitios escritos a mano; tres listas a mano son tres listas que
+   divergen.
+
+   Cada planta arrastra la PROCEDENCIA de sus coordenadas, y las que no las tienen
+   SALEN IGUAL en el desplegable, deshabilitadas y diciendo por qué. Omitirlas
+   escondería el hueco; inventar la coordenada del pueblo sería peor todavía —
+   un número verosímil sobre el sitio equivocado no se ve, y el hueco sí. */
+var PAIS_ISO={'España':'ES','Italia':'IT','Portugal':'PT','Perú':'PE','Túnez':'TN'};
+function _rotulo(p){
+  var partes=[],vistos={};
+  [p.emplazamiento,p.provincia].forEach(function(x){          /* Zaragoza, Zaragoza no */
+    if(x&&x!==p.proyecto&&!vistos[x]){vistos[x]=1;partes.push(x);}});
+  var donde=partes.join(', ');
+  var iso=PAIS_ISO[p.pais]||p.pais||'';
+  /* Dos proyectos con el mismo nombre son dos PLANTAS: la cartera tiene dos
+     «Túnez», el 24021 y el 26322. Se dice en el rótulo para que nadie los lea
+     como duplicado y simule uno creyendo que es el otro. */
+  var aviso=p.homonimo_de&&p.homonimo_de.length
+            ? ' — otro proyecto, no es el '+p.homonimo_de.join(' ni el ') : '';
+  return p.num+' · '+p.proyecto+(donde||iso?' ('+[donde,iso].filter(Boolean).join(', ')+')':'')+aviso;
+}
+
+/* Sitios que NO son de la cartera: el del gemelo y los dos de los estudios SUNNER
+   que se usan de referencia. Van en su propio grupo para que nadie los cite como
+   proyecto. */
+var OTROS=[
+ {n:"Gorraiz · Navarra (ES) — sitio del gemelo",lat:42.81,lon:-1.58},
+ {n:"Latina · Lacio (IT) — estudio de referencia",lat:41.468,lon:12.904},
+ {n:"Jodhpur · Rajastán (IN) — estudio de referencia",lat:26.264,lon:73.008}
 ];
+
+/* OJO con el nombre: `CARTERA` (sim/cartera.js) son los 22 PROYECTOS; `PLANTAS_REALES`
+   (sim/plantas.js) es el PLANO, las posiciones de cada seguidor de las 11 plantas con
+   layout. Cosas distintas que se cruzan por el número de proyecto. */
+var CARTERA=(typeof window!=='undefined'&&window.CARTERA&&window.CARTERA.plantas)?window.CARTERA.plantas:[];
+var LOCS=CARTERA.filter(function(p){return p.lat!=null})
+                .map(function(p){return {n:_rotulo(p),lat:p.lat,lon:p.lon,
+                                         num:p.num,fuente:p.fuente,planta:p};})
+                .concat(OTROS);
+var SIN_COORD=CARTERA.filter(function(p){return p.lat==null});
 
 /* ═══════════ Perfiles TCU — 00.2t (medidos por Factiun, campaña "Consumos motor_02 @24V") ═══════════ */
 /* NO SE COPIAN: se leen del espejo (GEM-CONST-01). Esta página ya carga
@@ -889,8 +921,43 @@ function bandParked(g,f,rows,color,key){
 }
 
 /* ═══════════ UI ═══════════ */
-LOCS.forEach(function(L,i){$('loc').add(new Option(L.n,i))});
-$('loc').add(new Option('✏️ Personalizado — buscar / mapa / lat-lon…','custom'));
+(function(){
+  var sel=$('loc');
+  function grupo(t){var g=document.createElement('optgroup');g.label=t;sel.add(g);return g;}
+  var nCart=LOCS.length-OTROS.length;
+  if(nCart){
+    var g1=grupo('Cartera de proyectos · '+nCart+' con coordenadas');
+    LOCS.slice(0,nCart).forEach(function(L,i){
+      var o=new Option(L.n,i);
+      o.title='Coordenadas: '+(L.fuente==='cartera'?'de la cartera'
+              :'centroide del layout real ('+L.fuente.replace('layout:','')+')')
+              +(L.planta&&L.planta.estado_pem?' · PEM: '+L.planta.estado_pem:'');
+      g1.appendChild(o);
+    });
+  }
+  /* Las que faltan SE VEN. Deshabilitadas y con el motivo: así el hueco es
+     accionable —rellenar lat/lon en la cartera— en vez de invisible. */
+  if(SIN_COORD.length){
+    var g2=grupo('Cartera · '+SIN_COORD.length+' SIN coordenadas — rellénalas en la cartera');
+    SIN_COORD.forEach(function(p){
+      var o=new Option(_rotulo(p)+'  — sin coordenadas','');
+      o.disabled=true;
+      o.title='Esta planta está en la cartera pero no tiene lat/lon ni layout. '
+             +'Rellena Latitud y Longitud en proyectos/cartera-tabla.html y regenera '
+             +'con: node tools/genera_plantas.mjs';
+      g2.appendChild(o);
+    });
+  }
+  var g3=grupo('Otros emplazamientos (no son cartera)');
+  LOCS.slice(LOCS.length-OTROS.length).forEach(function(L,i){
+    g3.appendChild(new Option(L.n,LOCS.length-OTROS.length+i));
+  });
+  sel.add(new Option('✏️ Personalizado — buscar / mapa / lat-lon…','custom'));
+  if(!CARTERA.length){
+    var o=new Option('⚠ falta sim/cartera.js — solo hay sitios de referencia','');
+    o.disabled=true; sel.insertBefore(o,sel.firstChild);
+  }
+})();
 PROFILES.forEach(function(P,i){$('prof').add(new Option(P.n,i))});
 
 /* — Emplazamiento personalizado: Leaflet local + Nominatim (mismo patrón que index.html) — */
