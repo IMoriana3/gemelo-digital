@@ -9,6 +9,7 @@
 <!-- sin fuentes de Google: offline (fuentes del sistema) -->
 <script src="lib/three.min.js"></script><!-- librerías LOCALES (sin CDN): offline -->
 <script src="lib/GLTFLoader.js"></script>
+<script src="sim/cartera.js"></script><!-- CARTERA DE PROYECTOS, generada por tools/genera_plantas.mjs -->
 <script src="sim/viento.js"></script><!-- abanderamiento canónico B2, compartido con el simulador de planta y con terreno.html -->
 <script src="seguidor.js?v=13"></script><!-- FUENTE ÚNICA del seguidor (compartida con Cobertura 3D) -->
 <link rel="stylesheet" href="lib/leaflet.css">
@@ -367,18 +368,35 @@ el('btnTapa').onclick=function(){tcuOpen=!tcuOpen;this.textContent=tcuOpen?'⧉ 
 /* ---- shared currents ---- */
 var cur={iPv:0,iMot:0,iBat:0,vBat:25.6,moving:false};
 /* ---- parametros fisicos (espejo simplificado de SolarGPT / BMS) ---- */
-/* EMPLAZAMIENTOS seleccionables (lat,lon, offset UTC y si aplica DST europeo) */
-var LOCS=[
- {n:"Gorraiz · Navarra (ES)",lat:42.81,lon:-1.58,tz:1,dst:true},
- {n:"El Burgo · Zaragoza (ES)",lat:41.576,lon:-0.798,tz:1,dst:true},
- {n:"Ayora · Valencia (ES)",lat:39.122,lon:-1.155,tz:1,dst:true},
- {n:"Alconadre · Huesca (ES)",lat:41.85,lon:-0.15,tz:1,dst:true},
- {n:"San José · Arequipa (PE)",lat:-16.600,lon:-71.803,tz:-5,dst:false},
- {n:"El Hamma · Gabès (TN)",lat:33.879,lon:9.874,tz:1,dst:false},
- {n:"Trani · Apulia (IT)",lat:41.254,lon:16.351,tz:1,dst:true},
- {n:"Benante · Sicilia (IT)",lat:37.373,lon:14.898,tz:1,dst:true},
- {n:"Valle de Moinhos (PT)",lat:39.210,lon:-8.774,tz:0,dst:true}
-];
+/* EMPLAZAMIENTOS — salen de LA CARTERA (sim/cartera.js), no de una lista a mano.
+   Aquí había nueve escritos a mano, que eran la cuarta copia de lo mismo en la casa
+   y por la que el generador tenía que leer ESTE fichero para no perder tres
+   coordenadas. Ahora la flecha va en un solo sentido: el generador produce la
+   cartera y esta página la consume.
+
+   `tz` y `dst` los trae el catálogo derivados del país. No es una suposición: en
+   las nueve entradas que había aquí, huso y horario de verano quedaban
+   determinados por el país sin una sola excepción, y así se comprobó antes de
+   derivarlos. Si un país no está en la tabla llegan a null y se cae al
+   round(lon/15) de applyLoc, que es lo que hacía antes.
+
+   Gorraiz NO es cartera: es el sitio del gemelo y va primero, que es el que se
+   carga por defecto. */
+var GORRAIZ={n:"Gorraiz · Navarra (ES) — sitio del gemelo",lat:42.81,lon:-1.58,tz:1,dst:true};
+/* El rótulo lo produce el catálogo, igual que en bateria.html: una planta se
+   llama igual en las dos páginas o no se llama igual en ninguna. */
+function _rotuloPlanta(p){
+  return (window.CARTERA&&window.CARTERA.rotulo)
+       ? window.CARTERA.rotulo(p)
+       : (p.num+' · '+p.proyecto);
+}
+var _CART=(typeof window!=='undefined'&&window.CARTERA&&window.CARTERA.plantas)?window.CARTERA.plantas:[];
+var LOCS=[GORRAIZ].concat(_CART.filter(function(p){return p.lat!=null}).map(function(p){
+  return {n:_rotuloPlanta(p),lat:p.lat,lon:p.lon,tz:p.tz,dst:p.dst,fuente:p.fuente};}));
+/* Las que no tienen coordenadas SE VEN, en botón deshabilitado y con el motivo.
+   Esconderlas escondería el hueco. */
+var LOCS_SIN=_CART.filter(function(p){return p.lat==null}).map(function(p){
+  return {n:_rotuloPlanta(p)};});
 var LOC=LOCS[0], LAT=LOC.lat*Math.PI/180, LON=LOC.lon;   /* emplazamiento activo (Gorraiz por defecto) */
 /* ---- WIDGET de emplazamiento: presets + búsqueda (OSM/Nominatim) + mapa mundi (Leaflet) ---- */
 var emap=null, emarker=null, epick=null;
@@ -420,7 +438,15 @@ el('emplazModal').onclick=function(e){if(e.target===this)closeEmplaz();};
 el('emplazGo').onclick=doSearch;
 el('emplazSearch').onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();doSearch();}};
 el('emplazUse').onclick=function(){if(epick)applyLoc(epick.name,epick.lat,epick.lon,null,false); closeEmplaz();};
-LOCS.forEach(function(L0){var b=document.createElement('button');b.style.cssText='padding:5px 9px;font-size:12px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:7px;cursor:pointer';b.textContent=L0.n;b.onclick=function(){applyLoc(L0.n,L0.lat,L0.lon,L0.tz,L0.dst);closeEmplaz();};el('emplazPresets').appendChild(b);});
+LOCS.forEach(function(L0){var b=document.createElement('button');b.style.cssText='padding:5px 9px;font-size:12px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:7px;cursor:pointer';b.textContent=L0.n;
+  if(L0.fuente==='pendiente')b.title='Coordenadas a 3 decimales (~110 m) y sin procedencia declarada: sirven para el recurso solar, pero NO son el centroide de la planta. Pendiente de confirmar.';
+  else if(L0.fuente)b.title='Coordenadas: '+(L0.fuente==='cartera'?'de la cartera':'centroide del layout real ('+L0.fuente.replace('layout:','')+')');
+  b.onclick=function(){applyLoc(L0.n,L0.lat,L0.lon,L0.tz,L0.dst);closeEmplaz();};el('emplazPresets').appendChild(b);});
+LOCS_SIN.forEach(function(L0){var b=document.createElement('button');b.disabled=true;
+  b.style.cssText='padding:5px 9px;font-size:12px;background:var(--card2);color:var(--muted);border:1px dashed var(--line2);border-radius:7px;cursor:not-allowed;opacity:.6';
+  b.textContent=L0.n+' — sin coordenadas';
+  b.title='En la cartera pero sin lat/lon ni layout. Rellena Latitud y Longitud en proyectos/cartera-tabla.html y regenera: node tools/genera_plantas.mjs';
+  el('emplazPresets').appendChild(b);});
 var dayN=172;                                     /* día del año (1-365); declinación = declOf(dayN) */
 var AXIS_MAX=55;                                  /* tope mecanico (deg): -55 Este / +55 Oeste */
 var PITCH=6.0, CHORD=2.382, GCR=CHORD/PITCH;      /* dos filas -> ground cover ratio */
