@@ -736,6 +736,10 @@ function runControls(meteo,prof,loc,soc0,base){
 
 /* ═══════════ Rainflow (ASTM simplificado) + modelo de ciclos LFP (11.5b) ═══════════ */
 var RF_MIN=0.005;                 /* 0,5 % — filtro de amplitud: sin él el conteo depende del paso */
+var LFP_A=6000, LFP_B=1.2, LFP_EOL=20;   /* Nf = a/DoD^b · EOL = 80% SOH */
+/* Los canónicos suben AQUÍ, delante de `rainflow`, porque el contador ya los
+   necesita: es él quien tiene la profundidad de cada ciclo y por tanto el único
+   que puede sumar Palmgren-Miner. Antes vivían debajo y `rainflow` sólo contaba. */
 function rainflow(soc){
   var tp=[],i;
   for(i=0;i<soc.length;i++){
@@ -759,11 +763,25 @@ function rainflow(soc){
     }
   }
   for(i=0;i+1<stack.length;i++)cycles.push({r:Math.abs(stack[i+1]-stack[i]),w:0.5});
-  var tot=0,d30=0,d60=0;
-  cycles.forEach(function(c){if(c.r<RF_MIN)return;tot+=c.w;if(c.r>=0.30)d30+=c.w;if(c.r>=0.60)d60+=c.w;});
-  return {total:tot,dod30:d30,dod60:d60};
+  /* PALMGREN-MINER, que es para lo que existe contar por rainflow.
+     `miner` = Σ wᵢ/N(rᵢ) con N(DoD)=A/DoD^b: la FRACCIÓN de vida por ciclado
+     consumida en el periodo. Vale 1 al llegar al final de vida, o sea a
+     LFP_EOL % de pérdida de capacidad.
+
+     Hasta hoy esta lista se construía y se TIRABA: sólo salían recuentos, y el
+     fade por ciclado se calculaba aparte con el DoD medio diario. Con N(DoD) en
+     ley de potencias la media NO resume la distribución —muchos ciclos someros
+     más unos pocos profundos no envejecen como todos a la media—, así que la
+     tabla podía enseñar los ciclos profundos multiplicándose por 14 mientras el
+     fade no se movía. Ahora la profundidad de cada ciclo entra en el número. */
+  var tot=0,d30=0,d60=0,miner=0;
+  cycles.forEach(function(c){
+    if(c.r<RF_MIN)return;
+    tot+=c.w; if(c.r>=0.30)d30+=c.w; if(c.r>=0.60)d60+=c.w;
+    miner+=c.w/(LFP_A/Math.pow(c.r,LFP_B));
+  });
+  return {total:tot,dod30:d30,dod60:d60,miner:miner};
 }
-var LFP_A=6000, LFP_B=1.2, LFP_EOL=20;   /* Nf = a/DoD^b · EOL = 80% SOH */
 /* Envejecimiento calendario — BatteryModel v2 canónico (notebook 11.0, _apply_calendar_aging):
    tasa = base · exp(Ea/R·(1/T_ref − 1/T)) · (1 + 0,8·(SOC − 0,5))
    Base calibrada a 1,5 %/año para LFP en el punto de referencia 25 °C y SOC 0,5 (Wang 2014, 11.5b),
@@ -773,7 +791,7 @@ function calFadeRatePctYr(soc,tC){
   var arr=Math.exp(EA_OVER_R*(1/T_REF_K-1/(Math.max(-40,tC)+273.15)));
   return CAL_BASE_PCT_YR*arr*Math.max(0,1+0.8*(soc-0.5));
 }
-function cyclesAnalysis(rows){
+function cyclesAnalysis(rows,rf){
   var n=rows.length; if(n<2)return null;
   var thr=0;
   for(var i=1;i<n;i++)thr+=Math.abs(rows[i].soc-rows[i-1].soc);
@@ -791,14 +809,30 @@ function cyclesAnalysis(rows){
   /* calendario: se integra paso a paso con el SOC y la temperatura de celda reales */
   var calAcc=0;
   rows.forEach(function(r){calAcc+=calFadeRatePctYr(r.soc,(r.tCell!=null?r.tCell:r.temp))*dtH/8760;});
+  var cycYrMedio=0;
   if(days>=1){
+    /* CAMINO VIEJO, que se conserva CALCULADO para poder careárselo al nuevo:
+       convierte todo el trasiego (EFC) en ciclos equivalentes al DoD MEDIO
+       diario y los divide entre la vida a ese DoD. Con N(DoD) en ley de
+       potencias, resumir la distribución por su media es la aproximación que
+       hacía invisibles los ciclos profundos. */
     var cyclesYr=(efc/Math.max(dodM,1e-6))*(365/days);
-    cycYr=(cyclesYr/toEol)*LFP_EOL;                        /* fade por ciclado */
+    cycYrMedio=(cyclesYr/toEol)*LFP_EOL;
+
+    /* CAMINO CANÓNICO: Palmgren-Miner sobre el histograma real de profundidades
+       que ya produce `rainflow`. `miner` es la fracción de vida por ciclado
+       consumida en el periodo; ×LFP_EOL la pasa a % de capacidad y ×365/días la
+       anualiza. Si no hay rainflow (llamada vieja), se cae al camino medio y se
+       DECLARA en `cycOrigen` — dos números con el mismo nombre y distinta
+       procedencia no se pueden leer igual. */
+    cycYr = (rf && rf.miner!=null) ? rf.miner*LFP_EOL*(365/days) : cycYrMedio;
     calYr=calAcc*365/days;                                 /* fade calendario anualizado */
     fade=cycYr+calYr;
     years=Math.min(30,LFP_EOL/Math.max(fade,0.001));
   }
   return {efc:efc,dodMean:dodMean,toEol:toEol,fadeYr:fade,cycYr:cycYr,calYr:calYr,
+          cycYrMedio:cycYrMedio,
+          cycOrigen:(rf&&rf.miner!=null)?'rainflow (Palmgren-Miner)':'DoD medio diario (sin rainflow)',
           socMean:rows.reduce(function(a,r){return a+r.soc},0)/n,years:years};
 }
 /* Calibraciones (cargas al 100 %) logradas y peor racha sin calibrar — se recalcula
@@ -823,6 +857,7 @@ function summarize(rows){
      aunque la batería estuviera muerta, porque nunca marca "parked". */
   var hPark=rows.filter(function(r){return (r.parked&&!r.stow)||r.soc<=0.001}).length*dtH;
   var hStow=rows.filter(function(r){return r.stow}).length*dtH;
+  var _rf=rainflow(soc);
   return {
     socFinal:soc[soc.length-1], socMin:soc[minI], socMinT:rows[minI].t,
     hBelow15:soc.filter(function(v){return v<0.15}).length*dtH,
@@ -832,7 +867,9 @@ function summarize(rows){
     prodLostPct:(function(){var p=sum('poaPot'),l=sum('poaLost');return p>0?100*l/p:0})(),
     prodRelPct:(function(){var p=sum('poaPot'),r=sum('poaReal');return p>0?100*r/p:100})(),
     chg:sum('chg'), base:sum('base'), motor:sum('motor'), net:sum('net'),
-    cyc:cyclesAnalysis(rows), rf:rainflow(soc), cal:calibStats(rows)
+    /* El rainflow se calcula ANTES y se le pasa: el fade por ciclado sale de su
+       histograma, así que las dos cosas ya no pueden contar cosas distintas. */
+    cyc:cyclesAnalysis(rows,_rf), rf:_rf, cal:calibStats(rows)
   };
 }
 function aggDaily(rows){
@@ -1955,7 +1992,19 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
        'y con él el fade calendario '+fmt(R.cyc.calYr,2)+' % → '+fmt(S.cyc.calYr,2)+' %/año, que es el '+
        fmt(100*S.cyc.calYr/Math.max(S.cyc.fadeYr,1e-9))+' % del envejecimiento total. '+
        'Si el intercambio compensa depende del coste de reemplazar baterías en campo frente al valor de esa producción, '+
-       'y eso esta tabla no lo sabe.</div>';
+       'y eso esta tabla no lo sabe.</div>'+
+       /* Las filas de rainflow llevaban veredicto y NO entraban en el modelo de vida: el fade
+          por ciclado salía del DoD MEDIO diario, así que los ciclos profundos podían
+          multiplicarse por 14 sin mover el número. Ya no: el fade sale del histograma
+          completo por Palmgren-Miner. Se dice, porque un color sólo es legible si se sabe
+          hacia dónde propaga. */
+       '<div class="note"><b>Los ciclos por profundidad sí entran en la vida.</b> El fade por ciclado se calcula '+
+       'con <b>Palmgren-Miner</b> sobre el histograma de profundidades que produce el rainflow '+
+       '(Σ wᵢ/N(DoDᵢ), con N = '+fmt(LFP_A,0)+'/DoD^'+LFP_B+'), no con el DoD medio diario. '+
+       'Importa porque N(DoD) es una ley de potencias y la media no resume la distribución: '+
+       'muchos ciclos someros más unos pocos profundos no envejecen como todos a la media. '+
+       'Medido en este caso, el camino viejo daba '+fmt(S.cyc.cycYrMedio,4)+' %/año y éste '+fmt(S.cyc.cycYr,4)+
+       ' %/año — poco, porque aquí manda el calendario, y más cuanto más profundo sea el ciclado.</div>';
   if(mudas)tb2+='<div class="note bad">⚠ '+fmt(mudas)+' fila(s) sin veredicto declarado. Ponle dirección o di por qué no la tiene (NV).</div>';
   c5.insertAdjacentHTML('beforeend',tb2);
   out.appendChild(c5);
