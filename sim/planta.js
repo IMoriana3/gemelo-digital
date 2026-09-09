@@ -40,7 +40,7 @@
      (scada/tools/tcu-toolbox) contra equipo real — tilt ×10, ángulos solares
      ×100, temperaturas ×10, tensiones mV, corrientes mA, reloj en BCD.
    · Física y umbrales: los mismos que bateria.html (estudio de disponibilidad
-     de batería SUNNER + física canónica de SolarGPT).
+     de batería del estudio de disponibilidad + física canónica de SolarGPT).
 
    Lo que NO es
    ------------
@@ -845,7 +845,7 @@ TCU.prototype.decide = function (dt, ang) {
 /* ---- motor: velocidad real, deadband y consumo ----
    Devuelve los Wh gastados en este paso, con el modelo elegido en la estrategia:
    la medición de Factiun (Wh/° = K0 + K1·|θ|, con el ángulo MEDIO del movimiento y
-   tope de 50 W) o el consumo SUNNER en mA medios × tiempo de giro. */
+   tope de 50 W) o el consumo medio en mA del estudio × tiempo de giro. */
 TCU.prototype.mueve = function (dt, inhibido) {
   /* el error se calcula contra lo que el TCU MIDE, no contra dónde está la mesa: si
      el inclinómetro miente, el lazo persigue el objetivo equivocado y tan contento */
@@ -991,7 +991,7 @@ TCU.prototype.mueve = function (dt, inhibido) {
         lo que evita tenerla siempre al 100 % envejeciendo.
      3. Límite real de admisión: rendimiento de carga, C-rate seguro LiFePO4 según
         temperatura, JEITA por el lado caliente y cut-in del regulador.
-     4. Consumo: electrónica + motor (medición Factiun o mA SUNNER) + calefactor
+     4. Consumo: electrónica + motor (medición Factiun o mA del estudio) + calefactor
         de las versiones LT, que gasta pero desbloquea la carga en frío.       */
 /* ── irradiancia del sitio y POA de un ángulo cualquiera ──
    Se calcula una sola vez por paso porque la usan dos: la política de difusa, para
@@ -1316,7 +1316,7 @@ function Planta(cfg) {
     iDuro: cfg.iDuro || 5000,                /* corriente con el eje duro: alta, pero sin disparar */
     perfil: cfg.perfil || F.perfilPorDefecto, /* alimentación y batería (SP · STRING · AC) */
     /* modelo de consumo del motor: 'factiun' (Wh/° medidos) o los mA medios de
-       SUNNER a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
+       del estudio a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
     motorModel: cfg.motorModel || 'factiun',
     estrategiaViento: cfg.estrategiaViento || 'B2',   /* A1 · A2 · B1 · B2 */
     /* averías por tasa: apagadas salvo que se pidan */
@@ -1329,7 +1329,7 @@ function Planta(cfg) {
        navegador —que es de primer orden— y se dice en pantalla. */
     canon: cfg.canon || null,
     /* ESTRATEGIA de gestión de batería — los mismos parámetros y los mismos valores
-       por defecto que el simulador de batería (estrategia oficial SUNNER) */
+       por defecto que el simulador de batería (estrategia oficial de SOC) */
     estrategia: {
       activa:  cfg.estrategia && cfg.estrategia.activa  != null ? cfg.estrategia.activa  : true,
       socCrit: cfg.estrategia && cfg.estrategia.socCrit != null ? cfg.estrategia.socCrit : 30,  /* defensa (%) */

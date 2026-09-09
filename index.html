@@ -515,7 +515,7 @@ function step(dt){
 
   /* --- algoritmo solar (true-tracking + backtracking), Gorraiz + día del año --- */
   var trk=trackAngle(s.hour); s.bt=trk.bt; s.elev=trk.el;
-  var lowE=s.soc<18;                                  /* control con restriccion energetica (TFM) */
+  var lowE=s.soc<18;                                  /* control con restriccion energetica */
   /* --- VIENTO: banda permitida de giro según velocidad y mañana/tarde ---
      >60 km/h: defensa a tope (-55 mañana / +55 tarde)
      40-60   : limitado (mañana [-55,-30], tarde [+30,+55])

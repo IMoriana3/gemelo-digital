@@ -132,9 +132,9 @@
       <select id="motor">
         <option value="curva">Factiun · curva I(|θ|) medida — TCU 33 @24 V</option>
         <option value="factiun">Factiun · ajuste Wh/° = K0 + K1·|θ|</option>
-        <option value="2500">SUNNER · 2500 mA medio @25,6 V</option>
-        <option value="3250">SUNNER · 3250 mA medio @25,6 V</option>
-        <option value="4000">SUNNER · 4000 mA medio @25,6 V</option>
+        <option value="2500">2500 mA medio @25,6 V (estudio de disponibilidad)</option>
+        <option value="3250">3250 mA medio @25,6 V (estudio de disponibilidad)</option>
+        <option value="4000">4000 mA medio @25,6 V (estudio de disponibilidad)</option>
       </select></div>
     <div class="fld"><label>Umbral duro de carga <span class="rv" id="poaMinV">0 W/m²</span></label>
       <input type="range" id="poaMin" min="0" max="200" step="10" value="0">
@@ -158,7 +158,7 @@
     <div class="fld" id="yearFld"><label>Año histórico</label><select id="year"></select></div>
     <div class="fld" id="sweepFld" style="display:none"><label>Barrido desde el año</label>
       <input type="number" id="sweepFrom" value="2013" min="1940" step="1">
-      <div class="note">Open-Meteo tiene histórico desde 1940. El estudio SUNNER usa 2013–2024. Más años = más peticiones (van por lotes de 8).</div></div>
+      <div class="note">Open-Meteo tiene histórico desde 1940. El estudio de disponibilidad usa 2013–2024. Más años = más peticiones (van por lotes de 8).</div></div>
     <div class="fld" id="daysFld" style="display:none"><label>Días de simulación <span class="rv" id="daysV">7</span></label>
       <input type="range" id="days" min="3" max="16" step="1" value="7"></div>
     <div class="fld" id="fileFld" style="display:none"><label>Fichero _HourlyRes de PVSyst (.csv)</label>
@@ -171,7 +171,7 @@
     <div class="fld" id="sdaysFld" style="display:none"><label>Días (sintético) <span class="rv" id="sdaysV">365</span></label>
       <input type="range" id="sdays" min="7" max="365" step="1" value="365"></div>
   </div>
-  <div class="grp"><h3>Estrategia SOC (SUNNER)</h3>
+  <div class="grp"><h3>Estrategia SOC</h3>
     <div class="fld"><label>SOC inicial <span class="rv" id="soc0V">50%</span></label>
       <input type="range" id="soc0" min="5" max="100" step="5" value="50"></div>
     <div class="fld"><label>SOC objetivo de carga <span class="rv" id="socTgtV">80%</span></label>
@@ -198,7 +198,7 @@
     <b>Metodología</b>: el panel dedicado de las TCU SP va solidario al seguidor (confirmado), de modo que su
     captación es la del plano del generador y cae cuando el seguidor va a defensa o abanderado; los TCU String
     toman su potencia nominal de un string de varios kW, disponible desde muy poca luz.
-    Estrategia oficial SUNNER (Battery Availability Study) — CASO 1: crítico&lt;SOC&lt;objetivo,
+    Estrategia oficial de gestión de SOC — CASO 1: crítico&lt;SOC&lt;objetivo,
     carga + consumo; CASO 2: SOC&gt;objetivo, sin carga; CASO 3: SOC&lt;crítico → <b>defensa 55°</b>,
     tracker no disponible, solo electrónica. Sin carga bajo la Tª mínima; por encima, C-rate seguro LiFePO₄
     según Tª (11.5b). Consumo de electrónica (0,64 W) y curva de motor I(|θ|) medidos por Factiun: 36 W a 0° y 67,2 W a 55°. Comparativa contra el mismo TCU
@@ -249,7 +249,7 @@ function _rotulo(p){
        : (p.num+' · '+p.proyecto);   /* sin catálogo no hay lista que rotular */
 }
 
-/* Sitios que NO son de la cartera: el del gemelo y los dos de los estudios SUNNER
+/* Sitios que NO son de la cartera: el del gemelo y los dos de los estudios
    que se usan de referencia. Van en su propio grupo para que nadie los cite como
    proyecto. */
 var OTROS=[
@@ -310,7 +310,7 @@ var PROFILES=[
  {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6 Ah · LT calefactada",  wh:153.6, chgW:60, heated:true, string:true}
 ];
 
-/* ═══════════ Tracker (constantes del estudio SUNNER + gemelo) ═══════════ */
+/* ═══════════ Tracker (constantes del estudio de disponibilidad + gemelo) ═══════════ */
 var AXIS_MAX=FISICA.e.AXIS_MAX, GCR=FISICA.e.GCR, NIGHT_POS=FISICA.e.NIGHT_POS, DEFENSE_POS=FISICA.e.DEFENSE_POS;
 /* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies):
    parcial ≥40 km/h (±30° mín), full ≥60 km/h (±55°), histéresis destow ~30 min (1 h aquí),
@@ -362,7 +362,7 @@ function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
 var JEITA_T3=FISICA.e.JEITA_T3, JEITA_T4=FISICA.e.JEITA_T4;
 function hotDerate(t){if(t>=JEITA_T4)return 0;if(t>JEITA_T3)return 1-0.7*(t-JEITA_T3)/(JEITA_T4-JEITA_T3);return 1;}
 var HYST_DEG=FISICA.e.HYST_DEG;                             /* banda muerta del lazo, en grados.
-   2026-08-27: era 2,5° «del estudio SUNNER» mientras el core corría a 1,0° y el
+   2026-08-27: era 2,5° «del estudio de disponibilidad» mientras el core corría a 1,0° y el
    registro del firmware publicaba 1,296°. Tres números distintos diciendo ser el
    mismo. Decidido por el mantenedor: 1,0° en todo el ecosistema. Ver la nota en
    sim/planta.js sobre lo que cuesta. */
@@ -572,7 +572,7 @@ function resample(meteo,stepMin){
   return out;
 }
 
-/* ═══════════ SIMULADOR — estrategia oficial SUNNER + winter mode canónico ═══════════
+/* ═══════════ SIMULADOR — estrategia oficial de SOC + winter mode canónico ═══════════
    opts: {motorModel:'factiun'|mA(number), winter, socTgt, socCrit, fcDays, tMin, strategy:bool} */
 function simulate(meteo,prof,loc,soc0,opts){
   var latR=loc.lat*D2R, capWh=prof.wh, n=meteo.length;
@@ -614,7 +614,7 @@ function simulate(meteo,prof,loc,soc0,opts){
                      :(parked?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
     if(prevPos==null)prevPos=target;
     /* Histéresis del lazo: en seguimiento sólo corrige si el error frente al sol ≥ 2,5°
-       (estudio SUNNER). Se evalúa sobre el error REAL, antes de limitar el avance. */
+       (estudio de disponibilidad). Se evalúa sobre el error REAL, antes de limitar el avance. */
     var moveNow=(stow>0||parked)?Math.abs(target-prevPos)>0.01
                                 :Math.abs(target-prevPos)>=HYST_DEG;
     /* El WINTER MODE NO TOCA EL MOVIMIENTO. Es techo de SOC (90 %) y calibración
@@ -706,19 +706,25 @@ function simulate(meteo,prof,loc,soc0,opts){
 
 /* ═══════════ Sistemas de control a comparar ═══════════
    Todos comparten TCU, emplazamiento y meteo: sólo cambia la lógica de gestión. */
+/* Los sistemas se nombran por LO QUE HACEN, no por quién los vende ni por el
+   documento donde se describieron. Antes dos columnas se llamaban «SUNNER» y una
+   «(TFM)»: la primera pone la marca de un tercero sobre una lógica de control que
+   aquí se simula, y la segunda es jerga interna que en un informe de cliente no
+   dice nada. El equipo concreto —SP o STRING, panel y batería— sí va dicho, y va
+   en la cabecera de la tabla, que es donde se pregunta «¿de qué TCU hablamos?». */
 var CONTROLS=[
  {k:'none', n:'Sin gestión',                 d:'Seguimiento continuo, sin techo de carga ni defensa',
   o:{strategy:false,socTgt:100,socCrit:0,fcDays:5,winter:false,defPos:DEFENSE_POS}},
- {k:'sunner', n:'SUNNER estándar',           d:'Objetivo 80 % · crítico 30 % → defensa 55° · calibración 5 d',
+ {k:'std',  n:'Estrategia estándar',         d:'Objetivo 80 % · crítico 30 % → defensa 55° · calibración 5 d',
   o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:DEFENSE_POS}},
- {k:'winter', n:'SUNNER + winter mode',      d:'Objetivo 90 % · calibración 3 d (y nada más: no toca el movimiento)',
+ {k:'winter', n:'Estándar + winter mode',    d:'Objetivo 90 % · calibración 3 d (y nada más: no toca el movimiento)',
   o:{strategy:true,socTgt:90,socCrit:30,fcDays:3,winter:true,defPos:DEFENSE_POS}},
- {k:'tfm', n:'Restricción energética (TFM)', d:'Como SUNNER pero aparca plano a 0° para sobrevivir',
+ {k:'plano', n:'Defensa en plano',           d:'Como la estándar, pero la defensa aparca a 0° en vez de a 55°',
   o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:0}},
  {k:'cons', n:'Conservador',                 d:'Objetivo 80 % · crítico 40 %: aparca antes, más margen',
   o:{strategy:true,socTgt:80,socCrit:40,fcDays:5,winter:false,defPos:DEFENSE_POS}}
 ];
-var CONTROL_COL={none:'#8093A4',sunner:'#36D399',winter:'#3aa0ff',tfm:'#e0a52b',cons:'#c084fc'};
+var CONTROL_COL={none:'#8093A4',std:'#36D399',winter:'#3aa0ff',plano:'#e0a52b',cons:'#c084fc'};
 function runControls(meteo,prof,loc,soc0,base){
   return CONTROLS.map(function(c){
     var o={};for(var k in base)o[k]=base[k];
@@ -1364,7 +1370,7 @@ function zoomFull(){
   render(LAST.meteo,LAST.mng,LAST.ref,LAST.prof,LAST.loc,LAST.opts,LAST.sweep,null,LAST.controls);
 }
 /* ═══════════════════════════════════════════════════════════════════════════
-   INFORME — estructura del «Battery Availability Study» de SUNNER, alimentado
+   INFORME — estructura del estudio de disponibilidad de batería, alimentado
    por la simulación en curso. Se abre en una pestaña aparte, tema claro y
    maquetado A4: el navegador lo imprime o lo guarda como PDF.
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -1428,7 +1434,7 @@ function buildReport(){
   var fuente=$('srcTag').textContent||'—';
   var motorTxt=opts.motorModel==='curva'?'curva I(|θ|) medida (TCU 33 @24 V)':
                opts.motorModel==='factiun'?'ajuste Wh/° = 0,0503 + 0,000845·|θ|':
-               opts.motorModel+' mA medios @25,6 V (SUNNER)';
+               opts.motorModel+' mA medios @25,6 V (estudio de disponibilidad)';
 
   /* — figuras: se toman de las gráficas ya dibujadas — */
   var cards=Array.prototype.slice.call(document.querySelectorAll('#out .card'));
@@ -1466,7 +1472,7 @@ function buildReport(){
   H+='<p>Este informe evalúa si la unidad de control de seguidor (TCU) <b>'+prof.id+'</b> mantiene la alimentación '+
      'necesaria para operar el seguidor en <b>'+sitio+'</b> a lo largo del periodo analizado, y cuantifica el impacto '+
      'sobre la planta de las horas en que no puede hacerlo. La metodología replica la del <i>Battery Availability Study</i> '+
-     'aplicada por SUNNER, con la física de consumo y batería medida por Factiun.</p>';
+     'del estudio de disponibilidad, con la física de consumo y batería medida por Factiun.</p>';
   H+='<div class="note"><b>Conclusión.</b> '+(apto
       ? 'La configuración evaluada <b>cumple</b>: el seguidor permanece indisponible por falta de energía un '+fmt(S.inactivePct,4)+' % del tiempo, '+
         'con una pérdida de producción imputable a la batería del '+fmt(S.prodLostPct,4)+' % y un SOC mínimo del '+fmt(S.socMin*100)+' %.'
@@ -1579,7 +1585,12 @@ function buildReport(){
   /* 9. SISTEMAS DE CONTROL */
   if(C&&C.length){
     H+='<h2 class="brk">9. Comparativa de sistemas de control</h2>';
-    H+='<p>Todas las alternativas comparten TCU, emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión.</p>';
+    /* El EQUIPO va nombrado aquí, no dado por sabido: un lector que llega a esta
+       tabla por el índice tiene que poder ver de qué TCU se habla sin subir cinco
+       páginas, porque la fuente de carga —SP con panel dedicado o STRING colgado
+       del generador— cambia el resultado más que ninguna de las cinco lógicas. */
+    H+='<p>Todas las alternativas comparten el mismo equipo —<b>'+prof.n+'</b>—, '+
+       'emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión.</p>';
     H+=tbl([['Descripción'].concat(C.map(function(x){return {v:x.c.d}}))].concat([
       ['% tiempo no disponible'].concat(C.map(function(x){return {v:fmt(x.S.inactivePct,4)}})),
       ['% producción perdida (batería)'].concat(C.map(function(x){return {v:fmt(x.S.prodLostPct,4)}})),
@@ -1638,7 +1649,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   var dm=LONG?aggDaily(mng):null, dr=LONG?aggDaily(ref):null;
   var crit=opts.socCrit/100;
 
-  /* — KPIs (métricas de impacto del estudio SUNNER) — */
+  /* — KPIs (métricas de impacto del estudio de disponibilidad) — */
   var chips=document.createElement('div');chips.className='chips';
   chips.innerHTML=
     chip('Tiempo no disponible',fmt(S.inactivePct,4)+'%',S.inactivePct>1?'bad':(S.inactivePct>0.1?'warn':'ok'),
@@ -1704,7 +1715,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   /* — Gráfica 1: SOC — */
   var c1=document.createElement('div');c1.className='card';
   c1.innerHTML='<h2>Estado de carga (SOC) — '+(sweep?('peor año '+sweep.worst):fmt(days)+' días')+'</h2><div class="sub">'+prof.id+' · '+loc.n+
-    ' · paso '+fmt(dtH*60)+' min · estrategia SUNNER (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días, reintentando a diario)'+
+    ' · paso '+fmt(dtH*60)+' min · estrategia de gestión de SOC (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días, reintentando a diario)'+
     (opts.winter?' · winter mode':'')+'</div>';
   out.appendChild(c1);
   var g1=mkCanvas(c1,210), f1=frame(g1,0,100,mng,function(v){return fmt(v)+'%'});
@@ -1821,7 +1832,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   /* — Comparativa entre sistemas de control — */
   if(controls && controls.length){
     var cc=document.createElement('div');cc.className='card';
-    cc.innerHTML='<h2>⚖️ Comparativa de sistemas de control</h2><div class="sub">Mismo TCU ('+prof.id+
+    cc.innerHTML='<h2>⚖️ Comparativa de sistemas de control</h2><div class="sub">Mismo equipo ('+prof.n+
       '), mismo emplazamiento y misma meteo: sólo cambia la lógica de gestión de la batería.</div>';
     out.appendChild(cc);
     var gc=mkCanvas(cc,210), fc=frame(gc,0,100,mng,function(v){return fmt(v)+'%'});
@@ -1866,7 +1877,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
 
   /* — Comparativa con/sin estrategia — */
   var c5=document.createElement('div');c5.className='card';
-  c5.innerHTML='<h2>Comparativa: sin estrategia vs con estrategia</h2><div class="sub">Mismo TCU y misma meteo; cambia solo la operación (estrategia SUNNER'+(opts.winter?' + winter mode':'')+')</div>';
+  c5.innerHTML='<h2>Comparativa: sin estrategia vs con estrategia</h2><div class="sub">Mismo TCU y misma meteo; cambia solo la operación (estrategia de gestión de SOC'+(opts.winter?' + winter mode':'')+')</div>';
   var rows=[
     ['Tiempo no disponible',fmt(R.inactivePct,4)+'%',fmt(S.inactivePct,4)+'%',null],
     ['Horas abanderado (viento)',fmt(R.hStow),fmt(S.hStow),null],
