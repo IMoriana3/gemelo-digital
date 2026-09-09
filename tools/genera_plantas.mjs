@@ -18,6 +18,11 @@
                         MANDA cuando existe: sale de las posiciones reales de los
                         seguidores, mientras que la cartera es una transcripción.
      · "cartera"      — lat/lon rellenados en la cartera. Respaldo.
+     · "gemelo:LOCS"  — la lista de emplazamientos de `index.html`, a 3 decimales
+                        (~110 m) y de procedencia no declarada: puede ser el
+                        centroide del pueblo y no el de la planta. Es lo más
+                        grueso de las tres y por eso va la ÚLTIMA y etiquetada.
+                        PENDIENTE de confirmar con quien las puso.
      · null           — SIN COORDENADAS. La planta aparece en el desplegable pero
                         no se puede simular, y el desplegable dice por qué.
 
@@ -57,6 +62,20 @@ const CHECK = args.includes('--check');
    proyecto, no se sustituyen. */
 const DESTINO = join(RAIZ, 'sim/cartera.js');
 
+/* Mapa nº-de-proyecto → clave en el LOCS de index.html. También explícito: casar
+   por nombre entre catálogos es lo que puso a Benante en Panbianco, y da igual que
+   aquí los nombres coincidan exactamente — la coincidencia no es la decisión, la
+   decisión es esta tabla. Son las únicas tres de la cartera que aparecen ahí.
+
+   OJO CON LA PRECISIÓN: 3 decimales y sin decir de dónde salen. Sirven para
+   simular el recurso solar —a 110 m la irradiancia no cambia— pero NO son el
+   centroide de la planta como sí lo son los layouts. Va dicho en `fuente`. */
+const GEMELO_LOCS = {
+  24024: 'Alconadre · Huesca (ES)',
+  25032: 'Trani · Apulia (IT)',
+  26009: 'Valle de Moinhos (PT)',
+};
+
 /* Mapa nº-de-proyecto → fichero de layout. EXPLÍCITO a propósito: ver cabecera. */
 const LAYOUT_DE = {
   24002: 'elburgo',
@@ -89,6 +108,19 @@ function leeCartera() {
   return { seed: JSON.parse(m[1]), nproy: JSON.parse(n[1].replace(/'/g, '"')) };
 }
 
+/* Lee el LOCS de index.html. No se copian los números aquí: se PARSEAN de su
+   fichero, para que si alguien los corrige allí lleguen solos. */
+function leeGemeloLocs() {
+  const f = join(RAIZ, 'index.html');
+  if (!existsSync(f)) return {};
+  const m = readFileSync(f, 'utf8').match(/var LOCS\s*=\s*\[([\s\S]*?)\];/);
+  if (!m) return {};
+  const out = {};
+  for (const e of m[1].matchAll(/\{\s*n\s*:\s*"([^"]+)"\s*,\s*lat\s*:\s*(-?[\d.]+)\s*,\s*lon\s*:\s*(-?[\d.]+)/g))
+    out[e[1]] = { lat: parseFloat(e[2]), lon: parseFloat(e[3]) };
+  return out;
+}
+
 function leeLayout(nombre) {
   const f = join(COBERTURA, `${nombre}_layout.json`);
   if (!existsSync(f)) return null;
@@ -97,6 +129,7 @@ function leeLayout(nombre) {
 }
 
 const { seed, nproy } = leeCartera();
+const gemelo = leeGemeloLocs();
 const plantas = seed.map(p => {
   const num = p.num;
   /* PRECEDENCIA: el layout ANTES que la cartera, porque es el dato más fino — el
@@ -110,6 +143,11 @@ const plantas = seed.map(p => {
   const c = nom ? leeLayout(nom) : null;
   if (c) { lat = c.lat; lon = c.lon; fuente = `layout:${nom}`; }
   else if (p.lat != null && p.lon != null) { lat = p.lat; lon = p.lon; fuente = 'cartera'; }
+  else {
+    const clave = GEMELO_LOCS[num] ?? GEMELO_LOCS[String(num)];
+    const g = clave ? gemelo[clave] : null;
+    if (g) { lat = g.lat; lon = g.lon; fuente = 'gemelo:LOCS'; }
+  }
   const rotulo = nproy[String(num)] || String(num);
   return {
     /* `num` es con el que se ROTULA; `num_cartera` la clave de la hoja. Los dos

@@ -8,8 +8,8 @@
     "layouts": "cobertura-zigbee/<planta>_layout.json · clat/clon (centroide real)"
    },
    "n_total": 22,
-   "n_con_coordenadas": 10,
-   "n_sin_coordenadas": 12,
+   "n_con_coordenadas": 13,
+   "n_sin_coordenadas": 9,
    "n_homonimos": 2,
    "plantas": [
     {
@@ -105,9 +105,9 @@
      "alim_tcu": null,
      "bateria_tcu": null,
      "trk_total": 19,
-     "lat": null,
-     "lon": null,
-     "fuente": null,
+     "lat": 41.254,
+     "lon": 16.351,
+     "fuente": "gemelo:LOCS",
      "homonimo_de": null
     },
     {
@@ -281,9 +281,9 @@
      "alim_tcu": "Selfpowered",
      "bateria_tcu": "6Ah",
      "trk_total": null,
-     "lat": null,
-     "lon": null,
-     "fuente": null,
+     "lat": 39.21,
+     "lon": -8.774,
+     "fuente": "gemelo:LOCS",
      "homonimo_de": null
     },
     {
@@ -363,9 +363,9 @@
      "alim_tcu": "Selfpowered",
      "bateria_tcu": "6Ah",
      "trk_total": null,
-     "lat": null,
-     "lon": null,
-     "fuente": null,
+     "lat": 41.85,
+     "lon": -0.15,
+     "fuente": "gemelo:LOCS",
      "homonimo_de": null
     }
    ]

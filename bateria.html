@@ -929,8 +929,13 @@ function bandParked(g,f,rows,color,key){
     var g1=grupo('Cartera de proyectos · '+nCart+' con coordenadas');
     LOCS.slice(0,nCart).forEach(function(L,i){
       var o=new Option(L.n,i);
-      o.title='Coordenadas: '+(L.fuente==='cartera'?'de la cartera'
-              :'centroide del layout real ('+L.fuente.replace('layout:','')+')')
+      var proc = L.fuente==='cartera' ? 'de la cartera'
+               : L.fuente==='gemelo:LOCS'
+                 ? 'de la lista de emplazamientos del gemelo, a 3 decimales (~110 m) '
+                   +'y sin procedencia declarada — sirve para el recurso solar, pero NO '
+                   +'es el centroide de la planta. PENDIENTE de confirmar'
+                 : 'centroide del layout real ('+L.fuente.replace('layout:','')+')';
+      o.title='Coordenadas: '+proc
               +(L.planta&&L.planta.estado_pem?' · PEM: '+L.planta.estado_pem:'');
       g1.appendChild(o);
     });
