@@ -1878,32 +1878,86 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   /* — Comparativa con/sin estrategia — */
   var c5=document.createElement('div');c5.className='card';
   c5.innerHTML='<h2>Comparativa: sin estrategia vs con estrategia</h2><div class="sub">Mismo TCU y misma meteo; cambia solo la operación (estrategia de gestión de SOC'+(opts.winter?' + winter mode':'')+')</div>';
+  /* EL VEREDICTO DE CADA FILA SE DECLARA, Y UN `null` A SECAS YA NO PASA.
+     `Tiempo no disponible` y `Producción perdida` iban con `null` y salían SIN
+     COLOR — o sea que las dos únicas métricas que son el PROPÓSITO de este
+     estudio eran las únicas sin veredicto, mientras el SOC final o los ciclos
+     por DoD sí lo tenían. Quien recorría la tabla por colores veía verdes en
+     vida útil, rojos en cosas secundarias, y no veía que la indisponibilidad se
+     había multiplicado por 6,5. La severidad se dice; no se deja en blanco.
+
+     Hay filas que legítimamente no tienen dirección, y esas ahora llevan el
+     motivo escrito: `NV(...)`. Un `null` pelado no distinguía «no aplica» de
+     «se me olvidó», y por eso el fallo duró. Si alguien vuelve a poner uno, la
+     celda lo DICE en pantalla en vez de salir en blanco. */
+  function NV(motivo){return {sinVeredicto:motivo}}
   var rows=[
-    ['Tiempo no disponible',fmt(R.inactivePct,4)+'%',fmt(S.inactivePct,4)+'%',null],
-    ['Horas abanderado (viento)',fmt(R.hStow),fmt(S.hStow),null],
-    ['Producción perdida',fmt(R.prodLostPct,4)+'%',fmt(S.prodLostPct,4)+'%',null],
+    ['Tiempo no disponible',fmt(R.inactivePct,4)+'%',fmt(S.inactivePct,4)+'%',S.inactivePct<=R.inactivePct],
+    ['Horas abanderado (viento)',fmt(R.hStow),fmt(S.hStow),
+      NV('El viento no lo decide la estrategia: misma meteo y mismo umbral en los dos casos.')],
+    ['Producción perdida',fmt(R.prodLostPct,4)+'%',fmt(S.prodLostPct,4)+'%',S.prodLostPct<=R.prodLostPct],
     ['SOC final',fmt(R.socFinal*100)+'%',fmt(S.socFinal*100)+'%',S.socFinal>=R.socFinal],
     ['SOC mínimo',fmt(R.socMin*100)+'%',fmt(S.socMin*100)+'%',S.socMin>=R.socMin],
     ['Horas SOC = 0 (batería muerta)',fmt(R.hZero),fmt(S.hZero),S.hZero<=R.hZero],
-    ['Carga total (Wh)',fmt(R.chg),fmt(S.chg),null],
+    ['Carga total (Wh)',fmt(R.chg),fmt(S.chg),
+      NV('Cargar más no es mejor ni peor: con techo al 100 % entra más energía y también se envejece más.')],
     ['Consumo motor (Wh)',fmt(R.motor),fmt(S.motor),S.motor<=R.motor],
     ['Balance neto (Wh)',(R.net>=0?'+':'')+fmt(R.net),(S.net>=0?'+':'')+fmt(S.net),S.net>=R.net],
     ['Rainflow: ciclos totales',fmt(R.rf.total),fmt(S.rf.total),S.rf.total<=R.rf.total],
     ['Rainflow: ciclos ≥30% DoD',fmt(R.rf.dod30),fmt(S.rf.dod30),S.rf.dod30<=R.rf.dod30],
     ['Rainflow: ciclos ≥60% DoD',fmt(R.rf.dod60),fmt(S.rf.dod60),S.rf.dod60<=R.rf.dod60],
     ['EFC',fmt(R.cyc.efc,1),fmt(S.cyc.efc,1),S.cyc.efc<=R.cyc.efc],
-    ['SOC medio del periodo',fmt(R.cyc.socMean*100)+'%',fmt(S.cyc.socMean*100)+'%',null],
+    ['SOC medio del periodo',fmt(R.cyc.socMean*100)+'%',fmt(S.cyc.socMean*100)+'%',
+      NV('Tiene dos signos a la vez: bajarlo alarga la vida (fade calendario) y acorta la reserva. Su efecto ya se ve en las filas de fade y de disponibilidad.')],
     ['Fade por ciclado',fmt(R.cyc.cycYr,2)+'%',fmt(S.cyc.cycYr,2)+'%',S.cyc.cycYr<=R.cyc.cycYr],
     ['Fade calendario (SOC+Tª)',fmt(R.cyc.calYr,2)+'%',fmt(S.cyc.calYr,2)+'%',S.cyc.calYr<=R.cyc.calYr],
     ['Fade anual estimado',fmt(R.cyc.fadeYr,2)+'%',fmt(S.cyc.fadeYr,2)+'%',S.cyc.fadeYr<=R.cyc.fadeYr],
     ['Vida a 80% SOH (años)',fmt(R.cyc.years,1),fmt(S.cyc.years,1),S.cyc.years>=R.cyc.years]
   ];
   var tb2='<table class="cmp"><tr><th>Métrica</th><th>Sin estrategia</th><th>Con estrategia</th></tr>';
+  var mudas=0;
   rows.forEach(function(r){
-    var cls=r[3]===null?'':(r[3]?'ok':'bad');
-    tb2+='<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td class="'+cls+'">'+r[2]+'</td></tr>';
+    var v=r[3], cls='', marca='', tit='';
+    /* EMPATE: si las dos celdas ENSEÑAN el mismo número, no hay veredicto que
+       dar. Con `>=` sobre flotantes, un 22,49 % y un 22,46 % salen los dos como
+       «22%» y uno se pintaba rojo — dos valores idénticos en pantalla con
+       colores distintos. Eso destruye la confianza en el color, que es justo lo
+       que esta tabla acaba de arreglar. La tabla explica LO QUE MUESTRA. */
+    if(typeof v==='boolean' && r[1]===r[2]){ cls=''; tit=' title="Mismo valor a la resolución que se muestra: no hay diferencia que juzgar."'; }
+    else if(typeof v==='boolean'){ cls=v?'ok':'bad'; }
+    /* Sin veredicto A PROPÓSITO: la celda va limpia y el motivo en el tooltip.
+       No lleva marca pegada al número —se leía como una errata («565 ·»)— y no
+       le hace falta para distinguirse del olvido: ése sale en rojo y con ⚠. */
+    else if(v&&v.sinVeredicto){ tit=' title="Sin veredicto a propósito: '+v.sinVeredicto+'"'; }
+    else { /* Ni booleano ni motivo: el hueco se VE. Un blanco se lee como «no
+              pasa nada», que es exactamente cómo se coló el fallo anterior. */
+           cls='bad'; marca=' ⚠'; mudas++;
+           tit=' title="Esta fila no declara dirección ni motivo: alguien la dejó sin veredicto."'; }
+    tb2+='<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td class="'+cls+'"'+tit+'>'+r[2]+marca+'</td></tr>';
   });
-  c5.insertAdjacentHTML('beforeend',tb2+'</table>');
+  tb2+='</table>';
+
+  /* QUÉ SIGNIFICA EL ROJO AQUÍ, que sin esto se lee como avería.
+     La indisponibilidad con estrategia sube porque el seguidor SE APARCA a
+     propósito por debajo del SOC crítico. En el caso base eso no puede pasar
+     —corre con SOC crítico 0 %, así que la condición de aparcar no se cumple
+     nunca— y por eso toda su indisponibilidad ES batería muerta. Son dos cosas
+     distintas con el mismo nombre, y la tabla las sumaba en una fila. */
+  var defS=Math.max(0,S.hParked-S.hZero), defR=Math.max(0,R.hParked-R.hZero);
+  tb2+='<div class="note"><b>Cómo leer el rojo de las dos primeras filas.</b> Es un coste real y por eso va marcado, '+
+       'pero no todo es avería: de las '+fmt(S.hParked)+' h no disponibles con estrategia, <b>'+fmt(S.hZero)+' h son batería agotada</b> '+
+       'y <b>'+fmt(defS)+' h son defensa deliberada</b> por debajo del '+opts.socCrit+' % de SOC. '+
+       'El caso base corre con SOC crítico 0 %, así que nunca aparca por decisión propia'+
+       /* La coletilla sólo tiene sentido si el caso base TIENE horas que repartir:
+          con 0 h, «sus 0 h son íntegramente batería agotada» no dice nada. */
+       (R.hParked>0&&defR===0?' y sus '+fmt(R.hZero)+' h no disponibles son íntegramente batería agotada':'')+'. '+
+       'Lo que se compra con esas horas está en las filas de abajo: SOC medio '+fmt(R.cyc.socMean*100)+' % → '+fmt(S.cyc.socMean*100)+' %, '+
+       'y con él el fade calendario '+fmt(R.cyc.calYr,2)+' % → '+fmt(S.cyc.calYr,2)+' %/año, que es el '+
+       fmt(100*S.cyc.calYr/Math.max(S.cyc.fadeYr,1e-9))+' % del envejecimiento total. '+
+       'Si el intercambio compensa depende del coste de reemplazar baterías en campo frente al valor de esa producción, '+
+       'y eso esta tabla no lo sabe.</div>';
+  if(mudas)tb2+='<div class="note bad">⚠ '+fmt(mudas)+' fila(s) sin veredicto declarado. Ponle dirección o di por qué no la tiene (NV).</div>';
+  c5.insertAdjacentHTML('beforeend',tb2);
   out.appendChild(c5);
 }
 </script>
