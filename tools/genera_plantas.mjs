@@ -113,18 +113,26 @@ const DESTINO = join(RAIZ, 'sim/cartera.js');
    regenera. La constante de abajo es lo único que hay que tocar. */
 const EXPORT_CARTERA = 'cartera_20260909.csv';
 
-/* Nombre de columna → campo. EXPLÍCITO y obligatorio: si la cartera renombra una
-   cabecera, esto muere en vez de emitir el campo vacío. Un `emplazamiento` que se
-   queda en blanco no se ve; un catálogo que no se genera, sí.
+/* Campo → cabeceras que lo pueden traer. EXPLÍCITO y obligatorio: si la cartera
+   renombra una columna y no está en su lista, esto MUERE nombrándola en vez de
+   emitir el campo vacío. Un `emplazamiento` en blanco no se ve; un catálogo que
+   no se genera, sí.
 
-   `lng` es la longitud en la cartera y `lon` aquí. No es capricho de nadie: son
-   dos convenios vivos, y el sitio de traducirlos es este mapa y no la cabeza de
-   quien lea el fichero dentro de seis meses. */
+   Las alternativas NO son por si acaso: son dos versiones REALES del mismo
+   export. Hasta factiun-cartera#198 las coordenadas salían con la clave cruda de
+   la base —`lat` y `lng`, porque `LABELS` no las tenía— y desde entonces salen
+   como «Latitud» y «Longitud». Los dos ficheros existen y los dos se tienen que
+   poder leer: exigir solo el nuevo convertiría en basura el CSV que alguien
+   bajó ayer. La lista se lee de izquierda a derecha y gana la primera que esté.
+
+   Y aquí vive la traducción `lng`→`lon`, que son dos convenios vivos: el sitio de
+   traducirlos es este mapa, no la cabeza de quien lea el fichero en seis meses. */
 const COLUMNAS = {
-  'Nº': 'num', 'Proyecto': 'proyecto', 'Emplazamiento': 'emplazamiento',
-  'Provincia/Estado': 'provincia', 'País': 'pais', 'Estado PEM': 'estado_pem',
-  'Alimentación TCUs': 'alim_tcu', 'Batería TCU': 'bateria_tcu',
-  'Total trackers': 'trk_total', 'lat': 'lat', 'lng': 'lon',
+  num: ['Nº'], proyecto: ['Proyecto'], emplazamiento: ['Emplazamiento'],
+  provincia: ['Provincia/Estado'], pais: ['País'], estado_pem: ['Estado PEM'],
+  alim_tcu: ['Alimentación TCUs'], bateria_tcu: ['Batería TCU'],
+  trk_total: ['Total trackers'],
+  lat: ['Latitud', 'lat'], lon: ['Longitud', 'lng'],
 };
 
 /* Huso y horario de verano por PAÍS, para las plantas sin layout. Los nueve
@@ -203,18 +211,23 @@ function leeCartera() {
   }
   const filas = filasCSV(readFileSync(f, 'utf8').replace(/^\uFEFF/, ''));
   const cab = filas[0] || [];
-  /* Cada columna que se espera tiene que ESTAR. Si la cartera renombra una, el
-     generador muere nombrándola; sin esto el campo saldría vacío en el catálogo y
-     el hueco no se vería hasta que alguien echara en falta un dato. */
-  const faltan = Object.keys(COLUMNAS).filter(c => !cab.includes(c));
+  /* Cada campo tiene que llegar por ALGUNA de sus cabeceras. Si por ninguna, el
+     generador muere nombrando el campo y las alternativas que buscaba; sin esto
+     saldría vacío en el catálogo y el hueco no se vería hasta que alguien echara
+     en falta un dato. */
+  const pos = {}, faltan = [];
+  for (const [campo, nombres] of Object.entries(COLUMNAS)) {
+    const i = nombres.map(n => cab.indexOf(n)).find(k => k >= 0);
+    if (i === undefined) faltan.push(`${campo} (buscado como ${nombres.join(' o ')})`);
+    else pos[campo] = i;
+  }
   if (faltan.length) {
-    console.error('la exportación de la cartera ya no trae estas columnas:\n  - '
+    console.error('la exportación de la cartera no trae estos campos:\n  - '
       + faltan.join('\n  - ')
       + '\n\nCabeceras que sí trae:\n  ' + cab.join(' · ')
-      + '\n\nActualiza COLUMNAS con el nombre nuevo; no se adivina.');
+      + '\n\nAñade el nombre nuevo a su lista en COLUMNAS; no se adivina.');
     process.exit(2);
   }
-  const pos = {}; for (const [col, campo] of Object.entries(COLUMNAS)) pos[campo] = cab.indexOf(col);
   const num = x => { const v = String(x || '').trim().replace(',', '.'); return v === '' ? null : Number(v); };
   const txt = x => { const v = String(x || '').trim(); return v === '' ? null : v; };
 
