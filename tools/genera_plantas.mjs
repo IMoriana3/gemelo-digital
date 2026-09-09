@@ -4,10 +4,27 @@
    ## Por qué se genera y no se escribe
 
    El desplegable de emplazamientos de `bateria.html` llevaba diez sitios a mano.
-   La cartera real vive en `proyectos/cartera-tabla.html` (constante `SEED`) y las
+   La cartera real vive en `imoriana3/factiun-cartera` —Supabase, con login— y las
    coordenadas finas de cada planta en los `*_layout.json` de `cobertura-zigbee`.
    Tres listas a mano son tres listas que divergen — la enfermedad que este repo
    lleva toda la semana curando. Así que la lista se DERIVA de las dos fuentes.
+
+   ## Y la cartera de la que se deriva estuvo un tiempo siendo la equivocada
+
+   Hasta 2026-09-09 esto leía el `SEED` de `proyectos/cartera-tabla.html`. Parecía
+   la cartera —se llama así, tiene los mismos campos— y era otra cosa: una foto
+   sembrada de un Excel, editable en el navegador de cada uno. Llevaba **nueve
+   plantas de retraso** (Conselice, Minervino, Monsano, Ilio III, Agraval, SAP
+   Belcastro, Tuva y dos de los tres emplazamientos de Alconadre) y dieciséis
+   coordenadas menos.
+
+   Lo caro no fue el retraso, fue que no se veía: un catálogo de 22 plantas se lee
+   exactamente igual que uno de 31 si no sabes cuántas debería haber. Se descubrió
+   porque el mantenedor echó en falta una planta por su nombre.
+
+   De ahí la regla que gobierna este fichero: **de cada fuente se dice cuál es,
+   dónde está y de cuándo es el dato**. La exportación lleva la fecha en el nombre
+   y el catálogo la publica en `_fuentes`.
 
    ## Cada planta viaja con la PROCEDENCIA de sus coordenadas
 
@@ -17,14 +34,16 @@
      · "layout:<x>"   — centroide del layout real de cobertura-zigbee. Es el que
                         MANDA cuando existe: sale de las posiciones reales de los
                         seguidores, mientras que la cartera es una transcripción.
-     · "cartera"      — lat/lon rellenados en la cartera. Respaldo.
-     · "pendiente"    — venían del `LOCS` a mano de index.html, a 3 decimales
-                        (~110 m) y sin procedencia declarada: pueden ser el
-                        centroide del pueblo y no el de la planta. Es lo más
-                        grueso de las tres, va la ÚLTIMA y etiquetada, y su sitio
-                        definitivo es la cartera. PENDIENTE de confirmar.
+     · "cartera"      — lat/lon rellenados en la cartera viva. Respaldo, y el
+                        único origen de las plantas que no tienen layout.
      · null           — SIN COORDENADAS. La planta aparece en el desplegable pero
                         no se puede simular, y el desplegable dice por qué.
+
+   Hubo un cuarto valor, "pendiente": tres coordenadas a 3 decimales heredadas del
+   `LOCS` a mano de index.html, sin procedencia declarada. Murió con la cartera
+   viva, que trae las tres de verdad — y menos mal que iban etiquetadas: la de
+   Alconadre estaba a **12,4 km** del emplazamiento real. Un número verosímil no
+   se ve; una etiqueta que dice «esto es provisional», sí.
 
    Lo que NO se hace: inventar la coordenada del pueblo cuando falta la de la
    planta. Un número verosímil sobre el sitio equivocado es peor que un hueco,
@@ -47,12 +66,13 @@
 
    ## Tres cosas distintas que la gente confunde
 
-     · la CARTERA      — los proyectos (`SEED`), tengan layout o no.
+     · la CARTERA      — los proyectos de factiun-cartera, tengan layout o no.
      · los LAYOUTS     — las plantas levantadas, tengan ficha o no.
      · este CATÁLOGO   — la unión, que es lo que el gemelo puede simular, con
                          `en_cartera:false` en las que están sólo en la segunda.
 
-       node tools/genera_plantas.mjs --desde <clon-de-proyectos> [--check]
+       node tools/genera_plantas.mjs [--desde <clon-de-proyectos>]
+                                     [--cobertura <clon-de-cobertura-zigbee>] [--check]
 */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -73,38 +93,55 @@ const CHECK = args.includes('--check');
    `PLANTAS_REALES`, las posiciones de cada seguidor sacadas de los layouts del
    DWG, que genera tools/extrae_plantas.mjs—. Son dos cosas de alcance distinto y
    compartían nombre por accidente: el plano tiene las 11 plantas con layout; la
-   cartera, los 22 PROYECTOS, tengan layout o no. Se cruzan por el número de
+   cartera, los PROYECTOS, tengan layout o no. Se cruzan por el número de
    proyecto, no se sustituyen. */
 const DESTINO = join(RAIZ, 'sim/cartera.js');
 
-/* Coordenadas que NO están en la cartera ni en un layout, y que hasta ahora vivían
-   en el `LOCS` a mano de index.html. Se traen aquí porque index.html pasa a CONSUMIR
-   este catálogo: si siguiera siendo su fuente, el generador leería de quien lee del
-   generador. Alguien tiene que tener el dato primero, y mientras la cartera no lo
-   lleve, lo tiene esta tabla.
+/* LA EXPORTACIÓN DE LA CARTERA VIVA.
+   Hasta hoy este generador leía el `SEED` de `proyectos/cartera-tabla.html`, y
+   estaba leyendo la cartera EQUIVOCADA. La viva es `imoriana3/factiun-cartera`:
+   Supabase, con login, y es donde se dan de alta los proyectos. El SEED es otra
+   cosa —una foto sembrada de un Excel, editable en el navegador— y llevaba nueve
+   plantas de retraso: Conselice, Minervino, Monsano, Ilio III, Agraval, SAP
+   Belcastro, Tuva y las dos Alconadre que faltaban no existían para el gemelo.
 
-   OJO CON LA PRECISIÓN: 3 decimales (~110 m) y sin procedencia declarada — pueden
-   ser el centroide del pueblo y no el de la planta. Sirven para el recurso solar;
-   no para llamarlas «la planta». Va dicho en `fuente` y en el tooltip.
+   La base pide login, así que lo que se versiona aquí es su EXPORTACIÓN — el
+   `⬇ CSV` de la propia cartera, tal cual sale. Fecha en el nombre y a la vista:
+   un catálogo derivado de una foto tiene que decir de cuándo es la foto.
 
-   SITIO PROVISIONAL: en cuanto estas tres tengan lat/lon en la cartera, esta tabla
-   se borra y se toman de allí, que es donde deben vivir. */
-const COORD_PENDIENTES = {
-  24024: { lat: 41.85,  lon: -0.15   },   /* Alconadre · Huesca */
-  25032: { lat: 41.254, lon: 16.351  },   /* Trani · Apulia */
-  26009: { lat: 39.210, lon: -8.774  },   /* Valle de Moinhos */
+   Para actualizar: ⬇ CSV en la cartera, se deja el fichero en `datos/` y se
+   regenera. La constante de abajo es lo único que hay que tocar. */
+const EXPORT_CARTERA = 'cartera_20260909.csv';
+
+/* Nombre de columna → campo. EXPLÍCITO y obligatorio: si la cartera renombra una
+   cabecera, esto muere en vez de emitir el campo vacío. Un `emplazamiento` que se
+   queda en blanco no se ve; un catálogo que no se genera, sí.
+
+   `lng` es la longitud en la cartera y `lon` aquí. No es capricho de nadie: son
+   dos convenios vivos, y el sitio de traducirlos es este mapa y no la cabeza de
+   quien lea el fichero dentro de seis meses. */
+const COLUMNAS = {
+  'Nº': 'num', 'Proyecto': 'proyecto', 'Emplazamiento': 'emplazamiento',
+  'Provincia/Estado': 'provincia', 'País': 'pais', 'Estado PEM': 'estado_pem',
+  'Alimentación TCUs': 'alim_tcu', 'Batería TCU': 'bateria_tcu',
+  'Total trackers': 'trk_total', 'lat': 'lat', 'lng': 'lon',
 };
 
-/* Huso y horario de verano por PAÍS. No es una suposición: son los nueve
-   emplazamientos que index.html tenía a mano, y en los nueve `tz` y `dst` quedan
-   determinados por el país sin una sola excepción — comprobado antes de derivarlos.
-   Y coinciden con la realidad: la UE aplica horario de verano; Túnez y Perú no. */
+/* Huso y horario de verano por PAÍS, para las plantas sin layout. Los nueve
+   emplazamientos que index.html tenía a mano quedaban determinados por el país
+   sin una sola excepción, comprobado antes de derivarlos, y coinciden con la
+   realidad: la UE aplica horario de verano; Túnez, Perú y la India no.
+
+   La India entra con la cartera viva (Agraval y Tuva) y trae media hora: UTC+5:30.
+   Por eso `tz` va en HORAS y no en un entero — con enteros, media India se
+   simularía con media hora de error y nadie lo vería en la gráfica. */
 const HUSO = {
-  'España':   { tz: 1,  dst: true  },
-  'Italia':   { tz: 1,  dst: true  },
-  'Portugal': { tz: 0,  dst: true  },
-  'Túnez':    { tz: 1,  dst: false },
-  'Perú':     { tz: -5, dst: false },
+  'España':   { tz: 1,   dst: true  },
+  'Italia':   { tz: 1,   dst: true  },
+  'Portugal': { tz: 0,   dst: true  },
+  'Túnez':    { tz: 1,   dst: false },
+  'Perú':     { tz: -5,  dst: false },
+  'India':    { tz: 5.5, dst: false },
 };
 
 /* El emparejado layout ↔ cartera NO se escribe aquí: se PIDE.
@@ -137,20 +174,71 @@ function leeIndiceLayouts() {
   return d.plantas;
 }
 
+/* CSV con separador `;` y campos entrecomillados, que es lo que exporta la
+   cartera. Se parsea entero en vez de partir por `;`: hay campos con saltos de
+   línea dentro (la columna String de El Polvorín lleva seis) y un `split` los
+   convertiría en filas fantasma. */
+function filasCSV(t) {
+  const filas = []; let f = [], c = '', comillas = false;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (comillas) {
+      if (ch === '"') { if (t[i + 1] === '"') { c += '"'; i++; } else comillas = false; }
+      else c += ch;
+    } else if (ch === '"') comillas = true;
+    else if (ch === ';') { f.push(c); c = ''; }
+    else if (ch === '\n') { f.push(c); c = ''; filas.push(f); f = []; }
+    else if (ch !== '\r') c += ch;
+  }
+  if (c !== '' || f.length) { f.push(c); filas.push(f); }
+  return filas;
+}
+
 function leeCartera() {
-  const f = join(PROYECTOS, 'cartera-tabla.html');
-  if (!existsSync(f)) { console.error(`no encuentro ${f} — pasa --desde <clon-de-proyectos>`); process.exit(2); }
-  const s = readFileSync(f, 'utf8');
-  const m = s.match(/const SEED = (\[[\s\S]*?\]);/);
-  if (!m) { console.error('cartera-tabla.html ya no declara `const SEED = [...]`: mira el diff antes de tocar este script'); process.exit(2); }
+  const f = join(RAIZ, 'datos', EXPORT_CARTERA);
+  if (!existsSync(f)) {
+    console.error(`no encuentro ${f}.\nBaja el CSV de la cartera (factiun-cartera, botón ⬇ CSV), `
+      + 'déjalo en datos/ y apunta EXPORT_CARTERA a él.');
+    process.exit(2);
+  }
+  const filas = filasCSV(readFileSync(f, 'utf8').replace(/^\uFEFF/, ''));
+  const cab = filas[0] || [];
+  /* Cada columna que se espera tiene que ESTAR. Si la cartera renombra una, el
+     generador muere nombrándola; sin esto el campo saldría vacío en el catálogo y
+     el hueco no se vería hasta que alguien echara en falta un dato. */
+  const faltan = Object.keys(COLUMNAS).filter(c => !cab.includes(c));
+  if (faltan.length) {
+    console.error('la exportación de la cartera ya no trae estas columnas:\n  - '
+      + faltan.join('\n  - ')
+      + '\n\nCabeceras que sí trae:\n  ' + cab.join(' · ')
+      + '\n\nActualiza COLUMNAS con el nombre nuevo; no se adivina.');
+    process.exit(2);
+  }
+  const pos = {}; for (const [col, campo] of Object.entries(COLUMNAS)) pos[campo] = cab.indexOf(col);
+  const num = x => { const v = String(x || '').trim().replace(',', '.'); return v === '' ? null : Number(v); };
+  const txt = x => { const v = String(x || '').trim(); return v === '' ? null : v; };
+
+  const cartera = filas.slice(1).filter(r => r.some(v => v !== '')).map(r => ({
+    num: txt(r[pos.num]), proyecto: txt(r[pos.proyecto]),
+    emplazamiento: txt(r[pos.emplazamiento]), provincia: txt(r[pos.provincia]),
+    pais: txt(r[pos.pais]), estado_pem: txt(r[pos.estado_pem]),
+    alim_tcu: txt(r[pos.alim_tcu]), bateria_tcu: txt(r[pos.bateria_tcu]),
+    trk_total: num(r[pos.trk_total]),
+    lat: num(r[pos.lat]), lon: num(r[pos.lon]),
+  }));
+  if (!cartera.length) { console.error('la exportación no trae ninguna planta'); process.exit(2); }
+
   /* El número de la HOJA no siempre es el número con el que se ROTULA la planta.
      El Burgo es 24002 en la cartera y 23003 en el DWG y en el Excel de siting, y
      está decidido (2026-08-13) que se rotula el 23003. La equivalencia es canónica
-     y vive AQUÍ MISMO, en `const NPROY` — se lee, no se copia: una segunda tabla
-     de equivalencias es una segunda tabla que se queda atrás. */
-  const n = s.match(/const NPROY\s*=\s*(\{[^}]*\});/);
+     y vive en `proyectos/cartera-tabla.html`, en `const NPROY` — se lee, no se
+     copia: una segunda tabla de equivalencias es una segunda tabla que se queda
+     atrás. Es lo ÚNICO que se sigue leyendo de ahí. */
+  const g = join(PROYECTOS, 'cartera-tabla.html');
+  if (!existsSync(g)) { console.error(`no encuentro ${g} — pasa --desde <clon-de-proyectos>`); process.exit(2); }
+  const n = readFileSync(g, 'utf8').match(/const NPROY\s*=\s*(\{[^}]*\});/);
   if (!n) { console.error('cartera-tabla.html ya no declara `const NPROY = {...}`: sin él no sé con qué número se rotula cada planta'); process.exit(2); }
-  return { seed: JSON.parse(m[1]), nproy: JSON.parse(n[1].replace(/'/g, '"')) };
+  return { cartera, nproy: JSON.parse(n[1].replace(/'/g, '"')) };
 }
 
 function leeLayout(nombre) {
@@ -173,7 +261,7 @@ function huso(ent, pais) {
   return { tz: h ? h.tz : null, dst: h ? h.dst : null };
 }
 
-const { seed, nproy } = leeCartera();
+const { cartera, nproy } = leeCartera();
 const INDICE = leeIndiceLayouts();
 /* nº de cartera → entrada del índice. Las que el índice deja con `codigo: null`
    no tienen proyecto en la cartera y se tratan abajo, aparte. */
@@ -181,7 +269,7 @@ const PorCodigo = {};
 for (const e of INDICE) if (e.codigo != null) PorCodigo[String(e.codigo)] = e;
 const reclamados = new Set();
 
-const plantas = seed.map(p => {
+const plantas = cartera.map(p => {
   const num = p.num;
   /* PRECEDENCIA: el layout ANTES que la cartera, porque es el dato más fino — el
      centroide sale de las posiciones reales de los seguidores y la cartera es una
@@ -199,10 +287,6 @@ const plantas = seed.map(p => {
   const c = nom ? leeLayout(nom) : null;
   if (c) { lat = c.lat; lon = c.lon; fuente = `layout:${nom}`; }
   else if (p.lat != null && p.lon != null) { lat = p.lat; lon = p.lon; fuente = 'cartera'; }
-  else {
-    const g = COORD_PENDIENTES[num] ?? COORD_PENDIENTES[String(num)];
-    if (g) { lat = g.lat; lon = g.lon; fuente = 'pendiente'; }
-  }
   const rotulo = nproy[String(num)] || String(num);
   return {
     /* `num` es con el que se ROTULA; `num_cartera` la clave de la hoja. Los dos
@@ -278,6 +362,28 @@ for (const grupo of Object.values(porNombre)) {
    tiene que acabar en el catálogo, reclamada por un proyecto o emitida aparte, y
    si alguna no lo hace el generador MUERE en vez de publicar una lista corta. Un
    catálogo al que le falta una planta se lee exactamente igual que uno completo. */
+/* UN LAYOUT, UNA PLANTA. La cartera viva repite número: `24024` son TRES
+   emplazamientos de Alconadre (Sodeto, San Miguel y Peralta de Alcofea), y el
+   emparejado va por número. Hoy ese número no tiene layout y no pasa nada; el día
+   que lo tenga, las tres se llevarían el MISMO centroide y saldrían las tres
+   plantadas en el mismo sitio.
+   Es exactamente el fallo de Benante y Panbianco —dos plantas a 500 m con las
+   coordenadas de una sola— que ya se pagó una vez aquí. Que no haya que verlo dos
+   veces: si un layout lo reclama más de una fila, esto muere. */
+const porLayout = {};
+for (const p of plantas) {
+  if (!p.fuente || !p.fuente.startsWith('layout:')) continue;
+  (porLayout[p.fuente.slice(7)] = porLayout[p.fuente.slice(7)] || []).push(p);
+}
+const compartidos = Object.entries(porLayout).filter(([, v]) => v.length > 1);
+if (compartidos.length) {
+  console.error('Un layout no puede ser de dos plantas a la vez:\n  - '
+    + compartidos.map(([l, v]) => `${l} lo reclaman ${v.map(x => x.num + ' ' + x.proyecto).join(' Y ')}`).join('\n  - ')
+    + '\n\nLa cartera repite ese número en varias filas. Hace falta desambiguar el'
+    + '\nemparejado (por emplazamiento, o dando número propio a cada una en la cartera).');
+  process.exit(2);
+}
+
 const emitidos = new Set(plantas.filter(p => p.fuente && p.fuente.startsWith('layout:'))
                                 .map(p => p.fuente.slice(7)));
 const huerfanos = INDICE.filter(e => !emitidos.has(e.planta));
@@ -296,7 +402,8 @@ const salida = {
          + 'cobertura-zigbee. NO editar a mano: se rellena lat/lon EN LA CARTERA y se '
          + 'regenera.',
   _fuentes: {
-    cartera: 'proyectos/cartera-tabla.html · const SEED',
+    cartera: 'factiun-cartera (Supabase) · exportación ⬇ CSV en datos/' + EXPORT_CARTERA,
+    rotulos: 'proyectos/cartera-tabla.html · const NPROY (equivalencia de números)',
     emparejado: 'cobertura-zigbee/plantas_indice.json · código de cartera y huso por layout',
     layouts: 'cobertura-zigbee/<planta>_layout.json · clat/clon (centroide real)',
   },
