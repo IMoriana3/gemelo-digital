@@ -54,7 +54,27 @@ const ok = (c, m, x) => {
 /* ── los arneses que NO bloquean, uno a uno y con su porqué ──
    `motivo` explica por qué no es puerta HOY; `para_meterlo` es lo que haría
    falta, para que la exclusión no se lea como «esto nunca». */
-const EXCLUIDOS = {};
+const EXCLUIDOS = {
+  'tools/carea_resultado.mjs': {
+    motivo:
+      'Carea el resultado del espejo JS contra `solargpt_core.tcu_compare`, y '
+      + 'SolarGPTfull es un repositorio PRIVADO. El GITHUB_TOKEN por defecto está '
+      + 'limitado al repositorio donde corre, así que un `git fetch` de otro repo '
+      + 'privado muere con «could not read Username» — medido en la tirada 1 del '
+      + 'workflow, no supuesto. No es un descuido de configuración: es el alcance '
+      + 'del token. Se corre en local, donde el clon está al lado.',
+    para_meterlo:
+      'Un secreto del repositorio con acceso de LECTURA a SolarGPTfull (un PAT de '
+      + 'grano fino, o una GitHub App instalada en los dos), usado en el `git '
+      + 'fetch` de ese hermano. Lo provisiona el mantenedor: no es una decisión '
+      + 'técnica, es dar acceso a un repo privado desde otro.',
+    lo_que_NO_queda_sin_vigilar:
+      'El espejo de física NO se queda desnudo por esto: `carea_fisica.mjs` lo '
+      + 'carea función a función contra `sim/goldens-fisica.json`, que está '
+      + 'versionado aquí, y ése SÍ está en la puerta. Lo que se pierde es el careo '
+      + 'del RESULTADO día a día contra el core vivo.',
+  },
+};
 
 /* ── los que corren en CI y NO bloquean, con el porqué ──
    Que un arnés no bloquee tiene que ser una DECISIÓN escrita, no el efecto de
@@ -177,8 +197,13 @@ ok(zombis.length === 0,
    que «ídem.» no cuele. Ese fue el hallazgo real la primera vez que esta regla
    se aplicó en la casa: tres motivos escritos como «ídem.», pereza del propio
    autor de la regla. */
+/* Una exclusión se declara como objeto (lleva `motivo` y `para_meterlo`); las
+   otras dos cajas, como cadena. Leer el objeto con `String()` daría
+   «[object Object]» —15 caracteres— y esta comprobación se pondría roja por la
+   FORMA en vez de por la sustancia, señalando un motivo que sí está escrito. */
+const textoDe = m => (m && typeof m === 'object' ? m.motivo : m);
 const flojos = Object.entries({ ...EXCLUIDOS, ...NO_ES_ARNES, ...VIGILANTES })
-  .filter(([, m]) => String(m).trim().length < 60)
+  .filter(([, m]) => String(textoDe(m) ?? '').trim().length < 60)
   .map(([f]) => f);
 ok(flojos.length === 0,
    'todo motivo declarado tiene sustancia (≥60 caracteres)', flojos.join(', '));

@@ -32,7 +32,8 @@
       "commit": "d7a55d0abb6678082df2d7546336dabc2c6ac7e2",
       "para_que": "`solargpt_core.tcu_compare` — el core en Python contra el que `tools/carea_resultado.mjs` carea el resultado del espejo JS día a día.",
       "lo_usan": ["tools/carea_resultado.mjs"],
-      "verificado": "2026-09-09 · 5/5 careos contra este commit · importa con numpy y pandas, sin pvlib"
+      "verificado": "2026-09-09 · 5/5 careos contra este commit · importa con numpy y pandas, sin pvlib",
+      "CI_NO_LO_ALCANZA": "Este repo es PRIVADO y el GITHUB_TOKEN por defecto se limita al repositorio donde corre, así que la puerta no puede clonarlo (medido: la tirada 1 murió con «could not read Username» justo en este fetch, tras clonar los dos públicos sin problema). Por eso `carea_resultado.mjs` está en EXCLUIDOS de tools/inventario_arneses.mjs, con lo que haría falta para meterlo. El pin se conserva porque en LOCAL sí se usa, y el vigilante lo dirá como «no verificable» en cada tirada en vez de callárselo."
     }
   },
 

@@ -52,7 +52,7 @@ const pines = JSON.parse(readFileSync(join(RAIZ, 'pines.json'), 'utf8'));
 const git = (dir, ...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' }).trim();
 
 const tmp = mkdtempSync(join(tmpdir(), 'gem-deriva-'));
-let alDia = 0, movidos = 0;
+let alDia = 0, movidos = 0, ciegos = 0;
 try {
   for (const [repo, meta] of Object.entries(pines.repos)) {
     const pin = meta.commit;
@@ -72,7 +72,16 @@ try {
     } catch (e) {
       /* Un vigilante que no puede mirar lo DICE. Callarlo sería indistinguible
          de «no hay deriva», que es la mentira más cara de las dos. */
-      console.log(`   NO VERIFICABLE — no he podido clonar (${String(e.message).split('\n')[0]})`);
+      ciegos++;
+      console.log('   NO VERIFICABLE — no he podido clonarlo.');
+      console.log(`     ${String(e.message).split('\n')[0]}`);
+      /* La causa esperada tiene nombre y conviene decirlo: en CI, el
+         GITHUB_TOKEN por defecto sólo alcanza al repositorio donde corre, así
+         que un hermano PRIVADO no se puede clonar. Aquí pasa con SolarGPTfull.
+         Decir «no pude» sin decir «probablemente por esto» deja al que lo lea
+         buscando una avería que no existe. */
+      console.log('     Si es un repo PRIVADO, es lo esperado en CI: el GITHUB_TOKEN por');
+      console.log('     defecto se limita a este repositorio. En local, con acceso, sí se ve.');
       continue;
     }
     const punta = git(dir, 'rev-parse', 'origin/main');
@@ -103,7 +112,13 @@ try {
     }
   }
 
-  console.log(`\n${alDia} al día · ${movidos} movidos`);
+  /* Los ciegos van EN EL RESUMEN, no sólo arriba. «0 al día · 0 movidos» tras no
+     haber podido mirar ninguno se lee como «todo en orden», y es el vacío
+     contado como verificación. Un vigilante tiene que decir cuánto NO vio. */
+  console.log(`\n${alDia} al día · ${movidos} movidos · ${ciegos} no verificables`);
+  if (ciegos && !alDia && !movidos) {
+    console.log('OJO: no he podido mirar NINGUNO. Esto no es «sin deriva», es «sin datos».');
+  }
   console.log('Esto NO bloquea: es un aviso, no una puerta. Ver la cabecera para el porqué.');
 } finally {
   rmSync(tmp, { recursive: true, force: true });

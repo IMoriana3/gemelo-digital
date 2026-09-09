@@ -10,11 +10,18 @@
 #
 # ESTRUCTURA, y el porqué de cada trozo:
 #
-#   arneses        BLOQUEA · los seis de node/python. Clona los repos hermanos
-#                  por el COMMIT DEL PIN (ver pines.json), no por su punta.
+#   arneses        BLOQUEA · los de node. Clona los repos hermanos PÚBLICOS por
+#                  el COMMIT DEL PIN (ver pines.json), no por su punta.
 #   navegador      BLOQUEA · los dos que abren una página de verdad.
 #   inventario     BLOQUEA · el guard del guard: ningún .mjs sin clasificar.
 #   deriva         NO BLOQUEA · qué se ha movido en los hermanos desde el pin.
+#
+# LO QUE NO ALCANZA, y va dicho aquí y en la lista de exclusiones:
+# `carea_resultado.mjs` carea contra `solargpt_core` y SolarGPTfull es PRIVADO.
+# El GITHUB_TOKEN por defecto sólo alcanza a este repositorio, así que CI no
+# puede clonarlo. Se corre en local. El espejo NO se queda sin vigilancia por
+# eso: `carea_fisica.mjs` lo carea función a función contra un golden
+# versionado, y ése sí está en la puerta.
 #
 # `set -o pipefail` va en TODOS los `run` con tubería, y ningún veredicto sale de
 # un código de salida que atraviesa un pipe: el corolario 4 de la casa mordió dos
@@ -52,10 +59,16 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
 
-      # Los hermanos se clonan al LADO, porque `carea_resultado.mjs` resuelve el
-      # core como `../SolarGPTfull/solargpt` y esa es su disposición natural.
-      # El commit sale de pines.json: tenerlo también aquí serían dos sitios con
-      # el mismo dato, que es como se separan.
+      # Los hermanos se clonan al LADO, que es la disposición que los arneses
+      # esperan. El commit sale de pines.json: tenerlo también aquí serían dos
+      # sitios con el mismo dato, que es como se separan.
+      #
+      # SOLO LOS DOS PÚBLICOS. `SolarGPTfull` es privado y el GITHUB_TOKEN por
+      # defecto está limitado a ESTE repositorio, así que un `git fetch` de otro
+      # repo privado muere con «could not read Username». No es un descuido de
+      # configuración: es el alcance del token. Ver `carea_resultado.mjs` en la
+      # lista EXCLUIDOS de tools/inventario_arneses.mjs, donde está dicho qué
+      # haría falta para meterlo.
       - name: Clonar los hermanos POR EL PIN
         run: |
           set -o pipefail
@@ -71,7 +84,6 @@ jobs:
           }
           clonar proyectos        "$(leer proyectos)"
           clonar cobertura-zigbee "$(leer cobertura-zigbee)"
-          clonar SolarGPTfull     "$(leer SolarGPTfull)"
 
       # El clon TIENE que estar en el commit del pin. Sin esto, el día que
       # alguien cambie el paso de arriba por un `clone` a secas, la referencia
@@ -82,16 +94,13 @@ jobs:
         run: |
           set -o pipefail
           fallo=0
-          for r in proyectos cobertura-zigbee SolarGPTfull; do
+          for r in proyectos cobertura-zigbee; do
             esperado=$(python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['$r']['commit'])")
             real=$(git -C "$r" rev-parse HEAD)
             if [ "$esperado" = "$real" ]; then echo "OK   $r en $real"
             else echo "MAL  $r está en $real y el pin dice $esperado"; fallo=1; fi
           done
           exit $fallo
-
-      - name: numpy y pandas para el careo contra el core
-        run: python3 -m pip install --quiet numpy pandas
 
       - name: sim/prueba.mjs
         working-directory: gemelo-digital
@@ -104,10 +113,6 @@ jobs:
       - name: tools/carea_difusa.mjs
         working-directory: gemelo-digital
         run: node tools/carea_difusa.mjs
-
-      - name: tools/carea_resultado.mjs  (espejo JS vs core Python)
-        working-directory: gemelo-digital
-        run: node tools/carea_resultado.mjs
 
       - name: El catálogo está regenerado
         working-directory: gemelo-digital
