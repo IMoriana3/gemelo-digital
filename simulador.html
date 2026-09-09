@@ -734,9 +734,13 @@ function aplicaEstrategia(manual) {
   $('fcDaysV').innerHTML = E.fcDays + (E.fcDays === 1 ? ' día' : ' días') + canon;
   $('tMinV').textContent = E.tMin + ' °C';
   $('poaMinV').textContent = E.poaMin + ' W/m²';
+  /* El winter mode es techo y calibración, y NADA MÁS: no toca el seguimiento.
+     Esta nota decía además «consumo de motor a 3 °/h en vez de 10», que era la
+     regla retirada el 2026-09-09 — y decirlo aquí era además la tercera copia de
+     una semántica que no estaba en el core. */
   $('winterNota').innerHTML = 'Canónico: techo ' + pol.invierno.socMax + ' %, calibración cada ' +
-    pol.invierno.calibDias + ' días y consumo de motor a ' + SIM.K.DEG_H_WINTER + ' °/h en vez de ' +
-    SIM.K.DEG_H_NORMAL + '. Verano: ' + pol.verano.socMax + ' % / ' + pol.verano.calibDias + ' d.';
+    pol.invierno.calibDias + ' días. No cambia el seguimiento. Verano: ' +
+    pol.verano.socMax + ' % / ' + pol.verano.calibDias + ' d.';
   $('fisicaNota').innerHTML = 'Esta física no se escribe aquí: <code>sim/fisica.js</code> es el <b>espejo</b> del core ' +
     '(<b>solargpt_core/tcu_compare.py</b> y <b>tcu.py</b>: motor medido, calefactor, regulador y ' +
     'políticas), y <code>tools/carea_fisica.mjs</code> lo carea contra sus goldens a 1e-9. ' +
