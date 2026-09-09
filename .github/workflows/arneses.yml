@@ -1,0 +1,177 @@
+# LA PUERTA DE ESTE REPO
+# ======================
+# Hasta hoy este repo tenía SIETE arneses y CERO puertas: todos se lanzaban a
+# mano, cuando alguien se acordaba. La doctrina del repo dice que un check que no
+# bloquea es decorativo, y aquí ya se ha pagado dos veces —`sync_seguidor.py
+# --check` llevaba meses en rojo sin que lo mirara nadie, y la copia del gemelo se
+# quedó atrás CON UN BUG DE FÍSICA DENTRO (el seguidor cruzando 110° al dar el
+# mediodía con 60 km/h) teniendo la advertencia escrita en la cabecera del propio
+# fichero. Una promesa en un comentario no es un mecanismo.
+#
+# ESTRUCTURA, y el porqué de cada trozo:
+#
+#   arneses        BLOQUEA · los seis de node/python. Clona los repos hermanos
+#                  por el COMMIT DEL PIN (ver pines.json), no por su punta.
+#   navegador      BLOQUEA · los dos que abren una página de verdad.
+#   inventario     BLOQUEA · el guard del guard: ningún .mjs sin clasificar.
+#   deriva         NO BLOQUEA · qué se ha movido en los hermanos desde el pin.
+#
+# `set -o pipefail` va en TODOS los `run` con tubería, y ningún veredicto sale de
+# un código de salida que atraviesa un pipe: el corolario 4 de la casa mordió dos
+# veces el mismo día en que se escribió.
+
+name: arneses
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Los arneses que no necesitan navegador. Van juntos y NO con `continue-on-
+  # error`: si uno cae, la PR se para. Ese es el punto.
+  # ─────────────────────────────────────────────────────────────────────────
+  arneses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: gemelo-digital }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      # Los hermanos se clonan al LADO, porque `carea_resultado.mjs` resuelve el
+      # core como `../SolarGPTfull/solargpt` y esa es su disposición natural.
+      # El commit sale de pines.json: tenerlo también aquí serían dos sitios con
+      # el mismo dato, que es como se separan.
+      - name: Clonar los hermanos POR EL PIN
+        run: |
+          set -o pipefail
+          leer () { python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['$1']['commit'])"; }
+          clonar () {
+            local repo=$1 sha=$2
+            echo "── $repo → $sha"
+            git init -q "$repo" && cd "$repo"
+            git remote add origin "https://github.com/${{ github.repository_owner }}/$repo.git"
+            git fetch -q --depth 1 origin "$sha"
+            git checkout -q FETCH_HEAD
+            cd ..
+          }
+          clonar proyectos        "$(leer proyectos)"
+          clonar cobertura-zigbee "$(leer cobertura-zigbee)"
+          clonar SolarGPTfull     "$(leer SolarGPTfull)"
+
+      # El clon TIENE que estar en el commit del pin. Sin esto, el día que
+      # alguien cambie el paso de arriba por un `clone` a secas, la referencia
+      # vuelve a moverse sola y nadie se entera: la puerta seguiría verde
+      # midiendo otra cosa. Es la comprobación que impide que el pin sea una
+      # tautología, y va FUERA del arnés que protege.
+      - name: El clon está en el pin, no en la punta
+        run: |
+          set -o pipefail
+          fallo=0
+          for r in proyectos cobertura-zigbee SolarGPTfull; do
+            esperado=$(python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['$r']['commit'])")
+            real=$(git -C "$r" rev-parse HEAD)
+            if [ "$esperado" = "$real" ]; then echo "OK   $r en $real"
+            else echo "MAL  $r está en $real y el pin dice $esperado"; fallo=1; fi
+          done
+          exit $fallo
+
+      - name: numpy y pandas para el careo contra el core
+        run: python3 -m pip install --quiet numpy pandas
+
+      - name: sim/prueba.mjs
+        working-directory: gemelo-digital
+        run: node sim/prueba.mjs
+
+      - name: tools/carea_fisica.mjs
+        working-directory: gemelo-digital
+        run: node tools/carea_fisica.mjs
+
+      - name: tools/carea_difusa.mjs
+        working-directory: gemelo-digital
+        run: node tools/carea_difusa.mjs
+
+      - name: tools/carea_resultado.mjs  (espejo JS vs core Python)
+        working-directory: gemelo-digital
+        run: node tools/carea_resultado.mjs
+
+      - name: El catálogo está regenerado
+        working-directory: gemelo-digital
+        run: node tools/genera_plantas.mjs --check --desde ../proyectos --cobertura ../cobertura-zigbee
+
+      - name: tools/prueba_cartera.mjs
+        working-directory: gemelo-digital
+        run: node tools/prueba_cartera.mjs --desde ../proyectos --cobertura ../cobertura-zigbee
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Los que abren una página. Aparte porque instalan un navegador: si eso falla,
+  # el rojo dice «el navegador» y no contamina la atribución del trabajo de
+  # arriba.
+  # ─────────────────────────────────────────────────────────────────────────
+  navegador:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      # La versión sale de pines.json por el mismo motivo que los commits: sin
+      # fijarla, estos dos arneses carean contra un navegador distinto cada
+      # semana. Este repo no versiona package.json (está en .gitignore), así que
+      # la instalación es de CI y no deja rastro en el árbol.
+      - name: playwright, en la versión del pin
+        run: |
+          set -o pipefail
+          v=$(python3 -c "import json;print(json.load(open('pines.json'))['playwright']['version'])")
+          echo "── playwright $v"
+          npm i --no-audit --no-fund --no-save "playwright@$v"
+          npx playwright install --with-deps chromium
+
+      - name: tools/prueba_bateria.mjs
+        run: node tools/prueba_bateria.mjs
+
+      - name: tools/prueba_simulador.mjs
+        run: node tools/prueba_simulador.mjs
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Que nadie añada un arnés y se olvide de enchufarlo. Sin esto, la puerta
+  # protege lo que protegía el día que se escribió y se queda ahí.
+  # ─────────────────────────────────────────────────────────────────────────
+  inventario:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: node tools/inventario_arneses.mjs
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # NO BLOQUEA, y es una decisión. Perder de vista que el hermano evoluciona es
+  # el fallo contrario al blanco móvil, y también está pagado en esta casa. Pero
+  # un aviso que tumba PRs por un cambio ajeno deja de ser aviso y se vuelve
+  # peaje. Informa, sale con 0 siempre, y convertirlo en puerta tendrá que ser
+  # una decisión y no un descuido.
+  # ─────────────────────────────────────────────────────────────────────────
+  deriva:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: ¿se han movido los hermanos desde el pin?
+        run: node tools/deriva_pines.mjs --owner "${{ github.repository_owner }}"

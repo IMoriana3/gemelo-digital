@@ -1,0 +1,44 @@
+{
+  "_que_es": "Los COMMITS de los repos hermanos contra los que corre la puerta, y la versión de playwright. Un pin, no una punta.",
+
+  "_por_que_no_se_clona_HEAD": [
+    "Tres de los arneses de este repo careaan contra otro repo: dos leen la cartera y el índice de layouts (proyectos, cobertura-zigbee) y uno carea el resultado del espejo JS contra el core en Python (SolarGPTfull).",
+    "Si CI clonara la PUNTA de esos repos, el veredicto de una PR de aquí dependería de lo que otro empujó hace un minuto: la puerta no mediría ESTE repo, mediría el reloj. Ya ocurrió en SolarGPTfull — el bloque careado pasó de 1224 a 1507 líneas en unas horas, tres PRs quedaron atascadas a la vez y una se abrió para poner un número que ya estaba caducado al abrirla.",
+    "Con el pin fijo, el careo del hash pasa por construcción y eso NO mide nada. Lo que sí puede fallar y por eso es una puerta de verdad: que el CONTENIDO de este repo deje de casar con esos commits — un catálogo sin regenerar, un espejo que se separa del core.",
+    "Y lo que se pierde al fijar —perder de vista que el hermano evoluciona— lo recoge `tools/deriva_pines.mjs`, que clona la punta, compara y NO bloquea. Ese es el fallo contrario y también está pagado: `sync_seguidor.py --check` llevaba meses en rojo diciendo que el modelo iba por detrás y no lo miró nadie. Un aviso que tumba PRs ajenas deja de ser un aviso y se vuelve un peaje."
+  ],
+
+  "_como_se_mueve": [
+    "1. `node tools/deriva_pines.mjs` dice qué se ha movido y desde dónde.",
+    "2. Se clonan los candidatos y se corren los arneses CONTRA ELLOS (no contra el clon local, que no es el repo).",
+    "3. Se mueve el commit aquí SOLO si pasan, y el PR dice qué cambió en el hermano y por qué el pin nuevo es legítimo.",
+    "Nunca se fija «el último commit» a ciegas: se fija uno contra el que esto pasa, verificado ejecutándolo."
+  ],
+
+  "repos": {
+    "proyectos": {
+      "commit": "113c54ee937fe8c7bba1e06be88382790d3027dc",
+      "para_que": "`const NPROY` de cartera-tabla.html — la equivalencia canónica entre el número de la hoja y el número con el que se ROTULA la planta (El Burgo es 24002 en la cartera y 23003 en el DWG). Es lo ÚNICO que se sigue leyendo de ahí.",
+      "lo_usan": ["tools/genera_plantas.mjs --check", "tools/prueba_cartera.mjs"],
+      "verificado": "2026-09-09 · los dos arneses pasan contra este commit"
+    },
+    "cobertura-zigbee": {
+      "commit": "06b00aaa4344fb7e88e047c39f8f22a1498b4683",
+      "para_que": "`plantas_indice.json` (emparejado layout↔cartera y huso por layout) y los `*_layout.json` de los que sale el centroide real de cada planta.",
+      "lo_usan": ["tools/genera_plantas.mjs --check", "tools/prueba_cartera.mjs"],
+      "verificado": "2026-09-09 · los dos arneses pasan contra este commit"
+    },
+    "SolarGPTfull": {
+      "commit": "d7a55d0abb6678082df2d7546336dabc2c6ac7e2",
+      "para_que": "`solargpt_core.tcu_compare` — el core en Python contra el que `tools/carea_resultado.mjs` carea el resultado del espejo JS día a día.",
+      "lo_usan": ["tools/carea_resultado.mjs"],
+      "verificado": "2026-09-09 · 5/5 careos contra este commit · importa con numpy y pandas, sin pvlib"
+    }
+  },
+
+  "playwright": {
+    "version": "1.62.1",
+    "por_que_se_fija": "Este repo no versiona package.json (está en .gitignore), así que CI instala playwright cada vez. Sin versión fija, los dos arneses de navegador carearían contra un navegador distinto cada semana — el mismo blanco móvil que los repos, en otra forma.",
+    "lo_usan": ["tools/prueba_bateria.mjs", "tools/prueba_simulador.mjs"]
+  }
+}
