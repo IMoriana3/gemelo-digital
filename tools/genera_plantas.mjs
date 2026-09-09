@@ -85,6 +85,14 @@ const PROYECTOS = idx >= 0 ? args[idx + 1] : '/home/user/proyectos';
 const COBERTURA = (() => { const i = args.indexOf('--cobertura');
   return i >= 0 ? args[i + 1] : '/home/user/cobertura-zigbee'; })();
 const CHECK = args.includes('--check');
+/* `--export` y `--salida` existen para que el BANCO pueda correr el generador de
+   verdad sobre otro CSV sin pisar `sim/cartera.js`. No son para uso normal: el
+   export bueno es el de `datos/` y el catálogo vive en un sitio.
+   Sin ellos, `tools/prueba_cartera.mjs` tendría que reimplementar el lector — una
+   segunda cabeza que daría verde mientras el original evoluciona. */
+const OPC = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
+const EXPORT_RUTA = OPC('--export');
+const SALIDA_RUTA = OPC('--salida');
 /* .js y no .json: la ficha se abre también por file://, donde un fetch de JSON
    falla por CORS. Un <script src> sí carga — es el mismo motivo por el que
    viento.js y fisica.js son scripts y no datos.
@@ -95,7 +103,7 @@ const CHECK = args.includes('--check');
    compartían nombre por accidente: el plano tiene las 11 plantas con layout; la
    cartera, los PROYECTOS, tengan layout o no. Se cruzan por el número de
    proyecto, no se sustituyen. */
-const DESTINO = join(RAIZ, 'sim/cartera.js');
+const DESTINO = SALIDA_RUTA || join(RAIZ, 'sim/cartera.js');
 
 /* LA EXPORTACIÓN DE LA CARTERA VIVA.
    Hasta hoy este generador leía el `SEED` de `proyectos/cartera-tabla.html`, y
@@ -203,7 +211,7 @@ function filasCSV(t) {
 }
 
 function leeCartera() {
-  const f = join(RAIZ, 'datos', EXPORT_CARTERA);
+  const f = EXPORT_RUTA || join(RAIZ, 'datos', EXPORT_CARTERA);
   if (!existsSync(f)) {
     console.error(`no encuentro ${f}.\nBaja el CSV de la cartera (factiun-cartera, botón ⬇ CSV), `
       + 'déjalo en datos/ y apunta EXPORT_CARTERA a él.');
@@ -324,7 +332,7 @@ const plantas = cartera.map(p => {
 
 /* PLANTAS CON LAYOUT QUE LA CARTERA NO TIENE.
    `dicayagua` (El Naranjo Dicayagua, República Dominicana, estado «oferta») tiene
-   layout, centroide y huso, y no figura en el SEED. Antes se quedaba fuera con un
+   layout, centroide y huso, y no figura en la cartera. Antes se quedaba fuera con un
    comentario que decía «esto es la cartera, no todo lo que tiene layout» — cierto
    como principio y equivocado como resultado: al gemelo se le pide un SITIO QUE
    SIMULAR, y un sitio con layout real es simulable lo diga la hoja o no. Salen
@@ -410,12 +418,21 @@ if (huerfanos.length) {
 
 const con = plantas.filter(p => p.fuente).length;
 const salida = {
+  /* El titular nombra la MISMA fuente que el pie. Decía «desde
+     proyectos/cartera-tabla.html (SEED)» —la cartera equivocada, la que esto
+     dejó de leer— mientras `_fuentes` justo debajo declaraba la buena. Es el
+     rótulo que afirma un origen sin comprobarlo: el pie estaba bien y el
+     titular es lo primero que se lee. Sobrevivió al cambio de fuente porque
+     nada carea las dos frases; van pegadas para que separarlas cueste. */
   _que_es: 'Cartera de proyectos con coordenadas. GENERADO por tools/genera_plantas.mjs '
-         + 'desde proyectos/cartera-tabla.html (SEED) y los *_layout.json de '
-         + 'cobertura-zigbee. NO editar a mano: se rellena lat/lon EN LA CARTERA y se '
-         + 'regenera.',
+         + 'desde la exportación de factiun-cartera (' + (EXPORT_RUTA || 'datos/' + EXPORT_CARTERA)
+         + ') y los *_layout.json de cobertura-zigbee. NO editar a mano: se rellena lat/lon '
+         + 'EN LA CARTERA y se regenera.',
   _fuentes: {
-    cartera: 'factiun-cartera (Supabase) · exportación ⬇ CSV en datos/' + EXPORT_CARTERA,
+    /* El fichero REALMENTE leído, no la constante: con `--export` el banco corre
+       sobre otro CSV, y una procedencia que nombra el de siempre mentiría. */
+    cartera: 'factiun-cartera (Supabase) · exportación ⬇ CSV en '
+           + (EXPORT_RUTA || 'datos/' + EXPORT_CARTERA),
     rotulos: 'proyectos/cartera-tabla.html · const NPROY (equivalencia de números)',
     emparejado: 'cobertura-zigbee/plantas_indice.json · código de cartera y huso por layout',
     layouts: 'cobertura-zigbee/<planta>_layout.json · clat/clon (centroide real)',
