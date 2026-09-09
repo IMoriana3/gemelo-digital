@@ -185,7 +185,7 @@
     <label class="sw"><input type="checkbox" id="cmp" checked>
       <span>Comparar sistemas de control<small>Simula 5 estrategias sobre la misma meteo y las enfrenta</small></span></label>
     <label class="sw"><input type="checkbox" id="winter">
-      <span>Winter mode<small>Correcciones gruesas 3°/h · política canónica: objetivo 90 % y carga completa cada 3 días · calefactor auto en LT</small></span></label>
+      <span>Winter mode<small>Política canónica y completa: objetivo 90 % y carga completa cada 3 días · calefactor auto en LT. No cambia el seguimiento</small></span></label>
   </div>
   <div class="grp"><h3>Parámetros físicos · el canon es el defecto</h3>
     <div class="note" style="margin-top:0">Los valores medidos y canónicos con los que calcula el simulador. Se pueden apartar para probar, y lo apartado sale en ámbar con su valor original. <b>El canon manda cuando no lo tocas, no siempre.</b></div>
@@ -330,7 +330,7 @@ var WIND_T1=FISICA.e.WIND_T1, WIND_T2=FISICA.e.WIND_T2,
 
      o.dtH        paso en horas
      o.dia        ¿hay luz? (electrónica en idle o en reposo)
-     o.mov        grados EFECTIVOS movidos en el paso (ya con winter mode aplicado)
+     o.mov        grados EFECTIVOS movidos en el paso
      o.pos        ángulo MEDIO del movimiento — el par depende de dónde está la mesa
      o.motorModel 'curva' (I(θ) medida) · 'factiun' (el ajuste) · mA medios del estudio
      o.calefactada  perfil -LT
@@ -361,7 +361,6 @@ function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
 /* JEITA lado caliente (§04.1a): T3=35°C reduce, T4=45°C bloquea carga */
 var JEITA_T3=FISICA.e.JEITA_T3, JEITA_T4=FISICA.e.JEITA_T4;
 function hotDerate(t){if(t>=JEITA_T4)return 0;if(t>JEITA_T3)return 1-0.7*(t-JEITA_T3)/(JEITA_T4-JEITA_T3);return 1;}
-var DEG_H_NORMAL=FISICA.e.DEG_H_NORMAL, DEG_H_WINTER=FISICA.e.DEG_H_WINTER;      /* °/h solar por modo (11.5b) */
 var HYST_DEG=FISICA.e.HYST_DEG;                             /* banda muerta del lazo, en grados.
    2026-08-27: era 2,5° «del estudio SUNNER» mientras el core corría a 1,0° y el
    registro del firmware publicaba 1,296°. Tres números distintos diciendo ser el
@@ -573,7 +572,7 @@ function resample(meteo,stepMin){
   return out;
 }
 
-/* ═══════════ SIMULADOR — estrategia oficial SUNNER + winter mode 11.5b ═══════════
+/* ═══════════ SIMULADOR — estrategia oficial SUNNER + winter mode canónico ═══════════
    opts: {motorModel:'factiun'|mA(number), winter, socTgt, socCrit, fcDays, tMin, strategy:bool} */
 function simulate(meteo,prof,loc,soc0,opts){
   var latR=loc.lat*D2R, capWh=prof.wh, n=meteo.length;
@@ -618,14 +617,11 @@ function simulate(meteo,prof,loc,soc0,opts){
        (estudio SUNNER). Se evalúa sobre el error REAL, antes de limitar el avance. */
     var moveNow=(stow>0||parked)?Math.abs(target-prevPos)>0.01
                                 :Math.abs(target-prevPos)>=HYST_DEG;
-    /* Winter mode (11.5b): correcciones gruesas — cuando corrige, avanza como mucho
-       DEG_H_WINTER °/h, así que el seguidor va a la zaga del sol y barre ~3°/h en vez de
-       ~10°/h. Se aplica a la POSICIÓN: ángulo registrado, POA de carga y consumo de motor
-       hablan del mismo giro (antes se descontaba sólo la energía). */
-    if(moveNow && opts.winter && !parked && !stow){
-      var limW=DEG_H_WINTER*dtH, errW=target-prevPos;
-      target=prevPos+Math.sign(errW)*Math.min(Math.abs(errW),limW);
-    }
+    /* El WINTER MODE NO TOCA EL MOVIMIENTO. Es techo de SOC (90 %) y calibración
+       cada 3 días, y nada más — decisión del mantenedor, 2026-09-09. Aquí había un
+       límite de 3 °/h que dejaba al seguidor a la zaga del sol; ver la nota en
+       sim/fisica.js sobre por qué se fue. Si vuelves a necesitar un modo que mueva
+       menos, será OTRO modo con otro nombre, y con un ritmo medido. */
     /* Límite físico de velocidad de giro (0,17°/s): a paso fino el aparcado y el
        abanderamiento tardan varios pasos en completarse, como en el seguidor real. */
     var maxSweep=SLEW_DPS*3600*dtH;
@@ -682,9 +678,9 @@ function simulate(meteo,prof,loc,soc0,opts){
     var poaPot=0, poaLost=0, poaReal=0;
     if(sun.el>0){
       poaPot=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi,N);
-      /* POA en la posición REAL del seguidor: recoge TODA la pérdida de producción de la
-         planta — defensa por batería, abanderamiento y el seguimiento grueso del winter
-         mode —, no sólo la imputable a la batería. */
+      /* POA en la posición REAL del seguidor: recoge TODA la pérdida de producción de
+         la planta —defensa por batería y abanderamiento—, no sólo la imputable a la
+         batería. */
       if(Math.abs(target-trackPos)<0.01) poaReal=poaPot;
       else{
         var pIdeal=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi,N);
@@ -715,7 +711,7 @@ var CONTROLS=[
   o:{strategy:false,socTgt:100,socCrit:0,fcDays:5,winter:false,defPos:DEFENSE_POS}},
  {k:'sunner', n:'SUNNER estándar',           d:'Objetivo 80 % · crítico 30 % → defensa 55° · calibración 5 d',
   o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:DEFENSE_POS}},
- {k:'winter', n:'SUNNER + winter mode',      d:'Objetivo 90 % · calibración 3 d · seguimiento grueso 3°/h',
+ {k:'winter', n:'SUNNER + winter mode',      d:'Objetivo 90 % · calibración 3 d (y nada más: no toca el movimiento)',
   o:{strategy:true,socTgt:90,socCrit:30,fcDays:3,winter:true,defPos:DEFENSE_POS}},
  {k:'tfm', n:'Restricción energética (TFM)', d:'Como SUNNER pero aparca plano a 0° para sobrevivir',
   o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:0}},
@@ -1103,8 +1099,6 @@ var PARAMS_FIS=[
  {k:'DEFENSE_POS',     n:'Defensa por batería',          u:'°',     d:1, g:'Geometría y movimiento'},
  {k:'SLEW_DPS',        n:'Velocidad del actuador',       u:'°/s',   d:3, g:'Geometría y movimiento'},
  {k:'HYST_DEG',        n:'Histéresis del lazo',          u:'°',     d:2, g:'Geometría y movimiento'},
- {k:'DEG_H_NORMAL',    n:'Ritmo de seguimiento',         u:'°/h',   d:1, g:'Geometría y movimiento'},
- {k:'DEG_H_WINTER',    n:'Ritmo en modo invierno',       u:'°/h',   d:1, g:'Geometría y movimiento'},
  {k:'WIND_T1',         n:'Umbral parcial',               u:'m/s',   d:3, g:'Abanderamiento'},
  {k:'WIND_T2',         n:'Umbral total',                 u:'m/s',   d:3, g:'Abanderamiento'},
  {k:'PARTIAL_STOW_DEG',n:'Mínimo del sector parcial',    u:'°',     d:1, g:'Abanderamiento'},
@@ -1785,7 +1779,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   var c4=document.createElement('div');c4.className='card';
   out.appendChild(c4);
   if(LONG){
-    c4.innerHTML='<h2>Movimiento diario del seguidor</h2><div class="sub">Σ|Δθ| por día (°) — la estrategia y el winter mode reducen el recorrido</div>';
+    c4.innerHTML='<h2>Movimiento diario del seguidor</h2><div class="sub">Σ|Δθ| por día (°) — la estrategia reduce el recorrido; el winter mode no lo toca</div>';
     var maxM=Math.max(10,Math.max.apply(null,dr.map(function(r){return r.mov})),
                           Math.max.apply(null,dm.map(function(r){return r.mov})));
     var g4=mkCanvas(c4,145), f4=frame(g4,0,maxM,dm,function(v){return fmt(v)+'°'});

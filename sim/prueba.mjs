@@ -508,31 +508,31 @@ const pMano = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, estrategia: { socTgt: 
 pMano.paso(60);
 ok(pMano.cfg.estrategia.socTgt === 65, 'un techo puesto a mano no lo pisa la política automática');
 
-/* winter mode: mismo día, mismo sol, un tercio de correcciones */
-function motorDia(winter) {
-  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: 5,
-                             estrategia: { activa: true, winter } });
-  p.meteo.nubes = 5;
-  for (let i = 0; i < 16 * 60; i++) p.paso(60);
-  return p.tcu(1).energiaMotorHoy / 3600;
-}
-const whNormal = motorDia(false), whWinter = motorDia(true);
-console.log('   energía de motor en un día — normal:', whNormal.toFixed(2), 'Wh · winter:', whWinter.toFixed(2), 'Wh');
-ok(whWinter < whNormal, 'el winter mode gasta menos motor que el modo normal');
-
 /* ═══════════════════════════════════════════════════════════════════════
-   WINTER-01 — una sola política, y es CINEMÁTICA
-   El test de aquí arriba («gasta menos motor») pasaba con el bug dentro:
-   medía el AHORRO y nunca el COSTE. Con la semántica anterior el eje se movía
-   ENTERO y solo se reducían los grados que se le contaban al motor, así que el
-   seguidor cobraba la POA de un seguimiento perfecto y pagaba la de uno grueso.
-   Eso es justo lo que el README del repo dice que la comparativa de controles
-   existe para impedir: «que el ahorro de un modo no oculte lo que cuesta en
-   producción».
-   ═══════════════════════════════════════════════════════════════════════ */
-console.log('\n── winter mode: acota la POSICIÓN, no la factura ──');
+   WINTER-02 — el winter mode es POLÍTICA, y sólo política
+   Decisión del mantenedor (2026-09-09): «únicamente cambiar la frecuencia de
+   calibración y el SOC máximo, nada más; ni velocidades ni límites de giro».
 
-/* Un día de enero con un TCU aislado; devuelve trayectoria, recorrido y retraso. */
+   Lo que había aquí (WINTER-01) fijaba lo contrario: un límite cinemático de
+   `DEG_H_WINTER` °/h, con su mutante y todo. Aquellos tests eran correctos sobre
+   el código de entonces y se RETIRAN con la regla que documentaban — es la
+   higiene de la casa: la PR que mata un comportamiento retira los tests que lo
+   fijaban, y deja escrito qué había ahí.
+
+   Por qué se fue, medido: el sol pide entre 14,5 °/h (junio) y 25,0 °/h
+   (diciembre) de media en Gorraiz, con picos de 57-69 °/h por el backtracking. A
+   3 °/h el eje cubría del 12 % al 20 % del recorrido del día, y costaba un 24 %
+   de producción en la comparativa de controles. Además no estaba en el core
+   —`policy_for_mode('winter')` devuelve techo, calibración y calefactor— y salía
+   de §11.5b del cuaderno, marcada allí como research/demo sobre datos sintéticos.
+
+   El invariante nuevo es más fuerte que el viejo y más fácil de romper: con el
+   mismo día y el mismo sol, winter ON y OFF tienen que dar la MISMA trayectoria.
+   Si alguien vuelve a colgar un ritmo del modo, esto se pone rojo solo.
+   ═══════════════════════════════════════════════════════════════════════ */
+console.log('\n── winter mode: política, y sólo política ──');
+
+/* Un día de enero con un TCU aislado; devuelve trayectoria y recorrido. */
 function diaWinter(winter) {
   const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 15, hora: 0,
                              averias: false,
@@ -546,74 +546,70 @@ function diaWinter(winter) {
     if (t.sp === SIM.SP.NINGUNA && !t.parked) {
       peorRetraso = Math.max(peorRetraso, Math.abs(t.objetivo - t.anguloReal));
     }
-    if (k % 120 === 0) traza.push(+t.anguloReal.toFixed(2));
+    traza.push(+t.anguloReal.toFixed(6));
   }
-  return { rec, traza, peorRetraso, wh: t.energiaMotorHoy / 3600 };
+  return { rec, traza, peorRetraso };
 }
 
 const wOff = diaWinter(false), wOn = diaWinter(true);
 console.log('   recorrido del eje — normal ' + wOff.rec.toFixed(1) + '° · winter ' +
-            wOn.rec.toFixed(1) + '°  (retraso máx. ' + wOn.peorRetraso.toFixed(1) + '°)');
+            wOn.rec.toFixed(1) + '°  (retraso máx. ' + wOn.peorRetraso.toFixed(2) + '°)');
 
-ok(wOn.rec < wOff.rec * 0.5,
-   'el winter mode MUEVE MENOS el eje, no solo cobra menos',
-   wOff.rec.toFixed(1) + '° → ' + wOn.rec.toFixed(1) + '°');
-ok(JSON.stringify(wOn.traza) !== JSON.stringify(wOff.traza),
-   'y por eso la TRAYECTORIA es distinta — con la semántica anterior era idéntica');
-ok(wOn.peorRetraso > 10,
-   'el seguidor va a la zaga del sol, que es lo que el modo significa',
-   'retraso máximo ' + wOn.peorRetraso.toFixed(1) + '°');
+/* `==` y no una tolerancia: los dos lados ejecutan las MISMAS operaciones sobre los
+   MISMOS números, así que no hay nada que tolerar. Una diferencia en el último bit
+   ya significaría que el modo toca el movimiento. */
+ok(JSON.stringify(wOn.traza) === JSON.stringify(wOff.traza),
+   'winter ON y OFF dan la MISMA trayectoria: el modo no toca el movimiento',
+   'recorrido ' + wOff.rec.toFixed(3) + '° vs ' + wOn.rec.toFixed(3) + '°');
+ok(wOn.peorRetraso === wOff.peorRetraso,
+   'y el seguidor NO va a la zaga del sol por estar en invierno',
+   'retraso máximo ' + wOn.peorRetraso.toFixed(3) + '° en los dos');
 
-/* El ritmo, contra su constante: en seguimiento no puede pasar de DEG_H_WINTER. */
+/* MUTANTE. Sin esto lo de arriba sería un verde vacuo: dos trazas iguales porque
+   nadie las mueve. Se reintroduce a mano el límite retirado sobre la MISMA serie
+   de objetivos y tiene que separar las trayectorias. */
 {
-  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 15, hora: 9,
-                             averias: false, estrategia: { activa: true, winter: true } });
+  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 15, hora: 0, averias: false });
   const t = p.tcu(1);
-  let peorRitmo = 0;
-  for (let k = 0; k < 6 * 60; k++) {
-    const antes = t.anguloReal;
-    p.paso(60);
-    if (t.sp === SIM.SP.NINGUNA && !t.parked) {
-      peorRitmo = Math.max(peorRitmo, Math.abs(t.anguloReal - antes) * 60);  /* °/h */
+  const obj = [];
+  for (let k = 0; k < 24 * 60; k++) { p.paso(60); obj.push(t.objetivo); }
+  const dtH = 60 / 3600, DEG_H_RETIRADO = 3;
+  function recorre(conLimite) {
+    let pos = obj[0], rec = 0, retraso = 0;
+    for (let i = 1; i < obj.length; i++) {
+      const err = obj[i] - pos;
+      const paso = conLimite
+        ? Math.sign(err) * Math.min(Math.abs(err), DEG_H_RETIRADO * dtH)
+        : err;
+      pos += paso; rec += Math.abs(paso);
+      retraso = Math.max(retraso, Math.abs(obj[i] - pos));
     }
+    return { rec, retraso };
   }
-  ok(peorRitmo <= SIM.K.DEG_H_WINTER + 1e-9,
-     'y el ritmo nunca pasa de DEG_H_WINTER en seguimiento',
-     peorRitmo.toFixed(3) + ' °/h ≤ ' + SIM.K.DEG_H_WINTER + ' °/h');
+  const sin = recorre(false), con = recorre(true);
+  ok(sin.retraso < 1e-9 && con.retraso > 10,
+     'MUTANTE: reponer el límite de 3 °/h SÍ separa las trayectorias — el banco mide',
+     'sin límite ' + sin.retraso.toFixed(2) + '° · con él ' + con.retraso.toFixed(1) + '°');
+  ok(con.rec < sin.rec * 0.25,
+     'y le comería tres cuartas partes del recorrido, que es lo que costaba la producción',
+     sin.rec.toFixed(1) + '° → ' + con.rec.toFixed(1) + '°');
 }
 
-/* Una orden de SEGURIDAD no se ralentiza: winter mode no retrasa un
-   abanderamiento. Es el límite del contrato, y va probado en su régimen. */
+/* QUE NO VUELVA: ni el espejo ni las dos páginas pueden traer una constante de
+   ritmo colgada del modo. Es la forma estructural del invariante — la trayectoria
+   igual lo comprueba en ejecución, esto lo comprueba en el fuente, y hacen falta
+   las dos porque una constante puede volver antes de que alguien la use. */
 {
-  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 15, hora: 9,
-                             averias: false, estrategia: { activa: true, winter: true } });
-  const t = p.tcu(1);
-  /* Arrancar EN CALMA no es un adorno: la meteo de enero ya trae viento, así que
-     sin esto el seguidor llega a la ventana YA abanderado y a 0,6° de su
-     objetivo — dentro de la banda muerta. El test medía 0 °/h y eso se lee
-     exactamente igual que «el winter mode frenó la maniobra». Cazado
-     instrumentando en vez de suponer. */
-  p.meteo.viento = 0; p.meteo.rachas = 0;
-  for (let k = 0; k < 180; k++) p.paso(60);
-  const enSeguimiento = (t.sp === SIM.SP.NINGUNA);
-  const lejosDelTope = Math.abs(t.anguloReal) < 40;
-  ok(enSeguimiento && lejosDelTope,
-     'el seguidor llega a la ventana SIGUIENDO al sol y lejos del tope (si no, no hay '
-     + 'maniobra que medir)', 'sp=' + t.sp + ' · θ=' + t.anguloReal.toFixed(2) + '°');
-
-  p.meteo.viento = 25;                              /* 90 km/h: abanderamiento total */
-  let mayorPaso = 0, huboOrden = false;
-  for (let k = 0; k < 60; k++) {
-    const antes = t.anguloReal; p.paso(60);
-    if (t.sp !== SIM.SP.NINGUNA) {
-      huboOrden = true;
-      mayorPaso = Math.max(mayorPaso, Math.abs(t.anguloReal - antes) * 60);
-    }
-  }
-  ok(huboOrden, 'el vendaval llega a ordenar posición segura (si no, lo de abajo no mide nada)');
-  ok(mayorPaso > SIM.K.DEG_H_WINTER * 5,
-     'una orden de SEGURIDAD se ejecuta entera: winter mode no frena un abanderamiento',
-     mayorPaso.toFixed(1) + ' °/h, muy por encima de los ' + SIM.K.DEG_H_WINTER + ' °/h del modo');
+  ok(!('DEG_H_WINTER' in SIM.FISICA.e) && !('DEG_H_NORMAL' in SIM.FISICA.e),
+     'el espejo no publica ritmos por modo',
+     Object.keys(SIM.FISICA.e).filter((k) => /DEG_H/.test(k)).join(', ') || 'ninguno');
+  ok(!('DEG_H_WINTER' in SIM.K) && !('DEG_H_NORMAL' in SIM.K),
+     'y el simulador tampoco los expone');
+  const html = fs.readFileSync(new URL('../bateria.html', import.meta.url), 'utf8');
+  ok(!/DEG_H_(WINTER|NORMAL)\s*[=.]/.test(html),
+     'y la ficha de batería no los usa');
+  ok(!/opts\.winter\s*&&[\s\S]{0,120}target\s*=\s*prevPos/.test(html),
+     'ni acota el avance del eje cuando el modo está puesto');
 }
 
 /* Sin DOBLE descuento: los Wh que se cobran corresponden a los grados que el eje
@@ -637,65 +633,12 @@ ok(wOn.peorRetraso > 10,
      whReales.toFixed(4) + ' Wh ≥ ' + minimo.toFixed(4) + ' Wh por ' + recorrido.toFixed(2) + '°');
 }
 
-/* MUTANTE: la semántica ANTERIOR, aquí al lado. Si diera lo mismo, este banco no
-   estaría midiendo el arreglo. */
-{
-  const p = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 15, hora: 0, averias: false });
-  const t = p.tcu(1);
-  const obj = [];
-  for (let k = 0; k < 24 * 60; k++) { p.paso(60); obj.push(t.objetivo); }
-  const dtH = 60 / 3600;
-  function recorre(cinematico) {
-    let pos = obj[0], rec = 0, retraso = 0;
-    for (let i = 1; i < obj.length; i++) {
-      const err = obj[i] - pos;
-      const paso = cinematico
-        ? Math.sign(err) * Math.min(Math.abs(err), SIM.K.DEG_H_WINTER * dtH)
-        : err;                                   /* la de antes: el eje va entero */
-      pos += paso; rec += Math.abs(paso);
-      retraso = Math.max(retraso, Math.abs(obj[i] - pos));
-    }
-    return { rec, retraso };
-  }
-  const vieja = recorre(false), nueva = recorre(true);
-  ok(vieja.retraso < 1e-9 && nueva.retraso > 10,
-     'MUTANTE: la semántica anterior deja el retraso en CERO (cobra POA perfecta) '
-     + 'y la nueva no', 'antes ' + vieja.retraso.toFixed(2) + '° · ahora '
-     + nueva.retraso.toFixed(1) + '°');
-  ok(nueva.rec < vieja.rec * 0.25,
-     'y el recorrido cae de verdad, no en la contabilidad',
-     vieja.rec.toFixed(1) + '° → ' + nueva.rec.toFixed(1) + '°');
-}
+/* La PARIDAD con el canon la daba antes un raspador que buscaba en `bateria.html`
+   el bloque del límite cinemático y su constante. Se retira con la regla: ya no hay
+   bloque que raspar. Lo que queda de aquella idea —que ninguno de los dos lados
+   teclee la física— vive en `tools/prueba_bateria.mjs`, que recorre los parámetros
+   del panel y exige que todos salgan del espejo. */
 
-/* PARIDAD CON EL CANON: `bateria.html` es de donde sale `consumoTCU`, y fue quien
-   migró primero. Se lee el HTML REAL —nunca una copia— y se exige que siga
-   aplicando el modo a la POSICIÓN y con la misma constante. Si el canon volviera
-   a la semántica de factura, esto se pone rojo y hay que decidir de nuevo, no
-   acomodarse en silencio. */
-{
-  const html = fs.readFileSync(new URL('../bateria.html', import.meta.url), 'utf8');
-  /* Esto raspaba el literal `DEG_H_WINTER = 3.0` del HTML y lo comparaba con el
-     del simulador. Desde GEM-CONST-01 no hay literal que raspar: la ficha lee la
-     constante del ESPEJO, igual que `planta.js` (F.e.DEG_H_WINTER). O sea que la
-     propiedad pasó de COMPROBADA a ESTRUCTURAL, y lo que hay que exigir ya no es
-     que los dos números coincidan —no puede haber dos— sino que ninguno de los
-     dos lados vuelva a teclearlo. Un raspador que se queda sin nada que raspar
-     devuelve `?` y hay que reescribirlo, no aflojarlo. */
-  const lit = html.match(/\bDEG_H_WINTER\s*=\s*[0-9.]/);
-  ok(!lit, 'la ficha NO teclea DEG_H_WINTER: lo lee del espejo',
-     lit ? 'ha vuelto un literal: ' + lit[0] : '');
-  ok(/DEG_H_WINTER\s*=\s*FISICA\.e\.DEG_H_WINTER/.test(html),
-     'y lo lee de la MISMA fuente que el simulador (FISICA.e)');
-  ok(Math.abs(SIM.K.DEG_H_WINTER - SIM.FISICA.e.DEG_H_WINTER) < 1e-9,
-     'y el simulador tampoco lo teclea (' + SIM.K.DEG_H_WINTER + ' °/h)',
-     SIM.K.DEG_H_WINTER + ' vs ' + SIM.FISICA.e.DEG_H_WINTER);
-  const bloque = html.match(/Winter mode \(11\.5b\)[\s\S]{0,700}/);
-  ok(!!bloque && /target\s*=\s*prevPos\s*\+/.test(bloque[0]),
-     'y el canon sigue aplicándolo a la POSICIÓN (`target = prevPos + …`), no a la energía',
-     bloque ? 'bloque localizado' : 'bloque NO localizado en bateria.html');
-  ok(!!bloque && /Se aplica a la POSICI/.test(bloque[0]),
-     'con su porqué escrito, que es lo que zanjó cuál de las dos semánticas manda');
-}
 
 
 /* C-rate y JEITA: las curvas canónicas, comprobadas en sus puntos */

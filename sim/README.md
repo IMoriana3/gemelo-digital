@@ -310,7 +310,7 @@ Las de 3 Ah pasan la mitad del invierno limitadas por la batería, no por el sol
 | **SOC objetivo** (techo) | 80 % verano · **90 % invierno** | con la estrategia activa la batería **no sube de ahí**: por encima del techo no entra carga, aunque sobre sol. Es lo que evita tenerla siempre al 100 % envejeciendo |
 | **Carga completa** | cada 5 días verano · **3 invierno** | uno de cada N días el techo sube al 100 %, para reequilibrar |
 | **SOC crítico** | 30 % | por debajo, el seguidor va a **defensa 55°** y cuenta como **no disponible**. Rearma al superar el crítico **+2 %**, que es lo que evita el baile de entrar y salir al rozar el umbral |
-| **Winter mode** | off | tres cosas a la vez, las tres canónicas: techo **90 %**, calibración cada **3 días**, y paso tan grueso que consume como si corrigiera **3 °/h en vez de 10** — un 70 % menos de motor |
+| **Winter mode** | off | dos cosas, las dos canónicas y nada más: techo **90 %** y calibración cada **3 días**. **No toca el seguimiento** — llevaba además un límite de 3 °/h que se retiró el 2026-09-09 (no está en el core y costaba un 22 % de producción; ver la nota en `planta.js`) |
 | **T mínima de carga** | 0 °C | por debajo no se admite carga… salvo versión LT |
 | **Cut-in del regulador** | 50 W/m² | por debajo de ese POA el regulador no arranca |
 
