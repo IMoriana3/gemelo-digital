@@ -303,7 +303,7 @@ Las de 3 Ah pasan la mitad del invierno limitadas por la batería, no por el sol
 
 > **Pendiente de confirmar en campo.** El convertidor de string está en el canon como **60 W** y el valor de planta que manejamos es **57,6 W**: un 4 % de diferencia que conviene cerrar en `tcu.py`, que es de donde lo lee todo lo demás. Y si su salida son 48 V hay una etapa más antes del bus interno, porque las alarmas del propio mapa vigilan la ventana de **22 a 33 V** en bus y motor (30005 bits 0–3).
 
-### Estrategia oficial SUNNER
+### Estrategia oficial de gestión de SOC
 
 | Parámetro | Por defecto | Qué hace |
 |---|---|---|
@@ -322,7 +322,7 @@ Las de 3 Ah pasan la mitad del invierno limitadas por la batería, no por el sol
 4. **JEITA** por el lado caliente: reduce a partir de 35 °C, bloquea a 45 °C.
 5. **Calefactor LT**: `1 + 0,15·|T|` W bajo 0 °C, solo de día — gasta, pero desbloquea la carga.
 
-**Consumo:** electrónica 0,64 W siempre, más el motor con el modelo que se elija — la medición de Factiun (`Wh/° = 0,0503 + 0,000845·|θ|` sobre el ángulo medio del movimiento, tope 50 W) o el consumo SUNNER en mA medios a 25,6 V (2500 / 3250 / 4000).
+**Consumo:** electrónica 0,64 W siempre, más el motor con el modelo que se elija — la medición de Factiun (`Wh/° = 0,0503 + 0,000845·|θ|` sobre el ángulo medio del movimiento, tope 50 W) o el consumo medio en mA del estudio de disponibilidad a 25,6 V (2500 / 3250 / 4000).
 
 Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la estrategia: son los umbrales configurables de *alarma* del propio TCU (bits 13/11/12 de 30002 y el *low capacity mode* de 30001), y por debajo de L2 el firmware congela el seguimiento donde esté.
 
