@@ -262,7 +262,7 @@ Campo3D.prototype.construye = function (P) {
      es la bífila y es lo que sale por defecto. */
   var bifila = this.bifila !== false;
   var pitch = (this.plano && this.plano.filaZ ? this.plano.filaZ * 2
-            : (this.plano && this.plano.pitch) || 6.0);   /* entre las dos vigas del bífilo */
+            : (this.plano && this.plano.pitch) || 6.0);   /* entre las dos vigas de la bífila */
   var pasoFila = bifila ? pitch * 2 : pitch;             /* de un seguidor al siguiente */
   var largo = D.span || 34;                              /* la fila entera, con su vano */
   var hEje = D.postH || 2.0;
@@ -273,7 +273,7 @@ Campo3D.prototype.construye = function (P) {
   if (this.plano && this.plano.pos && this.plano.pos.length) {
     /* ── EL PLANO DE VERDAD ──────────────────────────────────────────────────
        Cada seguidor donde está en el layout del DWG, no en una rejilla inventada. El
-       punto del layout es el EJE DE UNIDAD —el centro del bífilo, no el motor—, y viene
+       punto del layout es el EJE DE UNIDAD —el centro de la bífila, no el motor—, y viene
        en [norte, este]. Aquí el norte es −X y el este −Z, así que se le da la vuelta a
        los dos; equivocar ese signo pone la planta en espejo y no canta hasta que alguien
        compara con el plano. El `rot` es el azimut del eje, grados al este del norte. */
