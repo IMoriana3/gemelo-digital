@@ -37,19 +37,35 @@ const require = createRequire(import.meta.url);
 const SIM = require('../sim/planta.js');
 
 const arg = n => (process.argv.find(a => a.startsWith('--' + n + '=')) || '').split('=')[1];
+const resuelve = c => path.isAbsolute(c) ? c
+  : path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', c);
 /* el núcleo vive en cobertura-zigbee, al lado. No se vendoriza: una copia sería
    una quinta cabeza, que es justo lo que este arnés existe para evitar. */
-const CANDIDATOS = [arg('nucleo'), '../cobertura-zigbee/js/control_core.js',
-                    '../Cobertura-Zigbee/js/control_core.js'].filter(Boolean);
 let ruta = null;
-for (const c of CANDIDATOS) {
-  const r = path.isAbsolute(c) ? c : path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', c);
-  if (fs.existsSync(r)) { ruta = r; break; }
-}
-if (!ruta) {
-  console.error('no encuentro js/control_core.js. Ten cobertura-zigbee al lado, o pasa --nucleo=<ruta>.');
-  console.error('probado: ' + CANDIDATOS.join(' · '));
-  process.exit(2);
+/* UN `--nucleo=` QUE NO EXISTE ES UN ERROR, NO UNA SUGERENCIA. Aquí había un
+   respaldo que se tragaba la ruta pedida y caía al clon de al lado, y me mordió a
+   mí mismo en la primera verificación: pedí carear contra el núcleo del commit
+   pinado —donde este fichero NO existe todavía, el pin es anterior al núcleo
+   compartido— y el arnés dio VERDE careando contra mi árbol de trabajo. Un careo
+   que mide otro fichero del que se le pidió no es un careo: es un verde que no
+   puede ser otra cosa. Si se pide una ruta, es ésa o nada. */
+const pedido = arg('nucleo');
+if (pedido) {
+  ruta = resuelve(pedido);
+  if (!fs.existsSync(ruta)) {
+    console.error('el --nucleo pedido no existe: ' + ruta);
+    console.error('no hay respaldo a propósito: carear contra otro fichero del pedido sería un verde falso.');
+    process.exit(2);
+  }
+} else {
+  for (const c of ['../cobertura-zigbee/js/control_core.js', '../Cobertura-Zigbee/js/control_core.js']) {
+    const r = resuelve(c);
+    if (fs.existsSync(r)) { ruta = r; break; }
+  }
+  if (!ruta) {
+    console.error('no encuentro js/control_core.js. Ten cobertura-zigbee al lado, o pasa --nucleo=<ruta>.');
+    process.exit(2);
+  }
 }
 new Function(fs.readFileSync(ruta, 'utf-8'))();
 const C = globalThis.CTRLCORE;
