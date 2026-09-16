@@ -621,6 +621,7 @@
 <script src="sim/careo.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/plantas.js"></script>
+<script src="sim/bt.js"></script><!-- el BT del hermano: planta.js lo busca aquí y NO tiene otro -->
 <script src="sim/planta.js"></script>
 <script>
 /* ═══════════════════ arranque ═══════════════════ */
@@ -2634,11 +2635,19 @@ $('btnCanon').onclick = function () {
   toca();
 };
 
-/* en marcha */
-cargaParams();      /* ANTES de construir: la planta nace ya con los valores puestos */
-pintaParams();
-aplicaPlanta();     /* y con los equipos de la planta seleccionada, no con los de fábrica */
-construye();
+/* EL BT SE CARGA ANTES DE CONSTRUIR, y no hay repuesto. El backtracking es del
+   hermano (cobertura-zigbee/backtracking.html, bloque FÍSICA PURA): este
+   simulador tenía el suyo, plano y con un GCR único, y eran dos BT para la
+   misma planta. Ahora no hay más que uno, así que si no se puede cargar no se
+   inventa nada de primer orden: se dice en pantalla y se para, que es la misma
+   regla que canon.js escribió para el motor de SolarGPT.
+   En Pages el hermano está en el mismo origen (imoriana3.github.io/
+   cobertura-zigbee/…) y en local basta tenerlo al lado. */
+function arranca() {
+  cargaParams();      /* ANTES de construir: la planta nace ya con los valores puestos */
+  pintaParams();
+  aplicaPlanta();     /* y con los equipos de la planta seleccionada, no con los de fábrica */
+  construye();
 aplicaEstrategia();
 aplicaPoliticaDifusa();
 pintaEscritura();
@@ -2647,10 +2656,32 @@ pintaEscritura();
   if (dU) { ESC = dU; $('escLista').dataset.hecho = ''; pintaEscenario(); $('escLista').value = 'mio'; ESC._mio = true; reproduce(); }
   else cargaEscenario('0');
 })();
-conectaCanon();          /* si el motor está, manda él; si no, se dice */
-sincronizaAverias();
-etiquetaTiempo();
-requestAnimationFrame(bucle);
+  conectaCanon();          /* si el motor está, manda él; si no, se dice */
+}
+
+var _avisoBT = document.getElementById('avisoBT');
+SIM.cargaBT('../cobertura-zigbee').then(function () {
+  if (!SIM.btListo()) {
+    var m = 'No he podido cargar el <b>backtracking</b> de cobertura-zigbee: ' +
+            SIM.BT.motivo() + '.<br>El simulador no lleva uno propio a propósito ' +
+            '—un backtracking de primer orden que parece el canónico es peor que no ' +
+            'tenerlo—, así que aquí se para. Ten el repo <code>cobertura-zigbee</code> ' +
+            'al lado de este.';
+    if (_avisoBT) { _avisoBT.innerHTML = m; _avisoBT.style.display = ''; }
+    else document.body.insertAdjacentHTML('afterbegin',
+      '<div style="padding:12px;background:#3a1d1d;color:#f2c6c6;font:14px system-ui">' + m + '</div>');
+    return;
+  }
+  arranca();
+  /* ESTAS TRES VAN DENTRO, y no fuera. Leen la planta (`sincronizaAverias` y
+     `etiquetaTiempo` la consultan, y `bucle` la hace andar), así que al pasar el
+     arranque a asíncrono —hay que esperar a que baje el BT del hermano— se
+     ejecutaban con `P` todavía en null: «Cannot read properties of null
+     (reading 'tcu')», que es lo que cazó el banco del navegador. */
+  sincronizaAverias();
+  etiquetaTiempo();
+  requestAnimationFrame(bucle);
+});
 </script>
 </body>
 </html>

@@ -42,6 +42,11 @@
    ============================================================================ */
 (function (global) {
 'use strict';
+/* La cola cierra con `})(this)` a propósito: es el patrón que el detector de
+   ámbito de la casa reconoce (tools/ambito.mjs mira la cola, que es lo único
+   decidible por texto) y el mismo que usa canon.js. Con un ternario delante
+   —aunque funcione— este módulo salía en la lista de «desnudos» y el banco del
+   navegador se ponía rojo, con razón: la regla es que se vea a simple vista. */
 
 var BASE = '../cobertura-zigbee';
 var MARCA_INI = 'FÍSICA PURA', MARCA_FIN = '/* FIN-FÍSICA';
@@ -88,7 +93,15 @@ BT.prototype._construye = function (solJs, irrJs, htmlBt) {
     ' anglesAstroSeg:anglesAstroSeg, anglesManual:anglesManual, surfaceOrient:surfaceOrient,' +
     ' clearskyIneichen:clearskyIneichen, skyWithClouds:skyWithClouds,' +
     ' westPorMesa:westPorMesa, ejesPorMesa:ejesPorMesa, Sol:Sol, Irr:Irr};');
-  this.F = f.call(global);
+  /* SE EVALÚA CONTRA EL GLOBAL DE VERDAD, no contra el `global` de este IIFE.
+     `sol.js` e `irradiancia.js` se publican colgándose de su `this` (root.Sol =
+     …) y el bloque del hermano los referencia como variables LIBRES, así que
+     solo resuelven si ese `this` es el objeto global. Con el `global` del
+     envoltorio —que en CommonJS es `module.exports`— salía «Sol is not
+     defined». Es el mismo `.call(globalThis)` que usa el extractor de
+     produccion.html y el banco del hermano. */
+  var GLOBAL = (typeof globalThis !== 'undefined') ? globalThis : global;
+  this.F = f.call(GLOBAL);
   this.estado = 'listo';
   this.detalle = 'FÍSICA PURA de ' + this.base + '/backtracking.html';
   return this.F;
@@ -156,4 +169,4 @@ BT.aPvlib = aPvlib;
 if (typeof module !== 'undefined' && module.exports) module.exports = BT;
 else global.BT = BT;
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);
+})(this);

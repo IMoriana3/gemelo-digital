@@ -27,12 +27,35 @@
    diría más del contenedor que del código. Lo que se comprueba es lo que NO depende
    de la máquina: cuántas veces se pinta, cuándo, y qué hay en la escena.
    ============================================================================ */
-import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 
 const RAIZ = path.dirname(new URL('.', import.meta.url).pathname);
-const PAG = pathToFileURL(path.join(RAIZ, 'simulador.html')).href;
+
+/* ── SE SIRVE POR HTTP, Y DESDE EL DIRECTORIO PADRE ───────────────────────────
+   Esto abría la página por `file://`, y ya no se puede: el simulador carga el
+   BACKTRACKING del hermano (cobertura-zigbee/backtracking.html, bloque FÍSICA
+   PURA) con `fetch`, y un `fetch` de un `file://` a otro `file://` lo bloquea
+   CORS —origen opaco—, así que la página se quedaría sin BT y diría justamente
+   eso. Sirviendo el PADRE, `../cobertura-zigbee/…` resuelve igual que en Pages,
+   donde los dos repos comparten origen (imoriana3.github.io/…). Y así el banco
+   prueba el mismo camino que ve el usuario, que es de lo que sirve un banco de
+   navegador. */
+const PADRE = path.dirname(RAIZ);
+const CARPETA = path.basename(RAIZ);
+if (!existsSync(path.join(PADRE, 'cobertura-zigbee')) &&
+    !existsSync(path.join(PADRE, 'Cobertura-Zigbee'))) {
+  console.error('no encuentro cobertura-zigbee al lado de este repo, y el simulador ' +
+                'carga de ahí el backtracking: el banco no puede probar la página.');
+  process.exit(2);
+}
+const PUERTO = 8391 + (process.pid % 80);
+const srv = spawn('python3', ['-m', 'http.server', String(PUERTO), '--directory', PADRE],
+                  { stdio: 'ignore' });
+process.on('exit', () => { try { srv.kill(); } catch { /* nada */ } });
+await new Promise((r) => setTimeout(r, 1200));
+const PAG = `http://localhost:${PUERTO}/${CARPETA}/simulador.html`;
 
 /* ── GUARDIA DE NADA DUPLICADO, antes de abrir el navegador ────────────────────
    Un fichero de un solo <script> con una funcion definida dos veces NO da error: en
