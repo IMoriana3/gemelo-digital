@@ -784,21 +784,29 @@ ok(E.tipos.includes('av'), `y el añadido es del tipo pedido (${E.tipos.join(', 
 
   /* Que el mando MUEVE la máquina: se pide `astro` —que no recorta por sombra—
      a una hora de backtracking y el objetivo tiene que irse al tope. Si diera
-     lo mismo, el selector sería un adorno. */
+     lo mismo, el selector sería un adorno.
+
+     ⚠ CON EL RELOJ CONGELADO en cada lectura. La primera versión de esto
+     avanzaba con `P.paso(1)` y comparaba la ida y la vuelta al bit: falló, y
+     con razón — cada paso mueve el reloj un segundo, el sol con él (unos
+     0,004 °/s en el ángulo de hora) y la vuelta cae 0,008° más allá. No era
+     rastro del mando: era el sol. Fijando `P.t.hora` antes de cada paso las
+     tres lecturas son del MISMO instante y la identidad al bit vuelve a ser
+     una exigencia limpia, que es lo que se quería vigilar. */
   const mueve = await pg.evaluate(async () => {
     const reloj = document.getElementById('hora') || document.getElementById('hour');
     const pon = (v) => { if (reloj) { reloj.value = String(v); reloj.dispatchEvent(new Event('input', { bubbles: true })); } };
     pon(8);
     await new Promise((r) => setTimeout(r, 500));
-    const lee = () => { const t = P.tcu(1); return t.objetivoSolar; };
+    const HORA = 8;
     const s = document.getElementById('polBT');
-    s.value = 'pairwise'; s.dispatchEvent(new Event('change', { bubbles: true }));
-    P.paso(1); const pw = lee();
-    s.value = 'astro'; s.dispatchEvent(new Event('change', { bubbles: true }));
-    P.paso(1); const as = lee();
-    s.value = 'pairwise'; s.dispatchEvent(new Event('change', { bubbles: true }));
-    P.paso(1);
-    return { pw, as, vuelta: lee() };
+    const conPol = (k) => {
+      s.value = k; s.dispatchEvent(new Event('change', { bubbles: true }));
+      P.t.hora = HORA;                 /* el reloj, quieto: lo que se compara es la política */
+      P.paso(0.001);
+      return P.tcu(1).objetivoSolar;
+    };
+    return { pw: conPol('pairwise'), as: conPol('astro'), vuelta: conPol('pairwise') };
   });
   ok(Math.abs(mueve.as) > Math.abs(mueve.pw) + 1,
      'cambiar de política MUEVE la consigna: astro no recorta y pairwise sí',
