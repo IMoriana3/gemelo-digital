@@ -59,14 +59,14 @@ const EXCLUIDOS = {
     motivo:
       'Carea el lazo de control de este gemelo contra `js/control_core.js` de '
       + 'cobertura-zigbee, que es el núcleo compartido de la ley. Ese hermano SÍ es '
-      + 'público y la puerta ya lo clona, pero POR EL PIN — y el pin de ahora '
-      + '(06b00aaa) lleva la ley VIEJA: el núcleo enclavaba el destino al arrancar y '
-      + 'no lo recalculaba, así que con la consigna retrocediendo conducía a un '
-      + 'destino rancio (2,200° de máximo contra los 1,700 de la autoridad, medido). '
-      + 'Metido en la puerta hoy, este careo saldría ROJO por algo que no es de este '
-      + 'repo, y un aviso que tumba PRs ajenas deja de ser un aviso y se vuelve un '
-      + 'peaje — la lección que este mismo fichero ya tiene escrita. Se corre en '
-      + 'local, donde el clon está al lado y al día.',
+      + 'público y la puerta ya lo clona, pero POR EL PIN — y en el commit pinado '
+      + '(06b00aaa, del 9-sep) ESE FICHERO NO EXISTE: el pin es anterior al núcleo '
+      + 'compartido. Metido en la puerta hoy, el careo no encontraría contra qué '
+      + 'carear y saldría rojo por algo que no es de este repo. (Primero escribí aquí '
+      + 'que el pin llevaba la ley VIEJA, y era falso: comprobado con `ls`, el '
+      + 'fichero no está. Lo descubrí porque el propio arnés tenía un respaldo que '
+      + 'se tragaba la ruta pedida y daba verde careando contra mi árbol de trabajo; '
+      + 'ese respaldo ya no existe.) Se corre en local, donde el clon está al lado.',
     para_meterlo:
       'Mover el pin de cobertura-zigbee a un commit que lleve el arreglo del núcleo '
       + '(IMoriana3/cobertura-zigbee#670, abierto al escribir esto), por el '
