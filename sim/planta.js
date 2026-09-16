@@ -1301,7 +1301,8 @@ TCU.prototype.paso = function (dt) {
     this.moviendo = 0; this.iMotor = 0; this.soc = 0; this.iBat = 0; this.vPanel = 0;
     return;
   }
-  var ang = angulos(this.p.loc, this.p.t.dia, this.p.t.hora);
+  var ang = angulos(this.p.loc, this.p.t.dia, this.p.t.hora,
+                    { pol: this.p.cfg.polBT, T: this.p.Tbt || null, nFilas: this.p.cfg.nTcu });
   this.cielo(ang);            /* la irradiancia del sitio, UNA vez por paso */
   this.solar = { real: ang.real, bt: ang.bt, zen: ang.sol.zen * R2D, az: ang.sol.az * R2D, dia: ang.dia };
   /* el orden importa: primero se LEEN las entradas (medida analógica y línea binaria),
@@ -1497,6 +1498,15 @@ function Planta(cfg) {
     averias: cfg.averias || { activo: false, comsMtbfH: 0, comsMin: 10,
                               duroMtbfD: 0, caladoMtbfD: 0, reparaH: 8, desajusteSig: 0 },
     politicaDifusa: cfg.politicaDifusa || 'none',     /* none · flat · continuous · limited · poa_switch */
+    /* LA POLÍTICA DE BACKTRACKING, y son LAS MISMAS NUEVE que el selector de
+       produccion.html, porque el algoritmo es el mismo bloque: pairwise ·
+       true3d · row · global · bt2d · mgl · optimal · optfree · astro. No hay
+       lista propia aquí — la publica sim/bt.js y `tools/carea_bt.mjs` la carea
+       contra la FUENTE del hermano, así que si allí aparece una décima y aquí
+       no, la puerta canta. Pairwise es la canónica y la que este simulador
+       venía dando (su fórmula plana era esa misma, medido: 0,0000° de
+       separación en llano). */
+    polBT: cfg.polBT || 'pairwise',
     /* Trayectoria del ángulo calculada por el MOTOR canónico (SolarGPT, POST /tracker).
        Si está, el gemelo la EJECUTA y no calcula ni el backtracking ni la política de
        cielo cubierto: el algoritmo es de allí. Si no está, se usa el modelo del
@@ -1548,7 +1558,8 @@ function Planta(cfg) {
      ángulo que le tocaría a esta hora — si no, una planta creada a mediodía sale
      entera en posición nocturna y con desviación de 50°, o sea toda en aviso, hasta
      que la simulación tarda diez minutos en recuperarla. */
-  var ang0 = angulos(this.loc, this.t.dia, this.t.hora);
+  var ang0 = angulos(this.loc, this.t.dia, this.t.hora,
+                     { pol: this.cfg.polBT, T: this.Tbt || null, nFilas: this.cfg.nTcu });
   for (i = 0; i < this.tcus.length; i++) {
     if (!this.tcus[i].repetidor) {
       var t0 = this.tcus[i];

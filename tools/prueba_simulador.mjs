@@ -759,6 +759,55 @@ ok(E.trasQuitar === E.filas - 1 && E.trasAnadir === E.filas,
    `quitar y añadir eventos: ${E.filas} → ${E.trasQuitar} → ${E.trasAnadir}`);
 ok(E.tipos.includes('av'), `y el añadido es del tipo pedido (${E.tipos.join(', ')})`);
 
+/* ── EL BACKTRACKING ES EL DEL HERMANO, Y SE ELIGE EN LA PÁGINA ──────────────
+   No basta con que el algoritmo esté compartido: la queja era «las mismas
+   políticas en los dos lados», así que se comprueba que el selector ofrece las
+   NUEVE con las mismas claves —leídas de la fuente del hermano, no de una lista
+   escrita aquí— y que cambiarlas mueve la consigna de verdad. */
+{
+  const sel = await pg.evaluate(() => {
+    const s = document.getElementById('polBT');
+    return s ? { n: s.options.length, claves: [...s.options].map((o) => o.value),
+                 valor: s.value, nota: (document.getElementById('btNota') || {}).textContent || '' }
+             : null;
+  });
+  const html = readFileSync(path.join(RAIZ, '..', 'cobertura-zigbee', 'produccion.html'), 'utf8');
+  const i0 = html.indexOf('const POLS=');
+  const suyas = [...html.slice(i0, html.indexOf('];', i0)).matchAll(/key:'([a-z0-9]+)'/g)].map((m) => m[1]);
+  ok(!!sel && sel.claves.join(',') === suyas.join(','),
+     `el selector ofrece las políticas del hermano (${suyas.length})`,
+     sel ? `aquí [${sel.claves.join(' ')}] · allí [${suyas.join(' ')}]` : 'no hay selector');
+  ok(!!sel && sel.valor === 'pairwise',
+     'y arranca en pairwise, la canónica', sel ? sel.valor : '');
+  ok(!!sel && /backtracking\.html/.test(sel.nota),
+     'y la nota dice de dónde sale el algoritmo', sel ? sel.nota.slice(0, 80) : '');
+
+  /* Que el mando MUEVE la máquina: se pide `astro` —que no recorta por sombra—
+     a una hora de backtracking y el objetivo tiene que irse al tope. Si diera
+     lo mismo, el selector sería un adorno. */
+  const mueve = await pg.evaluate(async () => {
+    const reloj = document.getElementById('hora') || document.getElementById('hour');
+    const pon = (v) => { if (reloj) { reloj.value = String(v); reloj.dispatchEvent(new Event('input', { bubbles: true })); } };
+    pon(8);
+    await new Promise((r) => setTimeout(r, 500));
+    const lee = () => { const t = P.tcu(1); return t.objetivoSolar; };
+    const s = document.getElementById('polBT');
+    s.value = 'pairwise'; s.dispatchEvent(new Event('change', { bubbles: true }));
+    P.paso(1); const pw = lee();
+    s.value = 'astro'; s.dispatchEvent(new Event('change', { bubbles: true }));
+    P.paso(1); const as = lee();
+    s.value = 'pairwise'; s.dispatchEvent(new Event('change', { bubbles: true }));
+    P.paso(1);
+    return { pw, as, vuelta: lee() };
+  });
+  ok(Math.abs(mueve.as) > Math.abs(mueve.pw) + 1,
+     'cambiar de política MUEVE la consigna: astro no recorta y pairwise sí',
+     `pairwise ${mueve.pw.toFixed(2)}° · astro ${mueve.as.toFixed(2)}°`);
+  ok(Math.abs(mueve.vuelta - mueve.pw) < 1e-9,
+     'y volver a pairwise devuelve el mismo ángulo (el mando no deja rastro)',
+     `${mueve.vuelta.toFixed(4)}° contra ${mueve.pw.toFixed(4)}°`);
+}
+
 ok(rotos.length === 0, 'sin errores de JavaScript' + (rotos.length ? ': ' + rotos[0] : ''));
 
 await nav.close();

@@ -308,6 +308,11 @@
           <div class="note" id="estrNota" style="margin-top:4px"></div>
         </div>
         <div class="fld">
+          <label>Backtracking (las nueve de cobertura-zigbee)</label>
+          <select id="polBT"></select>
+          <div class="note" id="btNota" style="margin-top:4px"></div>
+        </div>
+        <div class="fld">
           <label>Cielo cubierto (difusa)</label>
           <select id="polDifusa"></select>
           <div class="note" id="difNota" style="margin-top:4px"></div>
@@ -652,6 +657,12 @@ SIM.PERFILES.forEach(function (p) { $('perfil').add(new Option(p.n, p.id)); });
 SIM.Abanderamiento.ESTRATEGIAS.forEach(function (e) { $('estrViento').add(new Option(e.n, e.id)); });
 $('estrViento').value = 'B2';
 /* Las cuatro políticas de difusa de DiffuseConfig (solargpt_core/tracker.py) */
+/* Las políticas de BT se listan de sim/bt.js, que las tiene con las MISMAS
+   claves que el selector de produccion.html —y `tools/carea_bt.mjs` lo carea
+   contra su fuente—. Aquí no se escribe ninguna lista: una copia es lo que se
+   queda atrás el día que allí aparezca la décima. */
+BT.POLITICAS.forEach(function (p) { $('polBT').add(new Option(p.nm, p.key)); });
+$('polBT').value = 'pairwise';
 SIM.Difusa.POLITICAS.forEach(function (p) { $('polDifusa').add(new Option(p.n, p.id)); });
 $('polDifusa').value = 'none';
 $('perfil').value = SIM.FISICA.perfilPorDefecto;   /* el DEFAULT_PROFILE de tcu.py */
@@ -684,6 +695,7 @@ function construye() {
       reparaH: +$('avRep').value, desajusteSig: +$('avDes').value / 10
     },
     politicaDifusa: $('polDifusa').value,
+    polBT: $('polBT').value,
     estrategia: {
       activa: $('estrOn').checked, socCrit: +$('socCrit').value, winter: $('winter').checked,
       tMin: +$('tMin').value, poaMin: +$('poaMin').value,
@@ -2621,6 +2633,22 @@ $('nGrup').onchange = construye;
 $('perfil').onchange = construye;
 $('estrViento').onchange = function () { aplicaEstrategiaViento(); toca(); };
 $('polDifusa').onchange = function () { aplicaPoliticaDifusa(); pideTrayectoria(); toca(); };
+/* La política de BT se cambia EN CALIENTE: es la consigna, no la geometría, así
+   que no hace falta rehacer la planta —y rehacerla perdería el estado del día,
+   que con banda muerta tiene memoria—. La nota dice de dónde sale el algoritmo,
+   que es el punto de todo esto. */
+$('polBT').onchange = function () {
+  if (P) P.cfg.polBT = $('polBT').value;
+  pintaNotaBT(); toca();
+};
+function pintaNotaBT() {
+  var n = $('btNota'); if (!n) return;
+  n.innerHTML = SIM.btListo()
+    ? 'El algoritmo es el de <b>cobertura-zigbee/backtracking.html</b> (bloque FÍSICA PURA), ' +
+      'cargado en caliente: el gemelo no lleva backtracking propio. Las mismas nueve ' +
+      'políticas que su tarjeta de producción.'
+    : '<b>Sin backtracking:</b> ' + (SIM.BT ? SIM.BT.motivo() : 'no está sim/bt.js');
+}
 $('btnCanon2').onclick = function () { conectaCanon(); };
 ['estrOn', 'socTgt', 'socCrit', 'fcDays', 'winter', 'tMin', 'poaMin', 'motorModel'].forEach(function (id) {
   var manual = id === 'socTgt' ? 'techo' : (id === 'fcDays' ? 'calib' : null);
@@ -2650,6 +2678,7 @@ function arranca() {
   construye();
 aplicaEstrategia();
 aplicaPoliticaDifusa();
+pintaNotaBT();
 pintaEscritura();
 (function () {
   var dU = Escenario.deURL(location.href);
