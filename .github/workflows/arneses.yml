@@ -114,6 +114,17 @@ jobs:
         working-directory: gemelo-digital
         run: node tools/carea_difusa.mjs
 
+      # El careo del LAZO contra el núcleo compartido de cobertura-zigbee, que el
+      # paso de arriba ya ha clonado POR EL PIN. Entra en la puerta ahora y no
+      # antes porque el pin anterior (06b00aaa, del 9-sep) era ANTERIOR al propio
+      # núcleo: `js/control_core.js` no existía en ese commit, así que el careo no
+      # habría tenido contra qué carear. Va con la ruta EXPLÍCITA: el arnés no
+      # tiene respaldo cuando se le pide una, y así lo que se carea en CI es el
+      # clon del pin y nunca un fichero de al lado que pase por casualidad.
+      - name: tools/carea_lazo.mjs
+        working-directory: gemelo-digital
+        run: node tools/carea_lazo.mjs --nucleo=../cobertura-zigbee/js/control_core.js
+
       - name: El catálogo está regenerado
         working-directory: gemelo-digital
         run: node tools/genera_plantas.mjs --check --desde ../proyectos --cobertura ../cobertura-zigbee

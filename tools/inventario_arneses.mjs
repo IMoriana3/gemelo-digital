@@ -55,34 +55,6 @@ const ok = (c, m, x) => {
    `motivo` explica por qué no es puerta HOY; `para_meterlo` es lo que haría
    falta, para que la exclusión no se lea como «esto nunca». */
 const EXCLUIDOS = {
-  'tools/carea_lazo.mjs': {
-    motivo:
-      'Carea el lazo de control de este gemelo contra `js/control_core.js` de '
-      + 'cobertura-zigbee, que es el núcleo compartido de la ley. Ese hermano SÍ es '
-      + 'público y la puerta ya lo clona, pero POR EL PIN — y en el commit pinado '
-      + '(06b00aaa, del 9-sep) ESE FICHERO NO EXISTE: el pin es anterior al núcleo '
-      + 'compartido. Metido en la puerta hoy, el careo no encontraría contra qué '
-      + 'carear y saldría rojo por algo que no es de este repo. (Primero escribí aquí '
-      + 'que el pin llevaba la ley VIEJA, y era falso: comprobado con `ls`, el '
-      + 'fichero no está. Lo descubrí porque el propio arnés tenía un respaldo que '
-      + 'se tragaba la ruta pedida y daba verde careando contra mi árbol de trabajo; '
-      + 'ese respaldo ya no existe.) Se corre en local, donde el clon está al lado.',
-    para_meterlo:
-      'Mover el pin de cobertura-zigbee a un commit que lleve el arreglo del núcleo '
-      + '(IMoriana3/cobertura-zigbee#670, abierto al escribir esto), por el '
-      + 'procedimiento que pines.json ya describe: clonar el candidato, correr los '
-      + 'arneses CONTRA ÉL y mover el commit solo si pasan. Con eso este careo pasa a '
-      + 'la puerta en la misma PR, que es donde tiene que estar: es el único que '
-      + 'vigila que las cuatro cabezas de la ley sigan diciendo lo mismo.',
-    lo_que_NO_queda_sin_vigilar:
-      'La ley del lazo NO se queda desnuda: sim/prueba.mjs la fija con seis '
-      + 'comprobaciones propias y versionadas aquí —que el eje aparca un margen más '
-      + 'allá, que cada paso vale dos márgenes con la consigna derivando, que '
-      + 'aparcado y con RUIDO una hora de consigna quieta no lo mueve, que el error '
-      + 'pasa por los dos lados, que un abanderamiento va A su ángulo y que la '
-      + 'continuidad la decide el destino— y ésas sí están en la puerta. Lo que se '
-      + 'pierde es el careo contra el núcleo VIVO del hermano.',
-  },
   'tools/carea_resultado.mjs': {
     motivo:
       'Carea el resultado del espejo JS contra `solargpt_core.tcu_compare`, y '

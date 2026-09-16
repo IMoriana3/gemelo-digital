@@ -97,18 +97,28 @@ try {
   console.log('\n── cabeceras viejas (lat/lng) ──');
   const v = genera(VIEJO, tmp);
   ok(v.code === 0, 'el generador acepta el export viejo', `salida ${v.code}\n${v.err}`);
-  ok(v.cat && v.cat.plantas.length === 32, 'trae las 32 plantas',
+  /* LAS CIFRAS ABSOLUTAS SON DEL HERMANO, NO DE LO QUE ESTE BANCO VIGILA, y
+     clavarlas aquí lo rompía cada vez que alguien da de alta una planta allí —
+     por un motivo que no tiene nada que ver con leer dos grafías de cabecera.
+     Pasó al mover el pin de cobertura-zigbee: apareció «Catania» y el recuento
+     fue de 32 a 33, con los dos exports igual de correctos que antes.
+     El contrato de verdad es RELATIVO y es más fuerte: los dos exports tienen que
+     dar el MISMO número de plantas, y el nuevo exactamente DOS coordenadas más —
+     las de Minervino y Monsano, que se comprueban por valor unas líneas más
+     abajo. Un lector que cogiera la columna de al lado seguiría cuadrando los
+     recuentos, y por eso ese bloque existe. */
+  ok(v.cat && v.cat.plantas.length > 0, 'el export viejo trae plantas',
      v.cat && `${v.cat.plantas.length}`);
-  ok(v.cat && v.cat.n_con_coordenadas === 30, '30 con coordenadas (sin Minervino ni Monsano)',
-     v.cat && `${v.cat.n_con_coordenadas}`);
 
   console.log('\n── cabeceras nuevas (Latitud/Longitud) ──');
   const n = genera(NUEVO, tmp);
   ok(n.code === 0, 'el generador acepta el export nuevo', `salida ${n.code}\n${n.err}`);
-  ok(n.cat && n.cat.plantas.length === 32, 'trae las 32 plantas',
-     n.cat && `${n.cat.plantas.length}`);
-  ok(n.cat && n.cat.n_con_coordenadas === 32, '32 con coordenadas',
-     n.cat && `${n.cat.n_con_coordenadas}`);
+  ok(n.cat && v.cat && n.cat.plantas.length === v.cat.plantas.length,
+     'las DOS grafías dan el mismo número de plantas',
+     n.cat && v.cat && `${n.cat.plantas.length} y ${v.cat.plantas.length}`);
+  ok(n.cat && v.cat && n.cat.n_con_coordenadas - v.cat.n_con_coordenadas === 2,
+     'y el export nuevo trae exactamente DOS coordenadas más (Minervino y Monsano)',
+     n.cat && v.cat && `${v.cat.n_con_coordenadas} → ${n.cat.n_con_coordenadas}`);
 
   /* Las dos que separan un export del otro, con el valor exacto. Un recuento
      que cuadra no dice QUÉ coordenada entró: si el lector cogiera la columna de

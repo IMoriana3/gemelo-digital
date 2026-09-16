@@ -9,11 +9,11 @@
     "emparejado": "cobertura-zigbee/plantas_indice.json · código de cartera y huso por layout",
     "layouts": "cobertura-zigbee/<planta>_layout.json · clat/clon (centroide real)"
    },
-   "n_total": 32,
-   "n_con_coordenadas": 32,
+   "n_total": 33,
+   "n_con_coordenadas": 33,
    "n_sin_coordenadas": 0,
    "n_homonimos": 2,
-   "n_fuera_de_cartera": 1,
+   "n_fuera_de_cartera": 2,
    "plantas": [
     {
      "num": "23003",
@@ -607,6 +607,26 @@
      "tz": 5.5,
      "dst": false,
      "homonimo_de": null
+    },
+    {
+     "num": null,
+     "num_cartera": null,
+     "proyecto": "Catania",
+     "emplazamiento": null,
+     "provincia": null,
+     "pais": null,
+     "estado_pem": "oferta",
+     "alim_tcu": null,
+     "bateria_tcu": null,
+     "trk_total": 3314,
+     "lat": 37.3794091,
+     "lon": 15.0179811,
+     "fuente": "layout:catania",
+     "tz": null,
+     "dst": null,
+     "homonimo_de": null,
+     "en_cartera": false,
+     "nota": "tiene layout pero no figura en la cartera"
     },
     {
      "num": null,
