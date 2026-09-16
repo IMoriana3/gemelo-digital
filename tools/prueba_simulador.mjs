@@ -27,12 +27,35 @@
    diría más del contenedor que del código. Lo que se comprueba es lo que NO depende
    de la máquina: cuántas veces se pinta, cuándo, y qué hay en la escena.
    ============================================================================ */
-import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 
 const RAIZ = path.dirname(new URL('.', import.meta.url).pathname);
-const PAG = pathToFileURL(path.join(RAIZ, 'simulador.html')).href;
+
+/* ── SE SIRVE POR HTTP, Y DESDE EL DIRECTORIO PADRE ───────────────────────────
+   Esto abría la página por `file://`, y ya no se puede: el simulador carga el
+   BACKTRACKING del hermano (cobertura-zigbee/backtracking.html, bloque FÍSICA
+   PURA) con `fetch`, y un `fetch` de un `file://` a otro `file://` lo bloquea
+   CORS —origen opaco—, así que la página se quedaría sin BT y diría justamente
+   eso. Sirviendo el PADRE, `../cobertura-zigbee/…` resuelve igual que en Pages,
+   donde los dos repos comparten origen (imoriana3.github.io/…). Y así el banco
+   prueba el mismo camino que ve el usuario, que es de lo que sirve un banco de
+   navegador. */
+const PADRE = path.dirname(RAIZ);
+const CARPETA = path.basename(RAIZ);
+if (!existsSync(path.join(PADRE, 'cobertura-zigbee')) &&
+    !existsSync(path.join(PADRE, 'Cobertura-Zigbee'))) {
+  console.error('no encuentro cobertura-zigbee al lado de este repo, y el simulador ' +
+                'carga de ahí el backtracking: el banco no puede probar la página.');
+  process.exit(2);
+}
+const PUERTO = 8391 + (process.pid % 80);
+const srv = spawn('python3', ['-m', 'http.server', String(PUERTO), '--directory', PADRE],
+                  { stdio: 'ignore' });
+process.on('exit', () => { try { srv.kill(); } catch { /* nada */ } });
+await new Promise((r) => setTimeout(r, 1200));
+const PAG = `http://localhost:${PUERTO}/${CARPETA}/simulador.html`;
 
 /* ── GUARDIA DE NADA DUPLICADO, antes de abrir el navegador ────────────────────
    Un fichero de un solo <script> con una funcion definida dos veces NO da error: en
@@ -735,6 +758,63 @@ ok(E.esMio, 'tocar un ejemplo de la casa hace una copia: el D.1.1 sigue siendo e
 ok(E.trasQuitar === E.filas - 1 && E.trasAnadir === E.filas,
    `quitar y añadir eventos: ${E.filas} → ${E.trasQuitar} → ${E.trasAnadir}`);
 ok(E.tipos.includes('av'), `y el añadido es del tipo pedido (${E.tipos.join(', ')})`);
+
+/* ── EL BACKTRACKING ES EL DEL HERMANO, Y SE ELIGE EN LA PÁGINA ──────────────
+   No basta con que el algoritmo esté compartido: la queja era «las mismas
+   políticas en los dos lados», así que se comprueba que el selector ofrece las
+   NUEVE con las mismas claves —leídas de la fuente del hermano, no de una lista
+   escrita aquí— y que cambiarlas mueve la consigna de verdad. */
+{
+  const sel = await pg.evaluate(() => {
+    const s = document.getElementById('polBT');
+    return s ? { n: s.options.length, claves: [...s.options].map((o) => o.value),
+                 valor: s.value, nota: (document.getElementById('btNota') || {}).textContent || '' }
+             : null;
+  });
+  const html = readFileSync(path.join(RAIZ, '..', 'cobertura-zigbee', 'produccion.html'), 'utf8');
+  const i0 = html.indexOf('const POLS=');
+  const suyas = [...html.slice(i0, html.indexOf('];', i0)).matchAll(/key:'([a-z0-9]+)'/g)].map((m) => m[1]);
+  ok(!!sel && sel.claves.join(',') === suyas.join(','),
+     `el selector ofrece las políticas del hermano (${suyas.length})`,
+     sel ? `aquí [${sel.claves.join(' ')}] · allí [${suyas.join(' ')}]` : 'no hay selector');
+  ok(!!sel && sel.valor === 'pairwise',
+     'y arranca en pairwise, la canónica', sel ? sel.valor : '');
+  ok(!!sel && /backtracking\.html/.test(sel.nota),
+     'y la nota dice de dónde sale el algoritmo', sel ? sel.nota.slice(0, 80) : '');
+
+  /* Que el mando MUEVE la máquina: se pide `astro` —que no recorta por sombra—
+     a una hora de backtracking y el objetivo tiene que irse al tope. Si diera
+     lo mismo, el selector sería un adorno.
+
+     ⚠ CON EL RELOJ CONGELADO en cada lectura. La primera versión de esto
+     avanzaba con `P.paso(1)` y comparaba la ida y la vuelta al bit: falló, y
+     con razón — cada paso mueve el reloj un segundo, el sol con él (unos
+     0,004 °/s en el ángulo de hora) y la vuelta cae 0,008° más allá. No era
+     rastro del mando: era el sol. Fijando `P.t.hora` antes de cada paso las
+     tres lecturas son del MISMO instante y la identidad al bit vuelve a ser
+     una exigencia limpia, que es lo que se quería vigilar. */
+  const mueve = await pg.evaluate(async () => {
+    const reloj = document.getElementById('hora') || document.getElementById('hour');
+    const pon = (v) => { if (reloj) { reloj.value = String(v); reloj.dispatchEvent(new Event('input', { bubbles: true })); } };
+    pon(8);
+    await new Promise((r) => setTimeout(r, 500));
+    const HORA = 8;
+    const s = document.getElementById('polBT');
+    const conPol = (k) => {
+      s.value = k; s.dispatchEvent(new Event('change', { bubbles: true }));
+      P.t.hora = HORA;                 /* el reloj, quieto: lo que se compara es la política */
+      P.paso(0.001);
+      return P.tcu(1).objetivoSolar;
+    };
+    return { pw: conPol('pairwise'), as: conPol('astro'), vuelta: conPol('pairwise') };
+  });
+  ok(Math.abs(mueve.as) > Math.abs(mueve.pw) + 1,
+     'cambiar de política MUEVE la consigna: astro no recorta y pairwise sí',
+     `pairwise ${mueve.pw.toFixed(2)}° · astro ${mueve.as.toFixed(2)}°`);
+  ok(Math.abs(mueve.vuelta - mueve.pw) < 1e-9,
+     'y volver a pairwise devuelve el mismo ángulo (el mando no deja rastro)',
+     `${mueve.vuelta.toFixed(4)}° contra ${mueve.pw.toFixed(4)}°`);
+}
 
 ok(rotos.length === 0, 'sin errores de JavaScript' + (rotos.length ? ': ' + rotos[0] : ''));
 

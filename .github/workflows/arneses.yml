@@ -125,6 +125,10 @@ jobs:
         working-directory: gemelo-digital
         run: node tools/carea_lazo.mjs --nucleo=../cobertura-zigbee/js/control_core.js
 
+      - name: tools/carea_bt.mjs
+        working-directory: gemelo-digital
+        run: node tools/carea_bt.mjs --hermano=../cobertura-zigbee
+
       - name: El catálogo está regenerado
         working-directory: gemelo-digital
         run: node tools/genera_plantas.mjs --check --desde ../proyectos --cobertura ../cobertura-zigbee
@@ -141,15 +145,40 @@ jobs:
   navegador:
     runs-on: ubuntu-latest
     steps:
+      # SE CHECKOUTEA EN SU CARPETA Y CON EL HERMANO AL LADO, igual que el job
+      # `arneses`. Antes bastaba la raíz: `prueba_simulador.mjs` abría la página
+      # por file://. Ya no puede — el simulador carga el BACKTRACKING del
+      # hermano con fetch, y un fetch de un file:// a otro lo bloquea CORS—, así
+      # que el arnés sirve por http desde el directorio PADRE y necesita ver los
+      # dos repos, que es la disposición que tiene Pages (mismo origen).
       - uses: actions/checkout@v4
+        with: { path: gemelo-digital }
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      # El hermano POR EL PIN, y comprobando que está en el pin: el mismo
+      # procedimiento y el mismo motivo que en el job `arneses` — si esto se
+      # volviera un `clone` a secas, la página se probaría contra la punta y la
+      # puerta seguiría verde midiendo otra cosa.
+      - name: Clonar cobertura-zigbee POR EL PIN
+        run: |
+          set -o pipefail
+          sha=$(python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['cobertura-zigbee']['commit'])")
+          echo "── cobertura-zigbee → $sha"
+          git init -q cobertura-zigbee && cd cobertura-zigbee
+          git remote add origin "https://github.com/${{ github.repository_owner }}/cobertura-zigbee.git"
+          git fetch -q --depth 1 origin "$sha"
+          git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$sha" || { echo "el clon NO está en el pin"; exit 1; }
 
       # La versión sale de pines.json por el mismo motivo que los commits: sin
       # fijarla, estos dos arneses carean contra un navegador distinto cada
       # semana. Este repo no versiona package.json (está en .gitignore), así que
       # la instalación es de CI y no deja rastro en el árbol.
       - name: playwright, en la versión del pin
+        working-directory: gemelo-digital
         run: |
           set -o pipefail
           v=$(python3 -c "import json;print(json.load(open('pines.json'))['playwright']['version'])")
@@ -158,9 +187,11 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: tools/prueba_bateria.mjs
+        working-directory: gemelo-digital
         run: node tools/prueba_bateria.mjs
 
       - name: tools/prueba_simulador.mjs
+        working-directory: gemelo-digital
         run: node tools/prueba_simulador.mjs
 
   # ─────────────────────────────────────────────────────────────────────────

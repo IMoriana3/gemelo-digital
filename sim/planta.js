@@ -63,6 +63,36 @@ var F = (typeof window !== 'undefined' && window.FISICA) ||
         (typeof require === 'function' ? require('./fisica.js') : null);
 if (!F) throw new Error('falta sim/fisica.js — es el espejo del core; carealo con: node tools/carea_fisica.mjs');
 
+/* ═══════════════════ el BACKTRACKING, del hermano ═══════════════════
+   NO se escribe aquí. Vivía aquí —`angulos()` calculaba su propio backtracking
+   de Anderson-Mikofski con un GCR único y el terreno llano— y eso eran DOS BT
+   para la misma planta: el otro es el bloque FÍSICA PURA de
+   `cobertura-zigbee/backtracking.html`, con sus NUEVE políticas, el terreno
+   medido pareja a pareja y el acople por accionamiento.
+
+   Que eran el mismo en llano y distintos en cuanto hay terreno está MEDIDO, y
+   lo vigila `node tools/carea_bt.mjs`: con el mismo GCR y el mismo sol la
+   fórmula de aquí y el `pairwise` del hermano coincidían al dígito (peor
+   0,0000° en 58 instantes del día), y con medio metro de desnivel por vano el
+   hermano se aparta hasta 23,71°. O sea que el BT de aquí no estaba mal:
+   estaba corto, y por eso se va entero en vez de arreglarse.
+
+   En Node se carga del clon de al lado, que es donde todos los arneses y CI ya
+   esperan al hermano. En el navegador la página lo pide con `API.cargaBT()`
+   antes de construir la planta —`fetch`, mismo origen en Pages— y si no está
+   lo DICE: no hay modelo de repuesto, porque un backtracking de primer orden
+   que parece el canónico es peor que no tener backtracking (la regla ya
+   escrita en canon.js). */
+var BT = (typeof window !== 'undefined' && window.BT) ||
+         (typeof require === 'function' ? require('./bt.js') : null);
+var BTX = BT ? new BT() : null;
+if (BTX && typeof require === 'function') {
+  var _path = require('path');
+  for (var _b of ['../cobertura-zigbee', '../Cobertura-Zigbee']) {
+    if (BTX.cargaSync(_path.join(__dirname, '..', _b))) break;
+  }
+}
+
 var K = {
   /* ---- del canon (fisica.js) ---- */
   AXIS_MAX: F.e.AXIS_MAX,       /* tope mecánico ±55° */
@@ -337,16 +367,48 @@ function posicionSolar(loc, N, h) {
   var az = Math.acos(clamp(caz, -1, 1)); if (w < 0) az = -az;   /* − este (mañana), + oeste (tarde) */
   return { el: el, az: az, zen: Math.PI / 2 - el };
 }
-/* True tracking + backtracking (Anderson-Mikofski) sobre eje N-S. */
-function angulos(loc, N, h) {
+/* EL SOL ES DE AQUÍ, EL BACKTRACKING ES DEL HERMANO.
+   El true tracking (apuntar al sol) es trigonometría de tres líneas y no tiene
+   versiones; el backtracking sí las tiene, y por eso se pide fuera.
+
+   `T` es el terreno en el formato del hermano y `pol` una de sus nueve
+   políticas. Sin terreno declarado se arma uno LLANO con el pitch canónico, que
+   es exactamente lo que este fichero suponía antes — y el careo demuestra que
+   ahí los dos dan el mismo número, así que quitar la fórmula de aquí no mueve
+   ni un grado hasta que alguien le dé un terreno de verdad.
+
+   ⚠ EL AZIMUT SE TRADUCE. Aquí se mide desde el SUR (0 = sur, negativo al
+   este); el hermano lo espera como pvlib, desde el NORTE en sentido horario
+   (90 = este). Sin el +180 la consigna sale con el signo dado la vuelta: 110°
+   de error, los dos extremos del recorrido. Y el ángulo vuelve negado, porque
+   el hermano va en convención pvlib (θ>0 al este) y la casa al contrario; las
+   dos conversiones viven en sim/bt.js y en ningún otro sitio. */
+function Tllana(nFilas) {
+  var xs = [], z = [], tilt = [], i;
+  var n = Math.max(2, nFilas || 10), pitch = 6.0, cw = K.GCR * pitch;
+  for (i = 0; i < n; i++) { xs.push(i * pitch); z.push(0); tilt.push(0); }
+  return { pairs: BTX.F.pairsFromElevX(z, xs, tilt), cw: cw, axisAz: 0, axisTilt: 0,
+           maxAngle: K.AXIS_MAX, gcr: cw / pitch, rowTilt: tilt, groups: null, drive: null };
+}
+var _Tcache = null;
+function angulos(loc, N, h, opt) {
   var P = posicionSolar(loc, N, h);
   if (P.el <= 0.0001) return { sol: P, dia: false, real: 0, bt: 0, sel: K.NIGHT_POS, btActivo: false, ghi: 0 };
   var sx = Math.cos(P.el) * Math.sin(P.az), sz = Math.sin(P.el);
   var tt = Math.atan2(sx, sz);
-  var temp = Math.min(1, (1 / K.GCR) * Math.cos(tt));
-  var bt = tt - signo(tt) * Math.acos(temp);
-  var ttD = clamp(tt * R2D, -K.AXIS_MAX, K.AXIS_MAX), btD = clamp(bt * R2D, -K.AXIS_MAX, K.AXIS_MAX);
-  return { sol: P, dia: true, real: ttD, bt: btD, sel: btD,
+  var ttD = clamp(tt * R2D, -K.AXIS_MAX, K.AXIS_MAX);
+  if (!BTX || !BTX.listo())
+    throw new Error('el backtracking lo trae cobertura-zigbee y no está cargado' +
+                    (BTX ? ': ' + BTX.motivo() : '') +
+                    '. En Node: ten el hermano al lado. En el navegador: API.cargaBT(base).');
+  var T = (opt && opt.T) || (_Tcache || (_Tcache = Tllana(opt && opt.nFilas)));
+  var zen = P.zen * R2D, az = 180 + P.az * R2D;            /* del sur al norte */
+  var doy = N;
+  var irr = BTX.F.clearskyIneichen(zen, doy, (loc && loc.alt) || 300, 3.5);
+  var a = BTX.angulos((opt && opt.pol) || 'pairwise', zen, az, T, irr, doy, 0.2);
+  var fila = (opt && opt.fila) || 0;
+  var btD = clamp(a[Math.min(fila, a.length - 1)], -K.AXIS_MAX, K.AXIS_MAX);
+  return { sol: P, dia: true, real: ttD, bt: btD, sel: btD, filas: a,
            btActivo: Math.abs(btD) < Math.abs(ttD) - 1e-3 };
 }
 /* Coseno del ángulo de incidencia con el ángulo REAL del seguidor: si está
@@ -1239,7 +1301,8 @@ TCU.prototype.paso = function (dt) {
     this.moviendo = 0; this.iMotor = 0; this.soc = 0; this.iBat = 0; this.vPanel = 0;
     return;
   }
-  var ang = angulos(this.p.loc, this.p.t.dia, this.p.t.hora);
+  var ang = angulos(this.p.loc, this.p.t.dia, this.p.t.hora,
+                    { pol: this.p.cfg.polBT, T: this.p.Tbt || null, nFilas: this.p.cfg.nTcu });
   this.cielo(ang);            /* la irradiancia del sitio, UNA vez por paso */
   this.solar = { real: ang.real, bt: ang.bt, zen: ang.sol.zen * R2D, az: ang.sol.az * R2D, dia: ang.dia };
   /* el orden importa: primero se LEEN las entradas (medida analógica y línea binaria),
@@ -1435,6 +1498,15 @@ function Planta(cfg) {
     averias: cfg.averias || { activo: false, comsMtbfH: 0, comsMin: 10,
                               duroMtbfD: 0, caladoMtbfD: 0, reparaH: 8, desajusteSig: 0 },
     politicaDifusa: cfg.politicaDifusa || 'none',     /* none · flat · continuous · limited · poa_switch */
+    /* LA POLÍTICA DE BACKTRACKING, y son LAS MISMAS NUEVE que el selector de
+       produccion.html, porque el algoritmo es el mismo bloque: pairwise ·
+       true3d · row · global · bt2d · mgl · optimal · optfree · astro. No hay
+       lista propia aquí — la publica sim/bt.js y `tools/carea_bt.mjs` la carea
+       contra la FUENTE del hermano, así que si allí aparece una décima y aquí
+       no, la puerta canta. Pairwise es la canónica y la que este simulador
+       venía dando (su fórmula plana era esa misma, medido: 0,0000° de
+       separación en llano). */
+    polBT: cfg.polBT || 'pairwise',
     /* Trayectoria del ángulo calculada por el MOTOR canónico (SolarGPT, POST /tracker).
        Si está, el gemelo la EJECUTA y no calcula ni el backtracking ni la política de
        cielo cubierto: el algoritmo es de allí. Si no está, se usa el modelo del
@@ -1486,7 +1558,8 @@ function Planta(cfg) {
      ángulo que le tocaría a esta hora — si no, una planta creada a mediodía sale
      entera en posición nocturna y con desviación de 50°, o sea toda en aviso, hasta
      que la simulación tarda diez minutos en recuperarla. */
-  var ang0 = angulos(this.loc, this.t.dia, this.t.hora);
+  var ang0 = angulos(this.loc, this.t.dia, this.t.hora,
+                     { pol: this.cfg.polBT, T: this.Tbt || null, nFilas: this.cfg.nTcu });
   for (i = 0; i < this.tcus.length; i++) {
     if (!this.tcus[i].repetidor) {
       var t0 = this.tcus[i];
@@ -2107,6 +2180,8 @@ var API = {
   CRIT: CRIT, CRIT_TXT: CRIT_TXT, FUENTE_SP: FUENTE_SP, FUENTE_TXT: FUENTE_TXT,
   CHARGER_TXT: CHARGER_TXT,
   posicionSolar: posicionSolar, angulos: angulos, cosAOI: cosAOI,
+  BT: BTX, cargaBT: function (base) { return BTX ? BTX.carga(base) : Promise.resolve(null); },
+  btListo: function () { return !!(BTX && BTX.listo()); },
   cRateSafeLFP: cRateSafeLFP, hotDerate: hotDerate, heaterW: heaterW, poaAt: poaAt,
   u16: u16, s16: s16, u32: u32, f32: f32, kx10: kx10, bits: bits
 };

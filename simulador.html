@@ -308,6 +308,11 @@
           <div class="note" id="estrNota" style="margin-top:4px"></div>
         </div>
         <div class="fld">
+          <label>Backtracking (las nueve de cobertura-zigbee)</label>
+          <select id="polBT"></select>
+          <div class="note" id="btNota" style="margin-top:4px"></div>
+        </div>
+        <div class="fld">
           <label>Cielo cubierto (difusa)</label>
           <select id="polDifusa"></select>
           <div class="note" id="difNota" style="margin-top:4px"></div>
@@ -621,6 +626,7 @@
 <script src="sim/careo.js"></script>
 <script src="sim/modbus-map.js"></script>
 <script src="sim/plantas.js"></script>
+<script src="sim/bt.js"></script><!-- el BT del hermano: planta.js lo busca aquí y NO tiene otro -->
 <script src="sim/planta.js"></script>
 <script>
 /* ═══════════════════ arranque ═══════════════════ */
@@ -651,6 +657,12 @@ SIM.PERFILES.forEach(function (p) { $('perfil').add(new Option(p.n, p.id)); });
 SIM.Abanderamiento.ESTRATEGIAS.forEach(function (e) { $('estrViento').add(new Option(e.n, e.id)); });
 $('estrViento').value = 'B2';
 /* Las cuatro políticas de difusa de DiffuseConfig (solargpt_core/tracker.py) */
+/* Las políticas de BT se listan de sim/bt.js, que las tiene con las MISMAS
+   claves que el selector de produccion.html —y `tools/carea_bt.mjs` lo carea
+   contra su fuente—. Aquí no se escribe ninguna lista: una copia es lo que se
+   queda atrás el día que allí aparezca la décima. */
+BT.POLITICAS.forEach(function (p) { $('polBT').add(new Option(p.nm, p.key)); });
+$('polBT').value = 'pairwise';
 SIM.Difusa.POLITICAS.forEach(function (p) { $('polDifusa').add(new Option(p.n, p.id)); });
 $('polDifusa').value = 'none';
 $('perfil').value = SIM.FISICA.perfilPorDefecto;   /* el DEFAULT_PROFILE de tcu.py */
@@ -683,6 +695,7 @@ function construye() {
       reparaH: +$('avRep').value, desajusteSig: +$('avDes').value / 10
     },
     politicaDifusa: $('polDifusa').value,
+    polBT: $('polBT').value,
     estrategia: {
       activa: $('estrOn').checked, socCrit: +$('socCrit').value, winter: $('winter').checked,
       tMin: +$('tMin').value, poaMin: +$('poaMin').value,
@@ -2620,6 +2633,22 @@ $('nGrup').onchange = construye;
 $('perfil').onchange = construye;
 $('estrViento').onchange = function () { aplicaEstrategiaViento(); toca(); };
 $('polDifusa').onchange = function () { aplicaPoliticaDifusa(); pideTrayectoria(); toca(); };
+/* La política de BT se cambia EN CALIENTE: es la consigna, no la geometría, así
+   que no hace falta rehacer la planta —y rehacerla perdería el estado del día,
+   que con banda muerta tiene memoria—. La nota dice de dónde sale el algoritmo,
+   que es el punto de todo esto. */
+$('polBT').onchange = function () {
+  if (P) P.cfg.polBT = $('polBT').value;
+  pintaNotaBT(); toca();
+};
+function pintaNotaBT() {
+  var n = $('btNota'); if (!n) return;
+  n.innerHTML = SIM.btListo()
+    ? 'El algoritmo es el de <b>cobertura-zigbee/backtracking.html</b> (bloque FÍSICA PURA), ' +
+      'cargado en caliente: el gemelo no lleva backtracking propio. Las mismas nueve ' +
+      'políticas que su tarjeta de producción.'
+    : '<b>Sin backtracking:</b> ' + (SIM.BT ? SIM.BT.motivo() : 'no está sim/bt.js');
+}
 $('btnCanon2').onclick = function () { conectaCanon(); };
 ['estrOn', 'socTgt', 'socCrit', 'fcDays', 'winter', 'tMin', 'poaMin', 'motorModel'].forEach(function (id) {
   var manual = id === 'socTgt' ? 'techo' : (id === 'fcDays' ? 'calib' : null);
@@ -2634,23 +2663,54 @@ $('btnCanon').onclick = function () {
   toca();
 };
 
-/* en marcha */
-cargaParams();      /* ANTES de construir: la planta nace ya con los valores puestos */
-pintaParams();
-aplicaPlanta();     /* y con los equipos de la planta seleccionada, no con los de fábrica */
-construye();
+/* EL BT SE CARGA ANTES DE CONSTRUIR, y no hay repuesto. El backtracking es del
+   hermano (cobertura-zigbee/backtracking.html, bloque FÍSICA PURA): este
+   simulador tenía el suyo, plano y con un GCR único, y eran dos BT para la
+   misma planta. Ahora no hay más que uno, así que si no se puede cargar no se
+   inventa nada de primer orden: se dice en pantalla y se para, que es la misma
+   regla que canon.js escribió para el motor de SolarGPT.
+   En Pages el hermano está en el mismo origen (imoriana3.github.io/
+   cobertura-zigbee/…) y en local basta tenerlo al lado. */
+function arranca() {
+  cargaParams();      /* ANTES de construir: la planta nace ya con los valores puestos */
+  pintaParams();
+  aplicaPlanta();     /* y con los equipos de la planta seleccionada, no con los de fábrica */
+  construye();
 aplicaEstrategia();
 aplicaPoliticaDifusa();
+pintaNotaBT();
 pintaEscritura();
 (function () {
   var dU = Escenario.deURL(location.href);
   if (dU) { ESC = dU; $('escLista').dataset.hecho = ''; pintaEscenario(); $('escLista').value = 'mio'; ESC._mio = true; reproduce(); }
   else cargaEscenario('0');
 })();
-conectaCanon();          /* si el motor está, manda él; si no, se dice */
-sincronizaAverias();
-etiquetaTiempo();
-requestAnimationFrame(bucle);
+  conectaCanon();          /* si el motor está, manda él; si no, se dice */
+}
+
+var _avisoBT = document.getElementById('avisoBT');
+SIM.cargaBT('../cobertura-zigbee').then(function () {
+  if (!SIM.btListo()) {
+    var m = 'No he podido cargar el <b>backtracking</b> de cobertura-zigbee: ' +
+            SIM.BT.motivo() + '.<br>El simulador no lleva uno propio a propósito ' +
+            '—un backtracking de primer orden que parece el canónico es peor que no ' +
+            'tenerlo—, así que aquí se para. Ten el repo <code>cobertura-zigbee</code> ' +
+            'al lado de este.';
+    if (_avisoBT) { _avisoBT.innerHTML = m; _avisoBT.style.display = ''; }
+    else document.body.insertAdjacentHTML('afterbegin',
+      '<div style="padding:12px;background:#3a1d1d;color:#f2c6c6;font:14px system-ui">' + m + '</div>');
+    return;
+  }
+  arranca();
+  /* ESTAS TRES VAN DENTRO, y no fuera. Leen la planta (`sincronizaAverias` y
+     `etiquetaTiempo` la consultan, y `bucle` la hace andar), así que al pasar el
+     arranque a asíncrono —hay que esperar a que baje el BT del hermano— se
+     ejecutaban con `P` todavía en null: «Cannot read properties of null
+     (reading 'tcu')», que es lo que cazó el banco del navegador. */
+  sincronizaAverias();
+  etiquetaTiempo();
+  requestAnimationFrame(bucle);
+});
 </script>
 </body>
 </html>
