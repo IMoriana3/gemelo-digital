@@ -125,6 +125,10 @@ jobs:
         working-directory: gemelo-digital
         run: node tools/carea_lazo.mjs --nucleo=../cobertura-zigbee/js/control_core.js
 
+      - name: tools/carea_bt.mjs
+        working-directory: gemelo-digital
+        run: node tools/carea_bt.mjs --hermano=../cobertura-zigbee
+
       - name: El catálogo está regenerado
         working-directory: gemelo-digital
         run: node tools/genera_plantas.mjs --check --desde ../proyectos --cobertura ../cobertura-zigbee

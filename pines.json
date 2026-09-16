@@ -28,7 +28,9 @@
       "lo_usan": [
         "tools/genera_plantas.mjs --check",
         "tools/prueba_cartera.mjs",
-        "tools/carea_lazo.mjs"
+        "tools/carea_lazo.mjs",
+        "tools/carea_bt.mjs",
+        "sim/bt.js (en caliente, sin copia)"
       ],
       "verificado": "2026-09-16 · los TRES arneses pasan contra este commit, clonándolo y corriéndolos contra el clon (no contra el árbol de trabajo). El commit anterior era 06b00aaa, del 9-sep, y en él `js/control_core.js` NO EXISTÍA todavía: el pin precedía al núcleo compartido, y por eso el careo del lazo estaba en EXCLUIDOS del inventario. Mover el pin OBLIGÓ a regenerar `sim/cartera.js` (el hermano da de alta «Catania», que no figura en la cartera de proyectos ni al día ni en su pin: 32 → 33 plantas, declarada como FUERA DE CARTERA por el propio generador) y a que `prueba_cartera.mjs` deje de clavar recuentos absolutos que son del hermano."
     },
