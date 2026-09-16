@@ -1242,17 +1242,153 @@ function coloca(t, a) { t.anguloReal = a; t.angulo = a; t.moviendo = 0; }
 }
 
 {
-  /* continuar en el MISMO sentido sigue costando solo la banda de llegada:
-     la corrección no puede haber roto la continuidad, que es para lo que la
-     regla existía */
+  /* LA CONTINUIDAD LA DECIDE AHORA EL DESTINO, no una concesión de arranque.
+     Este bloque comprobaba la regla de la ley vieja —«estando en marcha basta la
+     banda de llegada para seguir»— y con el contrato direccional 2.0.0 esa
+     concesión queda INERTE, igual que `continuity` en la autoridad: con destino
+     enclavado, «continuar» es «no haber llegado», así que no hay nada que
+     conceder. Se re-deriva en vez de borrarse, porque la PROPIEDAD que vigilaba
+     —que la corrección no rompa la continuidad— sigue siendo la buena; lo que
+     cambia es qué la produce. */
   const t = bancoDir().t, m = margenOeste(t);
   coloca(t, 0);
   mueveA(t, 3 * m, 5);
-  const antes = t.anguloReal, enVuelo = t.moviendo;
-  mueveA(t, t.anguloReal + 0.7 * m, 5);            /* 0,7·margen, mismo sentido */
+  const antes = t.anguloReal, enVuelo = t.moviendo, parkAntes = t.park;
+  /* (a) una orden que empuja el destino HACIA DELANTE no interrumpe nada: el
+         destino enclavado sigue mandando y el eje sigue en marcha */
+  mueveA(t, 3 * m + 0.3 * m, 5);
   ok(enVuelo === 1 && t.anguloReal > antes + 1e-9 && t.moviendo === 1,
-     'continuar en el mismo sentido sigue bastando con la banda de llegada',
-     '+' + (t.anguloReal - antes).toFixed(4) + '°');
+     'en marcha, una orden que empuja el destino ADELANTE no para el eje',
+     '+' + (t.anguloReal - antes).toFixed(4) + '° · destino enclavado ' +
+     (parkAntes == null ? 'ninguno' : parkAntes.toFixed(3) + '°'));
+
+  /* (b) y una que lo tira ATRÁS más que la banda de llegada SÍ para: la orden
+         que el eje estaba ejecutando ya no es la que hay, y con 0,7·margen de
+         error el arranque en frío no la vuelve a lanzar. Es la ley, no un
+         residuo: con la ley vieja el eje habría seguido, y el destino rancio es
+         justo lo que el caso 06 del contrato refutó. */
+  const t2 = bancoDir().t, m2 = margenOeste(t2);
+  coloca(t2, 0);
+  mueveA(t2, 3 * m2, 5);
+  const antes2 = t2.anguloReal;
+  mueveA(t2, t2.anguloReal + 0.7 * m2, 5);         /* el destino retrocede */
+  ok(t2.moviendo === 0 && Math.abs(t2.anguloReal - antes2) < 1e-12,
+     'y una que lo tira ATRÁS más que la banda para el eje: la orden cambió',
+     'θ ' + t2.anguloReal.toFixed(4) + '° · sentido recordado ' + t2.dirUlt);
+}
+
+console.log('\n── el eje ADELANTA al sol (contrato direccional 2.0.0) ──');
+{
+  /* EL PASO SON DOS MÁRGENES, que es la ley entera en una frase: la TCU no para
+     en la consigna, aparca un margen más allá. Se mide con la consigna QUIETA
+     para que no haya nada más en juego: un solo movimiento, de punta a punta. */
+  const t = bancoDir().t, m = margenOeste(t);
+  coloca(t, 0);
+  let pasos = 0;
+  for (let i = 0; i < 40 && (i === 0 || t.moviendo !== 0); i++) { mueveA(t, 3 * m, 1); pasos++; }
+  /* arranca a 3 márgenes de distancia y su destino es 3m + m: el eje recorre
+     CUATRO márgenes hasta aparcar, y el último margen es el adelanto */
+  casi(t.anguloReal, 4 * m, 0.17 + 1e-9, 'el eje aparca UN MARGEN MÁS ALLÁ de la consigna');
+  ok(t.anguloReal > 3 * m + 0.5 * m,
+     'y no para en la consigna, que es la ley vieja',
+     'θ ' + t.anguloReal.toFixed(4) + '° contra una consigna de ' + (3 * m).toFixed(4) + '°');
+
+  /* Y CON LA CONSIGNA DERIVANDO —como el sol— CADA PASO VALE DOS MÁRGENES, que
+     es la ley en una frase. La cuenta: el eje descansa en `consigna + m`, así que
+     no vuelve a arrancar hasta que la consigna avanza 2m (para que el error
+     alcance m otra vez), y entonces su destino es `consigna + m` = el punto de
+     partida + 3m… o sea 2m de recorrido. Medirlo con la consigna quieta no vale:
+     un solo paso no dice si el siguiente también mide dos márgenes, y poner la
+     consigna exactamente a un margen deja el test en el FILO de la puerta de
+     arranque (`>=`), donde el resultado lo decide el último bit. */
+  const t2 = bancoDir().t, m2 = margenOeste(t2);
+  coloca(t2, 0);
+  const largos = [];
+  let abierto = null;
+  for (let k = 0; k < 1200; k++) {
+    const antes = t2.anguloReal, movAntes = t2.moviendo;
+    mueveA(t2, 0.01 * k, 1);                       /* 0,6 °/min, como el sol */
+    if (t2.moviendo !== 0 && movAntes === 0) abierto = antes;
+    if (t2.moviendo === 0 && movAntes !== 0 && abierto != null) {
+      largos.push(Math.abs(t2.anguloReal - abierto)); abierto = null;
+    }
+  }
+  ok(largos.length >= 3, 'la serie da varios pasos completos', largos.length + ' pasos');
+  const peorL = largos.length ? Math.max(...largos.map(L => Math.abs(L - 2 * m2))) : 99;
+  ok(peorL < 0.17 + 1e-9,
+     'con la consigna derivando, CADA paso vale dos márgenes',
+     largos.length + ' pasos · peor desvío ' + peorL.toFixed(4) + '° sobre ' +
+     (2 * m2).toFixed(4) + '°');
+}
+
+{
+  /* NO HAY REPIQUETEO CON LA CONSIGNA QUIETA, y esto es con RUIDO, que es la
+     condición real del gemelo: es la única de las cuatro cabezas con
+     inclinómetro. Aparcado en el borde lejano el error vale EXACTAMENTE un
+     margen, o sea justo en la puerta de inversión, así que sin el suelo de ruido
+     en esa puerta el eje oscila para siempre. Medido antes de ponerlo: 199
+     arranques y 858° de recorrido en un día de cielo cerrado con el seguidor
+     tumbado al plano, contra los 85 y 192° de no tocarlo. */
+  const b = bancoDir(), t = b.t, m = margenOeste(t);
+  /* la cadena del sensor, neutralizada MENOS el ruido: lo que se mide aquí es el
+     ruido y nada más. (Con el desajuste de montaje puesto, este test medía un
+     SESGO constante de la medida y no el ruido — mi primera versión daba 204
+     arranques por eso, y no por la ley.) */
+  const S = t.sensor;
+  S.desajuste = 0; S.offsetCfg = 0; S.deriva = 0; S.tau = 1e-9; t.tPcb = 25;
+  S.ruidoRms = 0.04;                           /* el MEMS de verdad */
+  coloca(t, 0); S.filtrado = 0; S.crudo = 0;
+  for (let i = 0; i < 40 && (i === 0 || t.moviendo !== 0); i++) mueveA(t, 3 * m, 1);
+  const parado = t.anguloReal;
+  let recorrido = 0, arranques = 0, prev = 0;
+  for (let i = 0; i < 3600; i++) {                   /* una hora, consigna quieta */
+    const antes = t.anguloReal;
+    t.objetivo = 3 * m; t.sp = SIM.SP.NINGUNA; t.criterio = SIM.CRIT.SEGUIMIENTO;
+    t.mide(1); t.mueve(1, false);
+    if (t.moviendo !== 0 && prev === 0) arranques++;
+    prev = t.moviendo;
+    recorrido += Math.abs(t.anguloReal - antes);
+  }
+  ok(recorrido < 0.5 && arranques === 0,
+     'aparcado en el borde lejano y con RUIDO, una hora de consigna quieta no mueve el eje',
+     'recorrido ' + recorrido.toFixed(3) + '° · ' + arranques + ' arranques · θ ' +
+     parado.toFixed(3) + '°');
+}
+
+{
+  /* EL ERROR BARRE LOS DOS SIGNOS: es lo que se ve en pantalla y lo que delató
+     que las cuatro cabezas paraban en la consigna —la columna de desalineo no
+     cambiaba de signo nunca—. Con la consigna derivando como el sol. */
+  const t = bancoDir().t, m = margenOeste(t);
+  coloca(t, 0);
+  let delante = 0, detras = 0;
+  for (let k = 0; k < 900; k++) {
+    const obj = 0.002 * k;                        /* ~0,12 °/min, como el sol */
+    mueveA(t, obj, 1);
+    const e = t.anguloReal - obj;
+    if (e > 1e-9) delante++; else if (e < -1e-9) detras++;
+  }
+  ok(delante > 0 && detras > 0,
+     'con la consigna derivando, el eje pasa por DELANTE y por detrás de ella',
+     delante + ' pasos delante · ' + detras + ' detrás');
+}
+
+{
+  /* UNA ORDEN DE SEGURIDAD NO SE ADELANTA: manda ir A un ángulo, no un grado más
+     allá. Es la distinción que la autoridad hace con `_step_override`, y aquí
+     importa el doble: un stow que se pasa de largo se apoya en el final de
+     carrera cada vez que sopla el viento. */
+  const t = bancoDir().t, m = margenOeste(t);
+  coloca(t, 0);
+  t.sp = SIM.SP.VIENTO; t.criterio = SIM.CRIT.VIENTO;
+  for (let i = 0; i < 400; i++) {
+    t.objetivo = 20; t.sp = SIM.SP.VIENTO; t.criterio = SIM.CRIT.VIENTO;
+    t.mueve(1, false); t.angulo = t.anguloReal;
+    if (t.moviendo === 0 && i > 0) break;
+  }
+  ok(Math.abs(t.anguloReal - 20) <= 0.5 + 1e-9,
+     'un abanderamiento va A su ángulo, sin adelanto',
+     'θ ' + t.anguloReal.toFixed(4) + '° para una orden de 20°');
 }
 
 {

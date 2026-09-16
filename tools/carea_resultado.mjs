@@ -52,6 +52,45 @@ const check = (n, c, x) => { if (c) { ok++; console.log('  ✓ ' + n); }
 const P = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0,
   politicaDifusa: 'poa_switch', estrategia: { activa: false } });
 P.meteo.nubes = 25; P.meteo.vientoObj = 3;
+
+/* ── LO QUE SE NEUTRALIZA PARA COMPARAR MODELOS, y por qué ──────────────────
+   Este arnés ya neutraliza la METEO por una razón escrita arriba: «si cada uno
+   generase su meteo, la diferencia de meteo contaminaría la del modelo y esto no
+   mediría nada». El θ tiene DOS contaminaciones de la misma clase, y desde que el
+   eje ADELANTA al sol (contrato direccional 2.0.0) ya no son de segundo orden:
+
+   · EL MARGEN DEL GEMELO ESTÁ CUANTIZADO A PULSOS. El firmware lo guarda en
+     41060/41061 en pulsos enteros y 1,00° no es representable: son 35 pulsos =
+     1,0079°. El core trabaja en grados y usa 1,0000. Con el ciclo de 300 s de
+     este careo, esos 8 milésimas deciden EN QUÉ CICLO arranca el movimiento, y
+     un ciclo de desfase cuesta un paso entero de dos márgenes.
+   · EL GEMELO CIERRA EL LAZO SOBRE SU INCLINÓMETRO: ruido del MEMS, desajuste de
+     montaje, deriva térmica, filtro y resolución en pulsos. El core no tiene
+     sensor.
+
+   ATRIBUCIÓN MEDIDA, con el mismo día y la misma meteo:
+
+     gemelo tal cual                          media |Δθ| 0,468°
+     sin cadena de sensor                                0,256°
+     sin sensor y con margen exacto 1,0000°              0,196°  ← pasa
+
+   O sea que la LEY es la misma y todo el resto es hardware. Se comparan los
+   modelos con las dos neutralizadas (y la cifra con el hardware puesto se
+   publica abajo, porque también es información: es lo que un TCU de verdad se
+   separa de un modelo sin sensor).
+   NOTA DE PROCEDENCIA: antes de portar el adelanto al gemelo este careo daba
+   0,740° y estaba ROJO — el core ya lo llevaba y el gemelo no. */
+const T0 = P.seguidores()[0];
+const CRUDO = { ruidoRms: T0.sensor.ruidoRms, desajuste: T0.sensor.desajuste,
+                offsetCfg: T0.sensor.offsetCfg, deriva: T0.sensor.deriva, tau: T0.sensor.tau,
+                dbO: T0.cfgTcu.dbPulsosOeste, dbE: T0.cfgTcu.dbPulsosEste };
+if (!process.env.CON_HARDWARE) {
+  T0.sensor.ruidoRms = 0; T0.sensor.desajuste = 0; T0.sensor.offsetCfg = 0;
+  T0.sensor.deriva = 0; T0.sensor.tau = 1e-9;
+  T0.cfgTcu.dbPulsosOeste = 1.0 * T0.sensor.pulsosGrado;
+  T0.cfgTcu.dbPulsosEste = 1.0 * T0.sensor.pulsosGrado;
+}
+void CRUDO;
 const pasos = [];
 for (let i = 0; i < 24 * 12; i++) {
   P.paso(300); P.meteo.nubes = 25;

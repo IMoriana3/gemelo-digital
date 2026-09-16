@@ -581,6 +581,17 @@ function TCU(id, planta, opts) {
   this.modo = MODO.AUTO; this.manual = 0;
   this.sp = SP.NINGUNA; this.fuenteSp = FUENTE_SP.NINGUNA; this.criterio = CRIT.NOCHE;
   this.bt = false; this.moviendo = 0;      /* −1 este · 0 parado · +1 oeste */
+  /* EL ADELANTO AL SOL necesita DOS estados más, y los dos por razones medidas
+     (contrato direccional 2.0.0, `solargpt_core/direction.py`):
+     · `park` — el DESTINO enclavado al arrancar, que es la consigna adelantada
+       un margen. Sin enclavarlo, con la consigna derivando el destino huye y el
+       eje se queda de seguidor perpetuo un margen por delante sin dar nunca el
+       paso de dos márgenes (medido en el core: media firmada +0,925° y ni una
+       parada en una hora).
+     · `dirUlt` — el sentido RECORDADO al parar. Aparcado en el borde lejano el
+       error vale exactamente un margen, que era ya la condición de inversión:
+       sin recordar el sentido, cada parada quedaba en la puerta del chatter. */
+  this.park = null; this.dirUlt = 0;
 
   this.soc = opts.soc != null ? opts.soc : (this.perfil.tipo === 'ac' ? 100 : 78 + this.rnd.entre(-8, 12));
   this.soh = 100 - Math.floor(this.rnd.entre(0, 6));
@@ -881,29 +892,120 @@ TCU.prototype.mueve = function (dt, inhibido) {
      Contrato: CONTINUAR pide la banda de llegada; INVERTIR pide el margen
      entero del sentido nuevo — el mismo que pide arrancar parado. Es la misma
      máquina que `solargpt_core/direction.py` en el core. */
-  var invirtiendo = (this.moviendo !== 0 && dirPedida !== 0 &&
-                     dirPedida !== this.moviendo);
-  var arrancando = (this.moviendo === 0) || invirtiendo;
+  /* ── LA LEY: EL EJE ADELANTA AL SOL (contrato direccional 2.0.0) ───────────
+     «Nosotros adelantamos al sol un grado, es decir, hacemos movimientos de dos
+     grados» (dato de campo). El eje no para en la consigna: arranca cuando se ha
+     quedado un margen atrás y aparca un margen MÁS ALLÁ, así que el paso son
+     2×margen, hay la mitad de arranques y el error barre de +margen a −margen con
+     media cero. NO hay margen nuevo: es el MISMO margen direccional del firmware
+     (41060/41061), leído literalmente — una banda muerta con histéresis se arranca
+     en un borde y se para en el otro.
+     La autoridad es `solargpt_core/direction.py`; aquí se porta su `_step_auto`,
+     con lo que este gemelo tiene y ella no: un inclinómetro.
 
-  /* sin motor no hay movimiento: seta pulsada, alarma enclavada o modo que no manda */
-  if (!this.motorHabilitado || inhibido ||
-      (!urgente && Math.abs(err) < dead && arrancando)) {
-    this.moviendo = 0; this.iMotor = 0; this.vMotor = 0;
-    this.tSinMoverse = 0;
+     DOS PREGUNTAS DISTINTAS, Y EL ORDEN IMPORTA — las dos me costaron un fallo
+     medido al portarlas mal:
+     1. EN VUELO el sentido es el RECORDADO, no el del error. El eje CRUZA la
+        consigna por definición, así que leer el sentido del error convierte el
+        tramo final del adelanto en una «inversión» que no supera el margen y para
+        el eje justo en la consigna — el adelanto no se haría nunca. Medido: el eje
+        paraba en 1,530° cuando su destino era 2,058°, y el careo contra el núcleo
+        daba 1,06° de desvío.
+     2. PARADO, «¿es una inversión?» y «¿supera la puerta?» son preguntas separadas.
+        Juntarlas dejaba que una inversión que no supera el margen cayera al
+        arranque en frío, cuya puerta es `>=`… y aparcado en el borde lejano el
+        error vale EXACTAMENTE un margen, así que arrancaba siempre. Chatter: 199
+        arranques y 858° de recorrido en un día de cielo cerrado con la consigna
+        QUIETA, contra los 85 y 192° de no tocarlo. */
+  var mem = this.moviendo !== 0 ? this.moviendo : this.dirUlt;
+  /* DOS TOLERANCIAS, Y NO SON LA MISMA. El contrato las separa a propósito:
+     · `llegada` — la BANDA DE CONTROL que decide si la orden CAMBIÓ (margen/2 con
+       el suelo de ruido). Es `DirectionalLimits.arrival()`.
+     · `tolLlegada` — la tolerancia de MEDIDA para decir que el eje LLEGÓ a su
+       destino. Es `arrived_tol()`: el core va exacto porque no tiene sensor, y
+       quien lo tiene inyecta aquí su suelo. Con media banda aquí el eje pararía
+       medio margen antes de su destino y el paso dejaría de ser de dos márgenes. */
+  var llegada = Math.max(dead * 0.5, 3 * this.sensor.ruidoRms, 2 / this.sensor.pulsosGrado);
+  var tolLlegada = Math.max(3 * this.sensor.ruidoRms, 1 / this.sensor.pulsosGrado);
+  /* LA PUERTA DE INVERSIÓN LLEVA EL SUELO DE RUIDO, y esto es propio del gemelo:
+     es la única de las cuatro cabezas con inclinómetro. Con adelanto el eje aparca
+     en el borde lejano, así que su error en reposo vale EXACTAMENTE un margen — y
+     con 0,04° RMS de ruido, `|err| > margen` se cruza por ruido la mitad de los
+     ciclos. El suelo es el MISMO que usa la banda de llegada (3·RMS), no un
+     parámetro nuevo; en el core no hace falta porque no tiene sensor, y por eso el
+     contrato deja `arrival_floor_deg` como hueco para quien sí lo tiene. */
+  var invMargen = dead + 3 * this.sensor.ruidoRms;
+
+  var destino = null, paraYRecuerda = false;
+
+  /* SIN MOTOR NO HAY MOVIMIENTO, y esto va PRIMERO: seta pulsada, alarma
+     enclavada o un modo que no manda. No es parte de la ley del lazo —es
+     hardware— y por eso se pregunta antes que nada. (Lo perdí al reescribir el
+     bloque y el banco lo cazó a la primera: «con la seta pulsada la mesa no se
+     mueve» se puso rojo, que es exactamente lo que ese test existe para decir.) */
+  if (!this.motorHabilitado || inhibido) {
+    this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; this.tSinMoverse = 0;
+    this.park = null;
+    if (mem !== 0) this.dirUlt = mem;
     return 0;
   }
-  /* LLEGADA: se da por llegado al entrar en la banda muerta, nunca en un umbral
-     más fino que el propio ruido del sensor. Con un criterio de 0,02° y un ruido de
-     0,04° el seguidor persigue su propio ruido: no llega jamás, sigue mandando
-     micro-movimientos y acaba autodiagnosticándose un eje bloqueado.
-     Solo aplica CONTINUANDO: quien invierte ya ha pasado el margen entero. */
-  var llegada = Math.max(dead * 0.5, 3 * this.sensor.ruidoRms, 2 / this.sensor.pulsosGrado);
-  if (!invirtiendo && Math.abs(err) <= llegada) {
-    this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; this.tSinMoverse = 0; return 0;
+
+  if (urgente) {
+    /* UNA ORDEN DE SEGURIDAD NO SE ADELANTA: un stow o una defensa por batería
+       mandan ir A un ángulo, no un grado más allá. Misma distinción que
+       `_step_override` en la autoridad. Y CONSERVA SU BANDA DE LLEGADA: quitarla
+       fue un fallo medido — el eje abanderado se queda a 54,99° con el tope en 55,
+       el error se mide con el inclinómetro ruidoso y se le manda un paso de 0,086°
+       que el tope recorta a 0,010; el firmware lo lee como «se mueve menos de lo
+       mandado» y a los cuatro reintentos enclava EJE BLOQUEADO. Sin esta banda el
+       gemelo se rompía solo en cada abanderamiento por viento: 22 equipos
+       enclavados por su cuenta, y lo cazó la comprobación de que la seta de un
+       equipo no enclava a nadie más. */
+    destino = this.objetivo;
+    if (Math.abs(destino - this.angulo) <= llegada) paraYRecuerda = true;
+  } else if (this.moviendo !== 0 && this.park != null) {
+    /* EN VUELO. El destino efectivo es el MÁS CERCANO del enclavado y el vivo, y
+       hacen falta los dos. Solo el enclavado: con la consigna retrocediendo —el
+       codo del backtracking, una nube, la puesta— el eje seguiría viaje a un
+       destino que ya nadie pide (es el caso 06 del contrato, y el núcleo JS lo
+       tenía así: 2,200° de máximo contra los 1,700 de la autoridad). Solo el
+       vivo: el destino huye con la consigna y el eje se queda de seguidor
+       perpetuo un margen por delante, sin dar nunca el paso. */
+    var sgn = this.moviendo;
+    var invierte = (err * sgn < 0 && Math.abs(err) > invMargen);
+    var vivo = this.objetivo + dead * sgn;
+    if (invierte) destino = null;                               /* vuelve a decidir */
+    else if ((this.park - vivo) * sgn > llegada) paraYRecuerda = true;   /* orden cambiada */
+    else if ((this.park - this.angulo) * sgn <= tolLlegada) paraYRecuerda = true;  /* llegó */
+    else destino = this.park;
   }
 
-  var dir = dirPedida, antes = this.anguloReal;
-  var esperado = Math.min(Math.abs(err), K.SLEW_DPS * dt);   /* lo que se le MANDA girar */
+  if (destino === null && !paraYRecuerda) {
+    /* PARADO (o invirtiendo): ¿arranca? Las dos preguntas, separadas. */
+    var inv = (mem !== 0 && dirPedida !== 0 && dirPedida !== mem);
+    var arranca = inv ? Math.abs(err) > invMargen : Math.abs(err) >= dead;
+    if (!arranca || dirPedida === 0) paraYRecuerda = true;
+    else destino = this.objetivo + dead * dirPedida;            /* EL ADELANTO */
+  }
+
+  if (!paraYRecuerda) {
+    /* el adelanto NO fuerza el final de carrera: se apoya en él. */
+    destino = clamp(destino, C.topeEste, C.topeOeste);
+    if (Math.abs(destino - this.angulo) <= tolLlegada) paraYRecuerda = true;
+  }
+
+  if (paraYRecuerda) {
+    this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; this.tSinMoverse = 0;
+    this.park = null;
+    if (mem !== 0) this.dirUlt = mem;        /* EL SENTIDO SE RECUERDA al parar */
+    return 0;
+  }
+
+  var dir = (destino - this.angulo) > 0 ? 1 : -1;
+  if (!urgente) this.park = destino;
+  var antes = this.anguloReal;
+  /* lo que se le MANDA girar: hasta SU DESTINO, no hasta la consigna */
+  var esperado = Math.min(Math.abs(destino - this.angulo), K.SLEW_DPS * dt);
 
   /* WINTER MODE (11.5b) — LÍMITE CINEMÁTICO, no una rebaja de la factura.
      WINTER-01: aquí había una SEGUNDA semántica del mismo modo. El eje se movía
@@ -934,6 +1036,7 @@ TCU.prototype.mueve = function (dt, inhibido) {
   }
   var mov = Math.abs(this.anguloReal - antes);
   this.moviendo = dir;                    /* está MANDADO a moverse, se mueva o no */
+  this.dirUlt = dir;                      /* y el sentido se recuerda para la próxima parada */
 
   /* --- diagnóstico del firmware: ¿se está moviendo lo que debería? (41039 / 41065) ---
      La comparación es contra el paso MANDADO, no contra la velocidad máxima: si no,
