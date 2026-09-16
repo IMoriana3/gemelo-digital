@@ -1335,6 +1335,37 @@ console.log('\n── el eje ADELANTA al sol (contrato direccional 2.0.0) ──
 }
 
 {
+  /* CON LOS DOS MÁRGENES DISTINTOS, EL ADELANTO USA EL DEL SENTIDO DE LA MARCHA.
+     Es lo que obliga a pedir el margen POR SENTIDO en vez de tomar el del error:
+     con adelanto el eje CRUZA la consigna, y a partir de ahí el signo del error
+     ya no es el de la marcha. Con 41060 y 41061 iguales esto no se nota; con
+     ellos distintos —el caso que el propio firmware permite— sería otro destino.
+     La autoridad pide el margen con el sentido RECORDADO (`target_park(tgt, mem)`)
+     y aquí se comprueba que este gemelo hace lo mismo. */
+  const b = bancoDir(), t = b.t;
+  /* márgenes bien distintos, escritos como los escribe la toolbox */
+  t.cfgTcu.dbPulsosOeste = Math.round(1.0 * t.sensor.pulsosGrado);
+  t.cfgTcu.dbPulsosEste = Math.round(4.0 * t.sensor.pulsosGrado);
+  const mO = margenOeste(t), mE = margenEste(t);
+  ok(Math.abs(mE - 4 * mO) < 0.05, 'el banco de verdad tiene los dos márgenes distintos',
+     'oeste ' + mO.toFixed(3) + '° · este ' + mE.toFixed(3) + '°');
+
+  /* al OESTE: aparca un margen OESTE más allá */
+  coloca(t, 0);
+  for (let i = 0; i < 200 && (i === 0 || t.moviendo !== 0); i++) mueveA(t, 3 * mO, 1);
+  ok(Math.abs(t.anguloReal - (3 * mO + mO)) < 0.17 + 1e-9,
+     'yendo al OESTE, el adelanto es el margen del oeste',
+     'θ ' + t.anguloReal.toFixed(3) + '° · esperado ' + (4 * mO).toFixed(3) + '°');
+
+  /* y al ESTE: un margen ESTE más allá, que aquí es cuatro veces mayor */
+  coloca(t, 0);
+  for (let i = 0; i < 400 && (i === 0 || t.moviendo !== 0); i++) mueveA(t, -3 * mE, 1);
+  ok(Math.abs(t.anguloReal - (-3 * mE - mE)) < 0.17 + 1e-9,
+     'y yendo al ESTE, el margen del este',
+     'θ ' + t.anguloReal.toFixed(3) + '° · esperado ' + (-4 * mE).toFixed(3) + '°');
+}
+
+{
   /* una orden de SEGURIDAD manda sobre los márgenes, en los dos sentidos */
   const t = bancoDir().t, m = margenEste(t);
   /* 0,9·margen: por debajo del umbral de arranque y por ENCIMA de la banda de

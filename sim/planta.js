@@ -874,9 +874,16 @@ TCU.prototype.mueve = function (dt, inhibido) {
      `efecto: true` del catálogo. Los registros son ahora la fuente, y nacen
      en el valor que el lazo ya tenía. */
   var dirPedida = signo(err);
-  var pulsos = this.bajaCapacidad > 0 ? C.dbPulsosBaja
-             : (dirPedida >= 0 ? C.dbPulsosOeste : C.dbPulsosEste);
-  var dead = pulsos / this.sensor.pulsosGrado;
+  /* EL MARGEN ES DE UN SENTIDO, así que hay que poder pedirlo POR SENTIDO: con el
+     adelanto, el eje CRUZA la consigna y entonces el sentido del error deja de ser
+     el de la marcha. Usar el margen del error mientras se vuela hacia el otro lado
+     mezcla los dos registros, y con 41060 y 41061 distintos —que es el caso que el
+     propio banco ejercita: 1,296° al oeste y 14,398° al este— eso no es un detalle
+     de estilo, es otro destino. La autoridad pide el margen con el sentido
+     RECORDADO (`target_park(tgt, mem)`), y aquí igual. */
+  var margenDe = (d) => (this.bajaCapacidad > 0 ? C.dbPulsosBaja
+                         : (d >= 0 ? C.dbPulsosOeste : C.dbPulsosEste)) / this.sensor.pulsosGrado;
+  var dead = margenDe(dirPedida);
   /* en seguimiento solo corrige si el error supera el deadband; en posición de
      seguridad va sin histéresis (la orden es de seguridad, no de precisión) */
   var urgente = (this.sp !== SP.NINGUNA) || this.criterio === CRIT.BATERIA;
@@ -971,8 +978,10 @@ TCU.prototype.mueve = function (dt, inhibido) {
        vivo: el destino huye con la consigna y el eje se queda de seguidor
        perpetuo un margen por delante, sin dar nunca el paso. */
     var sgn = this.moviendo;
-    var invierte = (err * sgn < 0 && Math.abs(err) > invMargen);
-    var vivo = this.objetivo + dead * sgn;
+    /* el margen del sentido de la MARCHA, no el del error: ver `margenDe` arriba */
+    var deadM = margenDe(sgn);
+    var invierte = (err * sgn < 0 && Math.abs(err) > deadM + 3 * this.sensor.ruidoRms);
+    var vivo = this.objetivo + deadM * sgn;
     if (invierte) destino = null;                               /* vuelve a decidir */
     else if ((this.park - vivo) * sgn > llegada) paraYRecuerda = true;   /* orden cambiada */
     else if ((this.park - this.angulo) * sgn <= tolLlegada) paraYRecuerda = true;  /* llegó */
