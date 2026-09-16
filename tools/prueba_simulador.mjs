@@ -164,34 +164,19 @@ if (!abre) { console.log(rotos.join('\n')); await nav.close(); process.exit(1); 
 const r = await pg.evaluate(async () => {
   const o = {}, C = window.CAMPO;
 
-  /* contar renders es la medida: no cuánto tarda, sino cuántas veces se pinta */
-  let R = 0;
-  const orig = C.renderer.render.bind(C.renderer);
-  C.renderer.render = (a, b) => { R++; return orig(a, b); };
-  const cuenta = (seg, cada) => new Promise((ok2) => {
-    R = 0; let f = 0; const t0 = performance.now();
-    (function w() {
-      f++; if (cada) cada(f);
-      if (performance.now() - t0 < seg * 1000) requestAnimationFrame(w);
-      else ok2({ render: R, frames: f, seg });
-    })();
-  });
-
-  o.reposo = await cuenta(1.5);
-
-  const cv = C.renderer.domElement, rc = cv.getBoundingClientRect();
-  let px = rc.left + rc.width / 2, py = rc.top + rc.height / 2;
-  const ev = (t, x, y) => cv.dispatchEvent(new PointerEvent(t, {
-    pointerId: 1, clientX: x, clientY: y, bubbles: true, button: 0
-  }));
-  o.giro = await cuenta(1.2, () => { px += 2; ev('pointermove', px, py); }, ev('pointerdown', px, py));
-  ev('pointerup', px, py);
-
-  /* el campo entero dentro del cuadro, al abrir */
-  /* Cabe el campo entero: se miden LOS SEGUIDORES con su largo, que es lo que el
-     encuadre garantiza. Antes se medían las esquinas de la caja `_ext`, que lleva
-     márgenes que no tienen por qué caber -- y con el encuadre ceñido a la planta,
-     fallaba diciendo que faltaban esquinas cuando no falta ninguna. */
+  /* EL CAMPO ENTERO DENTRO DEL CUADRO, AL ABRIR — y se mide AQUÍ, lo primero, antes de
+     tocar la cámara. Esto se medía después del arrastre de `o.giro`, que es un giro de
+     órbita de verdad: la cámara se iba de 64,73|92,57 a 58,50|96,58 (unos 4° de azimut) y
+     entonces asomaba un extremo. La holgura del aserto (un extremo de 48) estaba pagando
+     ese giro, no midiendo el encuadre; y se acabó en CI, con otra versión de navegador,
+     donde el arrastre avanza otro número de frames y salían dos fuera (46/48) con el
+     encuadre de apertura intacto. Medido al abrir, caben los 48 y el peor extremo se
+     queda en 0,930 del semicuadro —el margen 0,93 que aplica el propio encaje—, así que
+     hay un 7 % de holgura y el aserto puede exigirlos todos.
+     Se miden LOS SEGUIDORES con su largo, que es lo que el encuadre garantiza. Antes se
+     medían las esquinas de la caja `_ext`, que lleva márgenes que no tienen por qué
+     caber -- y con el encuadre ceñido a la planta, fallaba diciendo que faltaban
+     esquinas cuando no falta ninguna. */
   const T = window.THREE, v = new T.Vector3();
   const semi = (window.Seguidor.DIMS.span || 34) / 2;
   C.camera.updateMatrixWorld();
@@ -217,6 +202,29 @@ const r = await pg.evaluate(async () => {
   o.encuadre.ocupaX = Math.round((x1 - x0) / 2 * 100);
   o.encuadre.ocupaY = Math.round((y1 - y0) / 2 * 100);
   o.encuadre.centro = [+((x0 + x1) / 2).toFixed(2), +((y0 + y1) / 2).toFixed(2)];
+
+  /* contar renders es la medida: no cuánto tarda, sino cuántas veces se pinta */
+  let R = 0;
+  const orig = C.renderer.render.bind(C.renderer);
+  C.renderer.render = (a, b) => { R++; return orig(a, b); };
+  const cuenta = (seg, cada) => new Promise((ok2) => {
+    R = 0; let f = 0; const t0 = performance.now();
+    (function w() {
+      f++; if (cada) cada(f);
+      if (performance.now() - t0 < seg * 1000) requestAnimationFrame(w);
+      else ok2({ render: R, frames: f, seg });
+    })();
+  });
+
+  o.reposo = await cuenta(1.5);
+
+  const cv = C.renderer.domElement, rc = cv.getBoundingClientRect();
+  let px = rc.left + rc.width / 2, py = rc.top + rc.height / 2;
+  const ev = (t, x, y) => cv.dispatchEvent(new PointerEvent(t, {
+    pointerId: 1, clientX: x, clientY: y, bubbles: true, button: 0
+  }));
+  o.giro = await cuenta(1.2, () => { px += 2; ev('pointermove', px, py); }, ev('pointerdown', px, py));
+  ev('pointerup', px, py);
 
   /* materiales, niebla y suelo */
   let conMapa = 0, mallas = 0;
@@ -570,13 +578,17 @@ ok(r.reposo.render <= 2,
    `en reposo NO se pinta: ${r.reposo.render} renders en ${r.reposo.frames} frames`);
 ok(r.giro.render >= r.giro.frames * 0.8,
    `girando se pinta en cada frame: ${r.giro.render} renders / ${r.giro.frames} frames`);
-/* El encuadre encaja con margen 0,93, pero el lienzo puede cambiar de alto DESPUÉS —al
-   aparecer el aviso de detalle reducido, por ejemplo— y entonces el aspect ya no es el
-   del encaje. Se admite que asome un extremo; lo que no se admite es que falte medio
-   campo, que es de donde venimos. */
-ok(r.encuadre.dentro >= r.encuadre.esq * 0.97,
+/* Medido al abrir, caben TODOS: el encuadre encaja con margen 0,93 y ahí no hay nada que
+   perdonar. La holgura que había antes (que asomara un extremo) no cubría el lienzo
+   cambiando de alto después —eso ya no le pasa a esta medida, que se toma antes—, sino el
+   giro de órbita que el propio banco daba por medio. */
+ok(r.encuadre.dentro === r.encuadre.esq,
    `al abrir cabe el campo: ${r.encuadre.dentro}/${r.encuadre.esq} extremos de mesa en cuadro`);
-ok(r.encuadre.ocupaX > 55 && r.encuadre.ocupaY > 50 &&
+/* Al abrir llena 69,8 % × 50,1 % y queda en -0,12|0,16. El alto pedido baja de 50 a 45:
+   antes se medía tras el giro de órbita, que estira el campo en vertical (57 %), y con el
+   encuadre de apertura eso era pedir justo lo que da. Lo que este aserto guarda sigue
+   entero: la caja envolvente dejaba Ayora en el 37 % del ancho y por debajo del centro. */
+ok(r.encuadre.ocupaX > 55 && r.encuadre.ocupaY > 45 &&
    Math.abs(r.encuadre.centro[0]) < 0.25 && Math.abs(r.encuadre.centro[1]) < 0.25,
    `y lo LLENA, más o menos centrado: ocupa ${r.encuadre.ocupaX}% × ${r.encuadre.ocupaY}% · centro ${r.encuadre.centro}`);
 ok(r.panelesConCelulas >= 1,
