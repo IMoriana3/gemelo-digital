@@ -158,15 +158,15 @@ ok(cte.sinCanon.length === 0,
    número coincida hoy — porque el problema es la copia, no el valor. */
 {
   const bat2 = readFileSync(path.join(RAIZ, 'bateria.html'), 'utf8');
-  const tecleados = ['AXIS_MAX','NIGHT_POS','DEFENSE_POS','SLEW_DPS','HYST_DEG','DEG_H_NORMAL',
-    'DEG_H_WINTER','WIND_T1','WIND_T2','PARTIAL_STOW_DEG','DESTOW_HOLD_H','IDLE_W','SLEEP_W',
+  const tecleados = ['AXIS_MAX','NIGHT_POS','DEFENSE_POS','SLEW_DPS','HYST_DEG',
+    'WIND_T1','WIND_T2','PARTIAL_STOW_DEG','DESTOW_HOLD_H','IDLE_W','SLEEP_W',
     'K0','K1','ETA_CHG','V_NOM','ALBEDO','JEITA_T3','JEITA_T4','GCR']
     .filter((k) => new RegExp('\\b' + k + '\\s*=\\s*[-\\d.]').test(bat2));
   ok(tecleados.length === 0,
-    'y ninguno se teclea: los 21 se leen de FISICA',
+    'y ninguno se teclea: los 19 se leen de FISICA',
     'tecleados: ' + tecleados.join(', '));
 }
 
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez y sus 21 canónicos salen del espejo'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez y sus 19 canónicos salen del espejo'));
 process.exit(fallos ? 1 : 0);

@@ -25,7 +25,9 @@
      3. SP4 LIMPIEZA — interruptor de limpieza del grupo o forzado.
      4. SP2/5/6/7    — forzados genéricos de la NCU.
      5. BATERÍA      — SoC bajo L3 (crítico) manda a defensa; bajo L2 congela el
-                       seguimiento; bajo L1 lo hace a pasos gruesos (winter mode).
+                       seguimiento; bajo L1 el firmware engorda la banda muerta
+                       (41063). Eso es del EQUIPO y por SoC — no es el winter mode,
+                       que no toca el movimiento.
      6. MANUAL       — consigna del operador (modo 1).
      7. AUTO         — seguimiento solar con backtracking (modo 2); de noche, a
                        la posición nocturna. En modo 0 (OFF) el TCU no se mueve.
@@ -38,7 +40,7 @@
      (scada/tools/tcu-toolbox) contra equipo real — tilt ×10, ángulos solares
      ×100, temperaturas ×10, tensiones mV, corrientes mA, reloj en BCD.
    · Física y umbrales: los mismos que bateria.html (estudio de disponibilidad
-     de batería SUNNER + física canónica de SolarGPT).
+     de batería del estudio de disponibilidad + física canónica de SolarGPT).
 
    Lo que NO es
    ------------
@@ -76,7 +78,6 @@ var K = {
   IDLE_W: F.idleW, SLEEP_W: F.sleepW,     /* electrónica, de día y de noche (W) */
   MOT_K0: F.motor.K0, MOT_K1: F.motor.K1, /* motor: Wh/° = K0 + K1·|θ| */
   ETA_CHG: F.e.ETA_CHG,                   /* rendimiento de la carga */
-  DEG_H_NORMAL: F.e.DEG_H_NORMAL, DEG_H_WINTER: F.e.DEG_H_WINTER,
   ALBEDO: F.e.ALBEDO,
   JEITA_T3: F.e.JEITA_T3, JEITA_T4: F.e.JEITA_T4,
   V_NOM: F.vNom,                          /* tensión nominal del bus */
@@ -148,8 +149,6 @@ var PARAMS = [
   { k: 'SLEW_DPS',      n: 'Velocidad del actuador',       u: '°/s',   d: 3, g: 'Geometría y movimiento', o: 'canon' },
   { k: 'HYST_DEG',      n: 'Banda muerta del lazo',        u: '°',     d: 2, g: 'Geometría y movimiento', o: 'canon' },
   { k: 'VEL_SIN_CARGA', n: 'Velocidad del motor en vacío', u: '°/s',   d: 2, g: 'Geometría y movimiento', o: 'sim' },
-  { k: 'DEG_H_NORMAL',  n: 'Ritmo de seguimiento',         u: '°/h',   d: 1, g: 'Geometría y movimiento', o: 'canon' },
-  { k: 'DEG_H_WINTER',  n: 'Ritmo en modo invierno',       u: '°/h',   d: 1, g: 'Geometría y movimiento', o: 'canon' },
 
   { k: 'WIND_T1',       n: 'Umbral parcial',               u: 'm/s',   d: 3, g: 'Abanderamiento', o: 'canon' },
   { k: 'WIND_T2',       n: 'Umbral total',                 u: 'm/s',   d: 3, g: 'Abanderamiento', o: 'canon' },
@@ -857,7 +856,7 @@ TCU.prototype.decide = function (dt, ang) {
 /* ---- motor: velocidad real, deadband y consumo ----
    Devuelve los Wh gastados en este paso, con el modelo elegido en la estrategia:
    la medición de Factiun (Wh/° = K0 + K1·|θ|, con el ángulo MEDIO del movimiento y
-   tope de 50 W) o el consumo SUNNER en mA medios × tiempo de giro. */
+   tope de 50 W) o el consumo medio en mA del estudio × tiempo de giro. */
 TCU.prototype.mueve = function (dt, inhibido) {
   /* el error se calcula contra lo que el TCU MIDE, no contra dónde está la mesa: si
      el inclinómetro miente, el lazo persigue el objetivo equivocado y tan contento */
@@ -1007,27 +1006,24 @@ TCU.prototype.mueve = function (dt, inhibido) {
   /* lo que se le MANDA girar: hasta SU DESTINO, no hasta la consigna */
   var esperado = Math.min(Math.abs(destino - this.angulo), K.SLEW_DPS * dt);
 
-  /* WINTER MODE (11.5b) — LÍMITE CINEMÁTICO, no una rebaja de la factura.
-     WINTER-01: aquí había una SEGUNDA semántica del mismo modo. El eje se movía
-     ENTERO y solo se reducían los grados que se le contaban al motor, así que el
-     seguidor cobraba la POA de un seguimiento perfecto y pagaba la de uno grueso
-     — las dos cosas a la vez, que es físicamente imposible. Medido sobre un día
-     de enero: winter ON y OFF daban la MISMA trayectoria (Δ recorrido 0,000°) y
-     el SOC final cambiaba +10,3 pp.
-     `bateria.html` —el canon del que este simulador copia `consumoTCU`— ya lo
-     había migrado, y lo dejó escrito: «Se aplica a la POSICIÓN: ángulo
-     registrado, POA de carga y consumo de motor hablan del mismo giro (antes se
-     descontaba sólo la energía)». El comentario que había aquí afirmaba lo
-     contrario —«se contabiliza igual que en el simulador de batería»— y era
-     falso desde esa migración.
-     La política es UNA y es ésta: en seguimiento, el avance por paso se acota a
-     `DEG_H_WINTER` °/h. El seguidor va a la zaga del sol, y eso se ve en el
-     ángulo, en la POA y en los Wh, porque es el MISMO giro.
-     Una orden de seguridad o una defensa por batería se ejecutan ENTERAS: winter
-     mode no puede retrasar un abanderamiento. */
-  if (E.winter && this.sp === SP.NINGUNA && !this.parked) {
-    esperado = Math.min(esperado, K.DEG_H_WINTER * dt / 3600);
-  }
+  /* EL WINTER MODE NO TOCA EL MOVIMIENTO — decisión del mantenedor, 2026-09-09:
+     «únicamente cambiar la frecuencia de calibración y el SOC máximo, nada más; ni
+     velocidades ni límites de giro».
+
+     Aquí había un límite cinemático de `DEG_H_WINTER` °/h. Lo que lo condena no es
+     el gusto: medido con las propias funciones del gemelo en Gorraiz, el sol pide
+     entre 14,5 °/h (junio) y 25,0 °/h (diciembre) de media, con picos de 57-69 °/h
+     por el backtracking. A 3 °/h el eje cubría entre el 12 % y el 20 % del recorrido
+     del día — o sea que no «seguía grueso», se quedaba casi clavado —, y eso costaba
+     un 24 % de producción en la comparativa de controles.
+
+     Y no estaba en el canon: `policy_for_mode('winter')` del core devuelve techo de
+     SOC, periodo de calibración y calefactor, y nada de ritmos. El 3 °/h salía de
+     §11.5b del cuaderno, que el propio cuaderno marca como research/demo sobre
+     DATOS SINTÉTICOS y no cableada al core.
+
+     Si algún día hace falta un modo que mueva menos, será otro modo, con otro
+     nombre y con un ritmo medido — no colgado del winter mode. */
   /* EL EJE ATASCADO ES FÍSICO: el motor tira, consume, y la mesa no se mueve. El bit
      de alarma no se pone aquí — lo deduce el firmware unas líneas más abajo. */
   if (!this.ejeAtascado) {
@@ -1098,7 +1094,7 @@ TCU.prototype.mueve = function (dt, inhibido) {
         lo que evita tenerla siempre al 100 % envejeciendo.
      3. Límite real de admisión: rendimiento de carga, C-rate seguro LiFePO4 según
         temperatura, JEITA por el lado caliente y cut-in del regulador.
-     4. Consumo: electrónica + motor (medición Factiun o mA SUNNER) + calefactor
+     4. Consumo: electrónica + motor (medición Factiun o mA del estudio) + calefactor
         de las versiones LT, que gasta pero desbloquea la carga en frío.       */
 /* ── irradiancia del sitio y POA de un ángulo cualquiera ──
    Se calcula una sola vez por paso porque la usan dos: la política de difusa, para
@@ -1423,7 +1419,7 @@ function Planta(cfg) {
     iDuro: cfg.iDuro || 5000,                /* corriente con el eje duro: alta, pero sin disparar */
     perfil: cfg.perfil || F.perfilPorDefecto, /* alimentación y batería (SP · STRING · AC) */
     /* modelo de consumo del motor: 'factiun' (Wh/° medidos) o los mA medios de
-       SUNNER a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
+       del estudio a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
     motorModel: cfg.motorModel || 'factiun',
     estrategiaViento: cfg.estrategiaViento || 'B2',   /* A1 · A2 · B1 · B2 */
     /* averías por tasa: apagadas salvo que se pidan */
@@ -1436,7 +1432,7 @@ function Planta(cfg) {
        navegador —que es de primer orden— y se dice en pantalla. */
     canon: cfg.canon || null,
     /* ESTRATEGIA de gestión de batería — los mismos parámetros y los mismos valores
-       por defecto que el simulador de batería (estrategia oficial SUNNER) */
+       por defecto que el simulador de batería (estrategia oficial de SOC) */
     estrategia: {
       activa:  cfg.estrategia && cfg.estrategia.activa  != null ? cfg.estrategia.activa  : true,
       socCrit: cfg.estrategia && cfg.estrategia.socCrit != null ? cfg.estrategia.socCrit : 30,  /* defensa (%) */

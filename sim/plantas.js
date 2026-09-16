@@ -11,10 +11,10 @@
      tcu, medios, completos, rep, ncu, hsu
      bifila           dos vigas por seguidor (la de la casa) o una
      ejeAz            azimut del eje, grados al este del norte
-     pitch, filaZ     paso entre filas y media separación del bífilo, si el layout lo dice
+     pitch, filaZ     paso entre filas y media separación de la bífila, si el layout lo dice
      pos[]            [norte, este, rot, medio(0/1), ncu] por seguidor, en metros
                       respecto al centro de planta. El punto es el EJE DE UNIDAD: el
-                      centro del bífilo, no el motor — el motor va en la viga oeste.
+                      centro de la bífila, no el motor — el motor va en la viga oeste.
 
    Regenerar:  node tools/extrae_plantas.mjs
    ============================================================================ */

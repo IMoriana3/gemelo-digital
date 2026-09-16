@@ -14,9 +14,9 @@
    lo mismo**. Aquí se contrastan tres:
 
      · el LAYOUT       cuántos trackers, NCU, estaciones y TCU sin mesa hay de verdad
-     · su `geometria`  si el seguidor es bífilo, el paso entre filas y el filaZ
+     · su `geometria`  si el seguidor es bífila, el paso entre filas y el filaZ
      · overcast.html   el desplegable con los códigos («23003 · El Burgo (215 uds ·
-                       2 NCUs)») y su REALMETA con el bífila de cada planta
+                       2 NCUs)») y su REALMETA con la bífila de cada planta
 
    Si el desplegable dice 215 uds y el layout trae 214, alguien ha tocado uno de los
    dos y hay que mirarlo, no promediar.
@@ -92,8 +92,8 @@ for (const f of fs.readdirSync(COB).filter((x) => x.endsWith('_layout.json')).so
   if (o && L.ncus && o.ncus !== L.ncus.length && L.ncus.length > 0) {
     avisos.push(`${k}: overcast dice ${o.ncus} NCU y el layout trae ${L.ncus.length}`);
   }
-  if (mt && g.bifilo != null && mt.bifila !== !!g.bifilo) {
-    avisos.push(`${k}: REALMETA dice bifila=${mt.bifila} y geometria.bifilo=${g.bifilo}`);
+  if (mt && g.bifila != null && mt.bifila !== !!g.bifila) {
+    avisos.push(`${k}: REALMETA dice bifila=${mt.bifila} y geometria.bifila=${g.bifila}`);
   }
   if (o && mt && o.monofila === mt.bifila) {
     avisos.push(`${k}: el texto del desplegable dice ${o.monofila ? 'monofila' : 'bífila'} ` +
@@ -102,8 +102,8 @@ for (const f of fs.readdirSync(COB).filter((x) => x.endsWith('_layout.json')).so
 
   /* bífila: manda el layout si lo declara; si no, lo que diga REALMETA; y si tampoco,
      la de la casa, que es bífila. Se anota de dónde salió. */
-  const bifila = g.bifilo != null ? !!g.bifilo : (mt ? mt.bifila : true);
-  const fuenteBif = g.bifilo != null ? 'layout' : (mt ? 'overcast' : 'por defecto');
+  const bifila = g.bifila != null ? !!g.bifila : (mt ? mt.bifila : true);
+  const fuenteBif = g.bifila != null ? 'layout' : (mt ? 'overcast' : 'por defecto');
 
   /* el azimut de eje: el `rot` de los seguidores. Si no todos coinciden se dice. */
   const rots = [...new Set(T.map((t) => +(t.rot || 0).toFixed(1)))];
@@ -128,7 +128,7 @@ for (const f of fs.readdirSync(COB).filter((x) => x.endsWith('_layout.json')).so
     bifila,
     fuenteBif,
     ejeAz: rots.length === 1 ? rots[0] : +(T.reduce((a, t) => a + (t.rot || 0), 0) / T.length).toFixed(1),
-    /* el paso y la media separación del bífilo, en NÚMERO. Ojo: algunos layouts los
+    /* el paso y la media separación de la bífila, en NÚMERO. Ojo: algunos layouts los
        explican en prosa dentro de `geometria` (Bagnarelli decía «filaZ = 5,50/2 = 2,75»
        en una frase) y ahí no los lee nadie: los que valen son los de `mesa`. */
     pitch: (L.mesa && L.mesa.pasoFila) != null ? L.mesa.pasoFila
@@ -182,10 +182,10 @@ const cab = `/* ================================================================
      tcu, medios, completos, rep, ncu, hsu
      bifila           dos vigas por seguidor (la de la casa) o una
      ejeAz            azimut del eje, grados al este del norte
-     pitch, filaZ     paso entre filas y media separación del bífilo, si el layout lo dice
+     pitch, filaZ     paso entre filas y media separación de la bífila, si el layout lo dice
      pos[]            [norte, este, rot, medio(0/1), ncu] por seguidor, en metros
                       respecto al centro de planta. El punto es el EJE DE UNIDAD: el
-                      centro del bífilo, no el motor — el motor va en la viga oeste.
+                      centro de la bífila, no el motor — el motor va en la viga oeste.
 
    Regenerar:  node tools/extrae_plantas.mjs
    ============================================================================ */

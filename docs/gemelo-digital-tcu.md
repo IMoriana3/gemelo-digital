@@ -1,7 +1,7 @@
 # Gemelo Digital TCU — Seguidor Factiun
 ### Gemelo digital 3D del conjunto seguidor + TCU de Factiun, con física de seguimiento y simulación energética en el navegador
 
-Réplica fiel, en 3D y en el navegador, de un seguidor solar **1V bífila** real de Factiun y de su TCU (caja **SUNNER**), con seguimiento solar astronómico, *backtracking* y dinámica energética de la batería LiFePO4. Es el banco de pruebas del control predictivo con restricción energética desarrollado en el TFM.
+Réplica fiel, en 3D y en el navegador, de un seguidor solar **1V bífila** real de Factiun y de su TCU (caja **SUNNER**), con seguimiento solar astronómico, *backtracking* y dinámica energética de la batería LiFePO4. Es el banco de pruebas del control predictivo con restricción energética.
 
 > TODO: enlazar el repositorio y, si se publica, la URL de visualización.
 
@@ -9,7 +9,7 @@ Réplica fiel, en 3D y en el navegador, de un seguidor solar **1V bífila** real
 
 - Representa en 3D, físicamente fiel, un seguidor 1V bífila real de Factiun y su TCU (caja SUNNER).
 - Simula en tiempo real el seguimiento solar astronómico con *backtracking* y la dinámica del TCU autoalimentado (panel auxiliar + batería LiFePO4).
-- Sirve de banco de pruebas para el control con restricción energética (línea del TFM): cuando la batería cae, el sistema prioriza la supervivencia operativa sobre el seguimiento óptimo.
+- Sirve de banco de pruebas para el control con restricción energética: cuando la batería cae, el sistema prioriza la supervivencia operativa sobre el seguimiento óptimo.
 
 ## Archivos
 
@@ -68,7 +68,7 @@ Reproduce la caja blanca real **SUNNER** de Factiun: cuerpo redondeado abovedado
 - **Seguimiento** verdadero sobre eje N-S, con **backtracking** (Anderson-Mikofski / Lorenzo, GCR ≈ 0,397).
 - **Controlador de carga LiFePO4** en tres estados: Bulk (CC) → Absorción (CV) → Flotación.
 - **SoC por conteo de culombios**.
-- **Modo de conservación con restricción energética** por debajo de SoC 18%: el control deja de seguir el sol "a ciegas" y prioriza la supervivencia del equipo (núcleo del TFM).
+- **Modo de conservación con restricción energética** por debajo de SoC 18%: el control deja de seguir el sol "a ciegas" y prioriza la supervivencia del equipo.
 - Chip **"Modo carga"** con el estado de carga en vivo.
 
 ## Controles

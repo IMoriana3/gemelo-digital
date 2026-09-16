@@ -132,9 +132,9 @@
       <select id="motor">
         <option value="curva">Factiun · curva I(|θ|) medida — TCU 33 @24 V</option>
         <option value="factiun">Factiun · ajuste Wh/° = K0 + K1·|θ|</option>
-        <option value="2500">SUNNER · 2500 mA medio @25,6 V</option>
-        <option value="3250">SUNNER · 3250 mA medio @25,6 V</option>
-        <option value="4000">SUNNER · 4000 mA medio @25,6 V</option>
+        <option value="2500">2500 mA medio @25,6 V (estudio de disponibilidad)</option>
+        <option value="3250">3250 mA medio @25,6 V (estudio de disponibilidad)</option>
+        <option value="4000">4000 mA medio @25,6 V (estudio de disponibilidad)</option>
       </select></div>
     <div class="fld"><label>Umbral duro de carga <span class="rv" id="poaMinV">0 W/m²</span></label>
       <input type="range" id="poaMin" min="0" max="200" step="10" value="0">
@@ -158,7 +158,7 @@
     <div class="fld" id="yearFld"><label>Año histórico</label><select id="year"></select></div>
     <div class="fld" id="sweepFld" style="display:none"><label>Barrido desde el año</label>
       <input type="number" id="sweepFrom" value="2013" min="1940" step="1">
-      <div class="note">Open-Meteo tiene histórico desde 1940. El estudio SUNNER usa 2013–2024. Más años = más peticiones (van por lotes de 8).</div></div>
+      <div class="note">Open-Meteo tiene histórico desde 1940. El estudio de disponibilidad usa 2013–2024. Más años = más peticiones (van por lotes de 8).</div></div>
     <div class="fld" id="daysFld" style="display:none"><label>Días de simulación <span class="rv" id="daysV">7</span></label>
       <input type="range" id="days" min="3" max="16" step="1" value="7"></div>
     <div class="fld" id="fileFld" style="display:none"><label>Fichero _HourlyRes de PVSyst (.csv)</label>
@@ -171,7 +171,7 @@
     <div class="fld" id="sdaysFld" style="display:none"><label>Días (sintético) <span class="rv" id="sdaysV">365</span></label>
       <input type="range" id="sdays" min="7" max="365" step="1" value="365"></div>
   </div>
-  <div class="grp"><h3>Estrategia SOC (SUNNER)</h3>
+  <div class="grp"><h3>Estrategia SOC</h3>
     <div class="fld"><label>SOC inicial <span class="rv" id="soc0V">50%</span></label>
       <input type="range" id="soc0" min="5" max="100" step="5" value="50"></div>
     <div class="fld"><label>SOC objetivo de carga <span class="rv" id="socTgtV">80%</span></label>
@@ -185,7 +185,7 @@
     <label class="sw"><input type="checkbox" id="cmp" checked>
       <span>Comparar sistemas de control<small>Simula 5 estrategias sobre la misma meteo y las enfrenta</small></span></label>
     <label class="sw"><input type="checkbox" id="winter">
-      <span>Winter mode<small>Correcciones gruesas 3°/h · política canónica: objetivo 90 % y carga completa cada 3 días · calefactor auto en LT</small></span></label>
+      <span>Winter mode<small>Política canónica y completa: objetivo 90 % y carga completa cada 3 días · calefactor auto en LT. No cambia el seguimiento</small></span></label>
   </div>
   <div class="grp"><h3>Parámetros físicos · el canon es el defecto</h3>
     <div class="note" style="margin-top:0">Los valores medidos y canónicos con los que calcula el simulador. Se pueden apartar para probar, y lo apartado sale en ámbar con su valor original. <b>El canon manda cuando no lo tocas, no siempre.</b></div>
@@ -198,7 +198,7 @@
     <b>Metodología</b>: el panel dedicado de las TCU SP va solidario al seguidor (confirmado), de modo que su
     captación es la del plano del generador y cae cuando el seguidor va a defensa o abanderado; los TCU String
     toman su potencia nominal de un string de varios kW, disponible desde muy poca luz.
-    Estrategia oficial SUNNER (Battery Availability Study) — CASO 1: crítico&lt;SOC&lt;objetivo,
+    Estrategia oficial de gestión de SOC — CASO 1: crítico&lt;SOC&lt;objetivo,
     carga + consumo; CASO 2: SOC&gt;objetivo, sin carga; CASO 3: SOC&lt;crítico → <b>defensa 55°</b>,
     tracker no disponible, solo electrónica. Sin carga bajo la Tª mínima; por encima, C-rate seguro LiFePO₄
     según Tª (11.5b). Consumo de electrónica (0,64 W) y curva de motor I(|θ|) medidos por Factiun: 36 W a 0° y 67,2 W a 55°. Comparativa contra el mismo TCU
@@ -218,6 +218,7 @@
 </div>
 </div>
 
+<script src="sim/cartera.js"></script><!-- CARTERA DE PROYECTOS, generada por tools/genera_plantas.mjs -->
 <script src="sim/fisica.js"></script><!-- ESPEJO del core Python, careado por tools/carea_fisica.mjs -->
 <script src="sim/canon.js"></script><!-- cliente del motor local de SolarGPT (POST /tcubalance) -->
 <script src="sim/viento.js"></script><!-- abanderamiento: el MISMO módulo que el simulador de planta y terreno.html -->
@@ -228,18 +229,44 @@ function fmt(n,d){return n.toFixed(d==null?0:d).replace('.',',')}
 var D2R=Math.PI/180;
 
 /* ═══════════ Emplazamientos — plantas Factiun con nº de proyecto (coords de cobertura-zigbee/<planta>_layout.json) ═══════════ */
-var LOCS=[
- {n:"23003 · El Burgo I (Zaragoza, ES)",lat:41.5763,lon:-0.7981},
- {n:"24007 · Fayón (Zaragoza, ES)",lat:41.2269,lon:0.3242},
- {n:"24019 · San José (Arequipa, PE)",lat:-16.5958,lon:-71.8064},
- {n:"24021 · Túnez (Gabès, TN)",lat:33.8792,lon:9.8736},
- {n:"24025 · Ayora (Valencia, ES)",lat:39.1182,lon:-1.1599},
- {n:"24030 · Bagnarelli (Apulia, IT)",lat:41.5156,lon:15.2676},
- {n:"25019 · Páramo (León, ES)",lat:42.3206,lon:-5.5998},
- {n:"Gorraiz · Navarra (ES)",lat:42.81,lon:-1.58},
- {n:"Latina · Lacio (IT)",lat:41.468,lon:12.904},
- {n:"Jodhpur · Rajastán (IN)",lat:26.264,lon:73.008}
+/* ═══════════ Emplazamientos — LA CARTERA DE PROYECTOS, no una lista a mano ═══════════
+   Sale de sim/plantas.js, que genera tools/genera_plantas.mjs desde la cartera
+   (proyectos/cartera-tabla.html) y los layouts reales de cobertura-zigbee. Aquí
+   había diez sitios escritos a mano; tres listas a mano son tres listas que
+   divergen.
+
+   Cada planta arrastra la PROCEDENCIA de sus coordenadas, y las que no las tienen
+   SALEN IGUAL en el desplegable, deshabilitadas y diciendo por qué. Omitirlas
+   escondería el hueco; inventar la coordenada del pueblo sería peor todavía —
+   un número verosímil sobre el sitio equivocado no se ve, y el hueco sí. */
+/* El rótulo lo PRODUCE el catálogo (CARTERA.rotulo, en sim/cartera.js). Aquí
+   estaba escrito a mano, y al enchufar index.html iba camino de existir dos
+   veces: la segunda copia ya se había dejado por el camino el aviso de
+   homónimo, que es justo lo que ese aviso evita. */
+function _rotulo(p){
+  return (window.CARTERA&&window.CARTERA.rotulo)
+       ? window.CARTERA.rotulo(p)
+       : (p.num+' · '+p.proyecto);   /* sin catálogo no hay lista que rotular */
+}
+
+/* Sitios que NO son de la cartera: el del gemelo y los dos de los estudios
+   que se usan de referencia. Van en su propio grupo para que nadie los cite como
+   proyecto. */
+var OTROS=[
+ {n:"Gorraiz · Navarra (ES) — sitio del gemelo",lat:42.81,lon:-1.58},
+ {n:"Latina · Lacio (IT) — estudio de referencia",lat:41.468,lon:12.904},
+ {n:"Jodhpur · Rajastán (IN) — estudio de referencia",lat:26.264,lon:73.008}
 ];
+
+/* OJO con el nombre: `CARTERA` (sim/cartera.js) son los 22 PROYECTOS; `PLANTAS_REALES`
+   (sim/plantas.js) es el PLANO, las posiciones de cada seguidor de las 11 plantas con
+   layout. Cosas distintas que se cruzan por el número de proyecto. */
+var CARTERA=(typeof window!=='undefined'&&window.CARTERA&&window.CARTERA.plantas)?window.CARTERA.plantas:[];
+var LOCS=CARTERA.filter(function(p){return p.lat!=null})
+                .map(function(p){return {n:_rotulo(p),lat:p.lat,lon:p.lon,
+                                         num:p.num,fuente:p.fuente,planta:p};})
+                .concat(OTROS);
+var SIN_COORD=CARTERA.filter(function(p){return p.lat==null});
 
 /* ═══════════ Perfiles TCU — 00.2t (medidos por Factiun, campaña "Consumos motor_02 @24V") ═══════════ */
 /* NO SE COPIAN: se leen del espejo (GEM-CONST-01). Esta página ya carga
@@ -283,7 +310,7 @@ var PROFILES=[
  {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6 Ah · LT calefactada",  wh:153.6, chgW:60, heated:true, string:true}
 ];
 
-/* ═══════════ Tracker (constantes del estudio SUNNER + gemelo) ═══════════ */
+/* ═══════════ Tracker (constantes del estudio de disponibilidad + gemelo) ═══════════ */
 var AXIS_MAX=FISICA.e.AXIS_MAX, GCR=FISICA.e.GCR, NIGHT_POS=FISICA.e.NIGHT_POS, DEFENSE_POS=FISICA.e.DEFENSE_POS;
 /* Abanderamiento por viento — estrategia canónica B2 (wind_stow_strategies):
    parcial ≥40 km/h (±30° mín), full ≥60 km/h (±55°), histéresis destow ~30 min (1 h aquí),
@@ -303,7 +330,7 @@ var WIND_T1=FISICA.e.WIND_T1, WIND_T2=FISICA.e.WIND_T2,
 
      o.dtH        paso en horas
      o.dia        ¿hay luz? (electrónica en idle o en reposo)
-     o.mov        grados EFECTIVOS movidos en el paso (ya con winter mode aplicado)
+     o.mov        grados EFECTIVOS movidos en el paso
      o.pos        ángulo MEDIO del movimiento — el par depende de dónde está la mesa
      o.motorModel 'curva' (I(θ) medida) · 'factiun' (el ajuste) · mA medios del estudio
      o.calefactada  perfil -LT
@@ -334,9 +361,8 @@ function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
 /* JEITA lado caliente (§04.1a): T3=35°C reduce, T4=45°C bloquea carga */
 var JEITA_T3=FISICA.e.JEITA_T3, JEITA_T4=FISICA.e.JEITA_T4;
 function hotDerate(t){if(t>=JEITA_T4)return 0;if(t>JEITA_T3)return 1-0.7*(t-JEITA_T3)/(JEITA_T4-JEITA_T3);return 1;}
-var DEG_H_NORMAL=FISICA.e.DEG_H_NORMAL, DEG_H_WINTER=FISICA.e.DEG_H_WINTER;      /* °/h solar por modo (11.5b) */
 var HYST_DEG=FISICA.e.HYST_DEG;                             /* banda muerta del lazo, en grados.
-   2026-08-27: era 2,5° «del estudio SUNNER» mientras el core corría a 1,0° y el
+   2026-08-27: era 2,5° «del estudio de disponibilidad» mientras el core corría a 1,0° y el
    registro del firmware publicaba 1,296°. Tres números distintos diciendo ser el
    mismo. Decidido por el mantenedor: 1,0° en todo el ecosistema. Ver la nota en
    sim/planta.js sobre lo que cuesta. */
@@ -546,7 +572,7 @@ function resample(meteo,stepMin){
   return out;
 }
 
-/* ═══════════ SIMULADOR — estrategia oficial SUNNER + winter mode 11.5b ═══════════
+/* ═══════════ SIMULADOR — estrategia oficial de SOC + winter mode canónico ═══════════
    opts: {motorModel:'factiun'|mA(number), winter, socTgt, socCrit, fcDays, tMin, strategy:bool} */
 function simulate(meteo,prof,loc,soc0,opts){
   var latR=loc.lat*D2R, capWh=prof.wh, n=meteo.length;
@@ -588,17 +614,14 @@ function simulate(meteo,prof,loc,soc0,opts){
                      :(parked?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
     if(prevPos==null)prevPos=target;
     /* Histéresis del lazo: en seguimiento sólo corrige si el error frente al sol ≥ 2,5°
-       (estudio SUNNER). Se evalúa sobre el error REAL, antes de limitar el avance. */
+       (estudio de disponibilidad). Se evalúa sobre el error REAL, antes de limitar el avance. */
     var moveNow=(stow>0||parked)?Math.abs(target-prevPos)>0.01
                                 :Math.abs(target-prevPos)>=HYST_DEG;
-    /* Winter mode (11.5b): correcciones gruesas — cuando corrige, avanza como mucho
-       DEG_H_WINTER °/h, así que el seguidor va a la zaga del sol y barre ~3°/h en vez de
-       ~10°/h. Se aplica a la POSICIÓN: ángulo registrado, POA de carga y consumo de motor
-       hablan del mismo giro (antes se descontaba sólo la energía). */
-    if(moveNow && opts.winter && !parked && !stow){
-      var limW=DEG_H_WINTER*dtH, errW=target-prevPos;
-      target=prevPos+Math.sign(errW)*Math.min(Math.abs(errW),limW);
-    }
+    /* El WINTER MODE NO TOCA EL MOVIMIENTO. Es techo de SOC (90 %) y calibración
+       cada 3 días, y nada más — decisión del mantenedor, 2026-09-09. Aquí había un
+       límite de 3 °/h que dejaba al seguidor a la zaga del sol; ver la nota en
+       sim/fisica.js sobre por qué se fue. Si vuelves a necesitar un modo que mueva
+       menos, será OTRO modo con otro nombre, y con un ritmo medido. */
     /* Límite físico de velocidad de giro (0,17°/s): a paso fino el aparcado y el
        abanderamiento tardan varios pasos en completarse, como en el seguidor real. */
     var maxSweep=SLEW_DPS*3600*dtH;
@@ -655,9 +678,9 @@ function simulate(meteo,prof,loc,soc0,opts){
     var poaPot=0, poaLost=0, poaReal=0;
     if(sun.el>0){
       poaPot=(m.poa!=null)?m.poa:poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi,N);
-      /* POA en la posición REAL del seguidor: recoge TODA la pérdida de producción de la
-         planta — defensa por batería, abanderamiento y el seguimiento grueso del winter
-         mode —, no sólo la imputable a la batería. */
+      /* POA en la posición REAL del seguidor: recoge TODA la pérdida de producción de
+         la planta —defensa por batería y abanderamiento—, no sólo la imputable a la
+         batería. */
       if(Math.abs(target-trackPos)<0.01) poaReal=poaPot;
       else{
         var pIdeal=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi,N);
@@ -683,19 +706,25 @@ function simulate(meteo,prof,loc,soc0,opts){
 
 /* ═══════════ Sistemas de control a comparar ═══════════
    Todos comparten TCU, emplazamiento y meteo: sólo cambia la lógica de gestión. */
+/* Los sistemas se nombran por LO QUE HACEN, no por quién los vende ni por el
+   documento donde se describieron. Antes dos columnas se llamaban «SUNNER» y una
+   «(TFM)»: la primera pone la marca de un tercero sobre una lógica de control que
+   aquí se simula, y la segunda es jerga interna que en un informe de cliente no
+   dice nada. El equipo concreto —SP o STRING, panel y batería— sí va dicho, y va
+   en la cabecera de la tabla, que es donde se pregunta «¿de qué TCU hablamos?». */
 var CONTROLS=[
  {k:'none', n:'Sin gestión',                 d:'Seguimiento continuo, sin techo de carga ni defensa',
   o:{strategy:false,socTgt:100,socCrit:0,fcDays:5,winter:false,defPos:DEFENSE_POS}},
- {k:'sunner', n:'SUNNER estándar',           d:'Objetivo 80 % · crítico 30 % → defensa 55° · calibración 5 d',
+ {k:'std',  n:'Estrategia estándar',         d:'Objetivo 80 % · crítico 30 % → defensa 55° · calibración 5 d',
   o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:DEFENSE_POS}},
- {k:'winter', n:'SUNNER + winter mode',      d:'Objetivo 90 % · calibración 3 d · seguimiento grueso 3°/h',
+ {k:'winter', n:'Estándar + winter mode',    d:'Objetivo 90 % · calibración 3 d (y nada más: no toca el movimiento)',
   o:{strategy:true,socTgt:90,socCrit:30,fcDays:3,winter:true,defPos:DEFENSE_POS}},
- {k:'tfm', n:'Restricción energética (TFM)', d:'Como SUNNER pero aparca plano a 0° para sobrevivir',
+ {k:'plano', n:'Defensa en plano',           d:'Como la estándar, pero la defensa aparca a 0° en vez de a 55°',
   o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:0}},
  {k:'cons', n:'Conservador',                 d:'Objetivo 80 % · crítico 40 %: aparca antes, más margen',
   o:{strategy:true,socTgt:80,socCrit:40,fcDays:5,winter:false,defPos:DEFENSE_POS}}
 ];
-var CONTROL_COL={none:'#8093A4',sunner:'#36D399',winter:'#3aa0ff',tfm:'#e0a52b',cons:'#c084fc'};
+var CONTROL_COL={none:'#8093A4',std:'#36D399',winter:'#3aa0ff',plano:'#e0a52b',cons:'#c084fc'};
 function runControls(meteo,prof,loc,soc0,base){
   return CONTROLS.map(function(c){
     var o={};for(var k in base)o[k]=base[k];
@@ -707,6 +736,10 @@ function runControls(meteo,prof,loc,soc0,base){
 
 /* ═══════════ Rainflow (ASTM simplificado) + modelo de ciclos LFP (11.5b) ═══════════ */
 var RF_MIN=0.005;                 /* 0,5 % — filtro de amplitud: sin él el conteo depende del paso */
+var LFP_A=6000, LFP_B=1.2, LFP_EOL=20;   /* Nf = a/DoD^b · EOL = 80% SOH */
+/* Los canónicos suben AQUÍ, delante de `rainflow`, porque el contador ya los
+   necesita: es él quien tiene la profundidad de cada ciclo y por tanto el único
+   que puede sumar Palmgren-Miner. Antes vivían debajo y `rainflow` sólo contaba. */
 function rainflow(soc){
   var tp=[],i;
   for(i=0;i<soc.length;i++){
@@ -730,11 +763,25 @@ function rainflow(soc){
     }
   }
   for(i=0;i+1<stack.length;i++)cycles.push({r:Math.abs(stack[i+1]-stack[i]),w:0.5});
-  var tot=0,d30=0,d60=0;
-  cycles.forEach(function(c){if(c.r<RF_MIN)return;tot+=c.w;if(c.r>=0.30)d30+=c.w;if(c.r>=0.60)d60+=c.w;});
-  return {total:tot,dod30:d30,dod60:d60};
+  /* PALMGREN-MINER, que es para lo que existe contar por rainflow.
+     `miner` = Σ wᵢ/N(rᵢ) con N(DoD)=A/DoD^b: la FRACCIÓN de vida por ciclado
+     consumida en el periodo. Vale 1 al llegar al final de vida, o sea a
+     LFP_EOL % de pérdida de capacidad.
+
+     Hasta hoy esta lista se construía y se TIRABA: sólo salían recuentos, y el
+     fade por ciclado se calculaba aparte con el DoD medio diario. Con N(DoD) en
+     ley de potencias la media NO resume la distribución —muchos ciclos someros
+     más unos pocos profundos no envejecen como todos a la media—, así que la
+     tabla podía enseñar los ciclos profundos multiplicándose por 14 mientras el
+     fade no se movía. Ahora la profundidad de cada ciclo entra en el número. */
+  var tot=0,d30=0,d60=0,miner=0;
+  cycles.forEach(function(c){
+    if(c.r<RF_MIN)return;
+    tot+=c.w; if(c.r>=0.30)d30+=c.w; if(c.r>=0.60)d60+=c.w;
+    miner+=c.w/(LFP_A/Math.pow(c.r,LFP_B));
+  });
+  return {total:tot,dod30:d30,dod60:d60,miner:miner};
 }
-var LFP_A=6000, LFP_B=1.2, LFP_EOL=20;   /* Nf = a/DoD^b · EOL = 80% SOH */
 /* Envejecimiento calendario — BatteryModel v2 canónico (notebook 11.0, _apply_calendar_aging):
    tasa = base · exp(Ea/R·(1/T_ref − 1/T)) · (1 + 0,8·(SOC − 0,5))
    Base calibrada a 1,5 %/año para LFP en el punto de referencia 25 °C y SOC 0,5 (Wang 2014, 11.5b),
@@ -744,7 +791,7 @@ function calFadeRatePctYr(soc,tC){
   var arr=Math.exp(EA_OVER_R*(1/T_REF_K-1/(Math.max(-40,tC)+273.15)));
   return CAL_BASE_PCT_YR*arr*Math.max(0,1+0.8*(soc-0.5));
 }
-function cyclesAnalysis(rows){
+function cyclesAnalysis(rows,rf){
   var n=rows.length; if(n<2)return null;
   var thr=0;
   for(var i=1;i<n;i++)thr+=Math.abs(rows[i].soc-rows[i-1].soc);
@@ -762,14 +809,30 @@ function cyclesAnalysis(rows){
   /* calendario: se integra paso a paso con el SOC y la temperatura de celda reales */
   var calAcc=0;
   rows.forEach(function(r){calAcc+=calFadeRatePctYr(r.soc,(r.tCell!=null?r.tCell:r.temp))*dtH/8760;});
+  var cycYrMedio=0;
   if(days>=1){
+    /* CAMINO VIEJO, que se conserva CALCULADO para poder careárselo al nuevo:
+       convierte todo el trasiego (EFC) en ciclos equivalentes al DoD MEDIO
+       diario y los divide entre la vida a ese DoD. Con N(DoD) en ley de
+       potencias, resumir la distribución por su media es la aproximación que
+       hacía invisibles los ciclos profundos. */
     var cyclesYr=(efc/Math.max(dodM,1e-6))*(365/days);
-    cycYr=(cyclesYr/toEol)*LFP_EOL;                        /* fade por ciclado */
+    cycYrMedio=(cyclesYr/toEol)*LFP_EOL;
+
+    /* CAMINO CANÓNICO: Palmgren-Miner sobre el histograma real de profundidades
+       que ya produce `rainflow`. `miner` es la fracción de vida por ciclado
+       consumida en el periodo; ×LFP_EOL la pasa a % de capacidad y ×365/días la
+       anualiza. Si no hay rainflow (llamada vieja), se cae al camino medio y se
+       DECLARA en `cycOrigen` — dos números con el mismo nombre y distinta
+       procedencia no se pueden leer igual. */
+    cycYr = (rf && rf.miner!=null) ? rf.miner*LFP_EOL*(365/days) : cycYrMedio;
     calYr=calAcc*365/days;                                 /* fade calendario anualizado */
     fade=cycYr+calYr;
     years=Math.min(30,LFP_EOL/Math.max(fade,0.001));
   }
   return {efc:efc,dodMean:dodMean,toEol:toEol,fadeYr:fade,cycYr:cycYr,calYr:calYr,
+          cycYrMedio:cycYrMedio,
+          cycOrigen:(rf&&rf.miner!=null)?'rainflow (Palmgren-Miner)':'DoD medio diario (sin rainflow)',
           socMean:rows.reduce(function(a,r){return a+r.soc},0)/n,years:years};
 }
 /* Calibraciones (cargas al 100 %) logradas y peor racha sin calibrar — se recalcula
@@ -794,6 +857,7 @@ function summarize(rows){
      aunque la batería estuviera muerta, porque nunca marca "parked". */
   var hPark=rows.filter(function(r){return (r.parked&&!r.stow)||r.soc<=0.001}).length*dtH;
   var hStow=rows.filter(function(r){return r.stow}).length*dtH;
+  var _rf=rainflow(soc);
   return {
     socFinal:soc[soc.length-1], socMin:soc[minI], socMinT:rows[minI].t,
     hBelow15:soc.filter(function(v){return v<0.15}).length*dtH,
@@ -803,7 +867,9 @@ function summarize(rows){
     prodLostPct:(function(){var p=sum('poaPot'),l=sum('poaLost');return p>0?100*l/p:0})(),
     prodRelPct:(function(){var p=sum('poaPot'),r=sum('poaReal');return p>0?100*r/p:100})(),
     chg:sum('chg'), base:sum('base'), motor:sum('motor'), net:sum('net'),
-    cyc:cyclesAnalysis(rows), rf:rainflow(soc), cal:calibStats(rows)
+    /* El rainflow se calcula ANTES y se le pasa: el fade por ciclado sale de su
+       histograma, así que las dos cosas ya no pueden contar cosas distintas. */
+    cyc:cyclesAnalysis(rows,_rf), rf:_rf, cal:calibStats(rows)
   };
 }
 function aggDaily(rows){
@@ -889,8 +955,48 @@ function bandParked(g,f,rows,color,key){
 }
 
 /* ═══════════ UI ═══════════ */
-LOCS.forEach(function(L,i){$('loc').add(new Option(L.n,i))});
-$('loc').add(new Option('✏️ Personalizado — buscar / mapa / lat-lon…','custom'));
+(function(){
+  var sel=$('loc');
+  function grupo(t){var g=document.createElement('optgroup');g.label=t;sel.add(g);return g;}
+  var nCart=LOCS.length-OTROS.length;
+  if(nCart){
+    var g1=grupo('Cartera de proyectos · '+nCart+' con coordenadas');
+    LOCS.slice(0,nCart).forEach(function(L,i){
+      var o=new Option(L.n,i);
+      var proc = L.fuente==='cartera' ? 'de la cartera'
+               : L.fuente==='gemelo:LOCS'
+                 ? 'de la lista de emplazamientos del gemelo, a 3 decimales (~110 m) '
+                   +'y sin procedencia declarada — sirve para el recurso solar, pero NO '
+                   +'es el centroide de la planta. PENDIENTE de confirmar'
+                 : 'centroide del layout real ('+L.fuente.replace('layout:','')+')';
+      o.title='Coordenadas: '+proc
+              +(L.planta&&L.planta.estado_pem?' · PEM: '+L.planta.estado_pem:'');
+      g1.appendChild(o);
+    });
+  }
+  /* Las que faltan SE VEN. Deshabilitadas y con el motivo: así el hueco es
+     accionable —rellenar lat/lon en la cartera— en vez de invisible. */
+  if(SIN_COORD.length){
+    var g2=grupo('Cartera · '+SIN_COORD.length+' SIN coordenadas — rellénalas en la cartera');
+    SIN_COORD.forEach(function(p){
+      var o=new Option(_rotulo(p)+'  — sin coordenadas','');
+      o.disabled=true;
+      o.title='Esta planta está en la cartera pero no tiene lat/lon ni layout. '
+             +'Rellena Latitud y Longitud en proyectos/cartera-tabla.html y regenera '
+             +'con: node tools/genera_plantas.mjs';
+      g2.appendChild(o);
+    });
+  }
+  var g3=grupo('Otros emplazamientos (no son cartera)');
+  LOCS.slice(LOCS.length-OTROS.length).forEach(function(L,i){
+    g3.appendChild(new Option(L.n,LOCS.length-OTROS.length+i));
+  });
+  sel.add(new Option('✏️ Personalizado — buscar / mapa / lat-lon…','custom'));
+  if(!CARTERA.length){
+    var o=new Option('⚠ falta sim/cartera.js — solo hay sitios de referencia','');
+    o.disabled=true; sel.insertBefore(o,sel.firstChild);
+  }
+})();
 PROFILES.forEach(function(P,i){$('prof').add(new Option(P.n,i))});
 
 /* — Emplazamiento personalizado: Leaflet local + Nominatim (mismo patrón que index.html) — */
@@ -1036,8 +1142,6 @@ var PARAMS_FIS=[
  {k:'DEFENSE_POS',     n:'Defensa por batería',          u:'°',     d:1, g:'Geometría y movimiento'},
  {k:'SLEW_DPS',        n:'Velocidad del actuador',       u:'°/s',   d:3, g:'Geometría y movimiento'},
  {k:'HYST_DEG',        n:'Histéresis del lazo',          u:'°',     d:2, g:'Geometría y movimiento'},
- {k:'DEG_H_NORMAL',    n:'Ritmo de seguimiento',         u:'°/h',   d:1, g:'Geometría y movimiento'},
- {k:'DEG_H_WINTER',    n:'Ritmo en modo invierno',       u:'°/h',   d:1, g:'Geometría y movimiento'},
  {k:'WIND_T1',         n:'Umbral parcial',               u:'m/s',   d:3, g:'Abanderamiento'},
  {k:'WIND_T2',         n:'Umbral total',                 u:'m/s',   d:3, g:'Abanderamiento'},
  {k:'PARTIAL_STOW_DEG',n:'Mínimo del sector parcial',    u:'°',     d:1, g:'Abanderamiento'},
@@ -1303,7 +1407,7 @@ function zoomFull(){
   render(LAST.meteo,LAST.mng,LAST.ref,LAST.prof,LAST.loc,LAST.opts,LAST.sweep,null,LAST.controls);
 }
 /* ═══════════════════════════════════════════════════════════════════════════
-   INFORME — estructura del «Battery Availability Study» de SUNNER, alimentado
+   INFORME — estructura del estudio de disponibilidad de batería, alimentado
    por la simulación en curso. Se abre en una pestaña aparte, tema claro y
    maquetado A4: el navegador lo imprime o lo guarda como PDF.
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -1367,7 +1471,7 @@ function buildReport(){
   var fuente=$('srcTag').textContent||'—';
   var motorTxt=opts.motorModel==='curva'?'curva I(|θ|) medida (TCU 33 @24 V)':
                opts.motorModel==='factiun'?'ajuste Wh/° = 0,0503 + 0,000845·|θ|':
-               opts.motorModel+' mA medios @25,6 V (SUNNER)';
+               opts.motorModel+' mA medios @25,6 V (estudio de disponibilidad)';
 
   /* — figuras: se toman de las gráficas ya dibujadas — */
   var cards=Array.prototype.slice.call(document.querySelectorAll('#out .card'));
@@ -1405,7 +1509,7 @@ function buildReport(){
   H+='<p>Este informe evalúa si la unidad de control de seguidor (TCU) <b>'+prof.id+'</b> mantiene la alimentación '+
      'necesaria para operar el seguidor en <b>'+sitio+'</b> a lo largo del periodo analizado, y cuantifica el impacto '+
      'sobre la planta de las horas en que no puede hacerlo. La metodología replica la del <i>Battery Availability Study</i> '+
-     'aplicada por SUNNER, con la física de consumo y batería medida por Factiun.</p>';
+     'del estudio de disponibilidad, con la física de consumo y batería medida por Factiun.</p>';
   H+='<div class="note"><b>Conclusión.</b> '+(apto
       ? 'La configuración evaluada <b>cumple</b>: el seguidor permanece indisponible por falta de energía un '+fmt(S.inactivePct,4)+' % del tiempo, '+
         'con una pérdida de producción imputable a la batería del '+fmt(S.prodLostPct,4)+' % y un SOC mínimo del '+fmt(S.socMin*100)+' %.'
@@ -1518,7 +1622,12 @@ function buildReport(){
   /* 9. SISTEMAS DE CONTROL */
   if(C&&C.length){
     H+='<h2 class="brk">9. Comparativa de sistemas de control</h2>';
-    H+='<p>Todas las alternativas comparten TCU, emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión.</p>';
+    /* El EQUIPO va nombrado aquí, no dado por sabido: un lector que llega a esta
+       tabla por el índice tiene que poder ver de qué TCU se habla sin subir cinco
+       páginas, porque la fuente de carga —SP con panel dedicado o STRING colgado
+       del generador— cambia el resultado más que ninguna de las cinco lógicas. */
+    H+='<p>Todas las alternativas comparten el mismo equipo —<b>'+prof.n+'</b>—, '+
+       'emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión.</p>';
     H+=tbl([['Descripción'].concat(C.map(function(x){return {v:x.c.d}}))].concat([
       ['% tiempo no disponible'].concat(C.map(function(x){return {v:fmt(x.S.inactivePct,4)}})),
       ['% producción perdida (batería)'].concat(C.map(function(x){return {v:fmt(x.S.prodLostPct,4)}})),
@@ -1577,7 +1686,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   var dm=LONG?aggDaily(mng):null, dr=LONG?aggDaily(ref):null;
   var crit=opts.socCrit/100;
 
-  /* — KPIs (métricas de impacto del estudio SUNNER) — */
+  /* — KPIs (métricas de impacto del estudio de disponibilidad) — */
   var chips=document.createElement('div');chips.className='chips';
   chips.innerHTML=
     chip('Tiempo no disponible',fmt(S.inactivePct,4)+'%',S.inactivePct>1?'bad':(S.inactivePct>0.1?'warn':'ok'),
@@ -1643,7 +1752,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   /* — Gráfica 1: SOC — */
   var c1=document.createElement('div');c1.className='card';
   c1.innerHTML='<h2>Estado de carga (SOC) — '+(sweep?('peor año '+sweep.worst):fmt(days)+' días')+'</h2><div class="sub">'+prof.id+' · '+loc.n+
-    ' · paso '+fmt(dtH*60)+' min · estrategia SUNNER (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días, reintentando a diario)'+
+    ' · paso '+fmt(dtH*60)+' min · estrategia de gestión de SOC (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días, reintentando a diario)'+
     (opts.winter?' · winter mode':'')+'</div>';
   out.appendChild(c1);
   var g1=mkCanvas(c1,210), f1=frame(g1,0,100,mng,function(v){return fmt(v)+'%'});
@@ -1718,7 +1827,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   var c4=document.createElement('div');c4.className='card';
   out.appendChild(c4);
   if(LONG){
-    c4.innerHTML='<h2>Movimiento diario del seguidor</h2><div class="sub">Σ|Δθ| por día (°) — la estrategia y el winter mode reducen el recorrido</div>';
+    c4.innerHTML='<h2>Movimiento diario del seguidor</h2><div class="sub">Σ|Δθ| por día (°) — la estrategia reduce el recorrido; el winter mode no lo toca</div>';
     var maxM=Math.max(10,Math.max.apply(null,dr.map(function(r){return r.mov})),
                           Math.max.apply(null,dm.map(function(r){return r.mov})));
     var g4=mkCanvas(c4,145), f4=frame(g4,0,maxM,dm,function(v){return fmt(v)+'°'});
@@ -1760,7 +1869,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   /* — Comparativa entre sistemas de control — */
   if(controls && controls.length){
     var cc=document.createElement('div');cc.className='card';
-    cc.innerHTML='<h2>⚖️ Comparativa de sistemas de control</h2><div class="sub">Mismo TCU ('+prof.id+
+    cc.innerHTML='<h2>⚖️ Comparativa de sistemas de control</h2><div class="sub">Mismo equipo ('+prof.n+
       '), mismo emplazamiento y misma meteo: sólo cambia la lógica de gestión de la batería.</div>';
     out.appendChild(cc);
     var gc=mkCanvas(cc,210), fc=frame(gc,0,100,mng,function(v){return fmt(v)+'%'});
@@ -1805,33 +1914,99 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
 
   /* — Comparativa con/sin estrategia — */
   var c5=document.createElement('div');c5.className='card';
-  c5.innerHTML='<h2>Comparativa: sin estrategia vs con estrategia</h2><div class="sub">Mismo TCU y misma meteo; cambia solo la operación (estrategia SUNNER'+(opts.winter?' + winter mode':'')+')</div>';
+  c5.innerHTML='<h2>Comparativa: sin estrategia vs con estrategia</h2><div class="sub">Mismo TCU y misma meteo; cambia solo la operación (estrategia de gestión de SOC'+(opts.winter?' + winter mode':'')+')</div>';
+  /* EL VEREDICTO DE CADA FILA SE DECLARA, Y UN `null` A SECAS YA NO PASA.
+     `Tiempo no disponible` y `Producción perdida` iban con `null` y salían SIN
+     COLOR — o sea que las dos únicas métricas que son el PROPÓSITO de este
+     estudio eran las únicas sin veredicto, mientras el SOC final o los ciclos
+     por DoD sí lo tenían. Quien recorría la tabla por colores veía verdes en
+     vida útil, rojos en cosas secundarias, y no veía que la indisponibilidad se
+     había multiplicado por 6,5. La severidad se dice; no se deja en blanco.
+
+     Hay filas que legítimamente no tienen dirección, y esas ahora llevan el
+     motivo escrito: `NV(...)`. Un `null` pelado no distinguía «no aplica» de
+     «se me olvidó», y por eso el fallo duró. Si alguien vuelve a poner uno, la
+     celda lo DICE en pantalla en vez de salir en blanco. */
+  function NV(motivo){return {sinVeredicto:motivo}}
   var rows=[
-    ['Tiempo no disponible',fmt(R.inactivePct,4)+'%',fmt(S.inactivePct,4)+'%',null],
-    ['Horas abanderado (viento)',fmt(R.hStow),fmt(S.hStow),null],
-    ['Producción perdida',fmt(R.prodLostPct,4)+'%',fmt(S.prodLostPct,4)+'%',null],
+    ['Tiempo no disponible',fmt(R.inactivePct,4)+'%',fmt(S.inactivePct,4)+'%',S.inactivePct<=R.inactivePct],
+    ['Horas abanderado (viento)',fmt(R.hStow),fmt(S.hStow),
+      NV('El viento no lo decide la estrategia: misma meteo y mismo umbral en los dos casos.')],
+    ['Producción perdida',fmt(R.prodLostPct,4)+'%',fmt(S.prodLostPct,4)+'%',S.prodLostPct<=R.prodLostPct],
     ['SOC final',fmt(R.socFinal*100)+'%',fmt(S.socFinal*100)+'%',S.socFinal>=R.socFinal],
     ['SOC mínimo',fmt(R.socMin*100)+'%',fmt(S.socMin*100)+'%',S.socMin>=R.socMin],
     ['Horas SOC = 0 (batería muerta)',fmt(R.hZero),fmt(S.hZero),S.hZero<=R.hZero],
-    ['Carga total (Wh)',fmt(R.chg),fmt(S.chg),null],
+    ['Carga total (Wh)',fmt(R.chg),fmt(S.chg),
+      NV('Cargar más no es mejor ni peor: con techo al 100 % entra más energía y también se envejece más.')],
     ['Consumo motor (Wh)',fmt(R.motor),fmt(S.motor),S.motor<=R.motor],
     ['Balance neto (Wh)',(R.net>=0?'+':'')+fmt(R.net),(S.net>=0?'+':'')+fmt(S.net),S.net>=R.net],
     ['Rainflow: ciclos totales',fmt(R.rf.total),fmt(S.rf.total),S.rf.total<=R.rf.total],
     ['Rainflow: ciclos ≥30% DoD',fmt(R.rf.dod30),fmt(S.rf.dod30),S.rf.dod30<=R.rf.dod30],
     ['Rainflow: ciclos ≥60% DoD',fmt(R.rf.dod60),fmt(S.rf.dod60),S.rf.dod60<=R.rf.dod60],
     ['EFC',fmt(R.cyc.efc,1),fmt(S.cyc.efc,1),S.cyc.efc<=R.cyc.efc],
-    ['SOC medio del periodo',fmt(R.cyc.socMean*100)+'%',fmt(S.cyc.socMean*100)+'%',null],
+    ['SOC medio del periodo',fmt(R.cyc.socMean*100)+'%',fmt(S.cyc.socMean*100)+'%',
+      NV('Tiene dos signos a la vez: bajarlo alarga la vida (fade calendario) y acorta la reserva. Su efecto ya se ve en las filas de fade y de disponibilidad.')],
     ['Fade por ciclado',fmt(R.cyc.cycYr,2)+'%',fmt(S.cyc.cycYr,2)+'%',S.cyc.cycYr<=R.cyc.cycYr],
     ['Fade calendario (SOC+Tª)',fmt(R.cyc.calYr,2)+'%',fmt(S.cyc.calYr,2)+'%',S.cyc.calYr<=R.cyc.calYr],
     ['Fade anual estimado',fmt(R.cyc.fadeYr,2)+'%',fmt(S.cyc.fadeYr,2)+'%',S.cyc.fadeYr<=R.cyc.fadeYr],
     ['Vida a 80% SOH (años)',fmt(R.cyc.years,1),fmt(S.cyc.years,1),S.cyc.years>=R.cyc.years]
   ];
   var tb2='<table class="cmp"><tr><th>Métrica</th><th>Sin estrategia</th><th>Con estrategia</th></tr>';
+  var mudas=0;
   rows.forEach(function(r){
-    var cls=r[3]===null?'':(r[3]?'ok':'bad');
-    tb2+='<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td class="'+cls+'">'+r[2]+'</td></tr>';
+    var v=r[3], cls='', marca='', tit='';
+    /* EMPATE: si las dos celdas ENSEÑAN el mismo número, no hay veredicto que
+       dar. Con `>=` sobre flotantes, un 22,49 % y un 22,46 % salen los dos como
+       «22%» y uno se pintaba rojo — dos valores idénticos en pantalla con
+       colores distintos. Eso destruye la confianza en el color, que es justo lo
+       que esta tabla acaba de arreglar. La tabla explica LO QUE MUESTRA. */
+    if(typeof v==='boolean' && r[1]===r[2]){ cls=''; tit=' title="Mismo valor a la resolución que se muestra: no hay diferencia que juzgar."'; }
+    else if(typeof v==='boolean'){ cls=v?'ok':'bad'; }
+    /* Sin veredicto A PROPÓSITO: la celda va limpia y el motivo en el tooltip.
+       No lleva marca pegada al número —se leía como una errata («565 ·»)— y no
+       le hace falta para distinguirse del olvido: ése sale en rojo y con ⚠. */
+    else if(v&&v.sinVeredicto){ tit=' title="Sin veredicto a propósito: '+v.sinVeredicto+'"'; }
+    else { /* Ni booleano ni motivo: el hueco se VE. Un blanco se lee como «no
+              pasa nada», que es exactamente cómo se coló el fallo anterior. */
+           cls='bad'; marca=' ⚠'; mudas++;
+           tit=' title="Esta fila no declara dirección ni motivo: alguien la dejó sin veredicto."'; }
+    tb2+='<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td class="'+cls+'"'+tit+'>'+r[2]+marca+'</td></tr>';
   });
-  c5.insertAdjacentHTML('beforeend',tb2+'</table>');
+  tb2+='</table>';
+
+  /* QUÉ SIGNIFICA EL ROJO AQUÍ, que sin esto se lee como avería.
+     La indisponibilidad con estrategia sube porque el seguidor SE APARCA a
+     propósito por debajo del SOC crítico. En el caso base eso no puede pasar
+     —corre con SOC crítico 0 %, así que la condición de aparcar no se cumple
+     nunca— y por eso toda su indisponibilidad ES batería muerta. Son dos cosas
+     distintas con el mismo nombre, y la tabla las sumaba en una fila. */
+  var defS=Math.max(0,S.hParked-S.hZero), defR=Math.max(0,R.hParked-R.hZero);
+  tb2+='<div class="note"><b>Cómo leer el rojo de las dos primeras filas.</b> Es un coste real y por eso va marcado, '+
+       'pero no todo es avería: de las '+fmt(S.hParked)+' h no disponibles con estrategia, <b>'+fmt(S.hZero)+' h son batería agotada</b> '+
+       'y <b>'+fmt(defS)+' h son defensa deliberada</b> por debajo del '+opts.socCrit+' % de SOC. '+
+       'El caso base corre con SOC crítico 0 %, así que nunca aparca por decisión propia'+
+       /* La coletilla sólo tiene sentido si el caso base TIENE horas que repartir:
+          con 0 h, «sus 0 h son íntegramente batería agotada» no dice nada. */
+       (R.hParked>0&&defR===0?' y sus '+fmt(R.hZero)+' h no disponibles son íntegramente batería agotada':'')+'. '+
+       'Lo que se compra con esas horas está en las filas de abajo: SOC medio '+fmt(R.cyc.socMean*100)+' % → '+fmt(S.cyc.socMean*100)+' %, '+
+       'y con él el fade calendario '+fmt(R.cyc.calYr,2)+' % → '+fmt(S.cyc.calYr,2)+' %/año, que es el '+
+       fmt(100*S.cyc.calYr/Math.max(S.cyc.fadeYr,1e-9))+' % del envejecimiento total. '+
+       'Si el intercambio compensa depende del coste de reemplazar baterías en campo frente al valor de esa producción, '+
+       'y eso esta tabla no lo sabe.</div>'+
+       /* Las filas de rainflow llevaban veredicto y NO entraban en el modelo de vida: el fade
+          por ciclado salía del DoD MEDIO diario, así que los ciclos profundos podían
+          multiplicarse por 14 sin mover el número. Ya no: el fade sale del histograma
+          completo por Palmgren-Miner. Se dice, porque un color sólo es legible si se sabe
+          hacia dónde propaga. */
+       '<div class="note"><b>Los ciclos por profundidad sí entran en la vida.</b> El fade por ciclado se calcula '+
+       'con <b>Palmgren-Miner</b> sobre el histograma de profundidades que produce el rainflow '+
+       '(Σ wᵢ/N(DoDᵢ), con N = '+fmt(LFP_A,0)+'/DoD^'+LFP_B+'), no con el DoD medio diario. '+
+       'Importa porque N(DoD) es una ley de potencias y la media no resume la distribución: '+
+       'muchos ciclos someros más unos pocos profundos no envejecen como todos a la media. '+
+       'Medido en este caso, el camino viejo daba '+fmt(S.cyc.cycYrMedio,4)+' %/año y éste '+fmt(S.cyc.cycYr,4)+
+       ' %/año — poco, porque aquí manda el calendario, y más cuanto más profundo sea el ciclado.</div>';
+  if(mudas)tb2+='<div class="note bad">⚠ '+fmt(mudas)+' fila(s) sin veredicto declarado. Ponle dirección o di por qué no la tiene (NV).</div>';
+  c5.insertAdjacentHTML('beforeend',tb2);
   out.appendChild(c5);
 }
 </script>

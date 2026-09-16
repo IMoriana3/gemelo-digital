@@ -56,7 +56,15 @@ var FISICA = {
  idleW: 0.64, sleepW: 0.64, vNom: 25.6,
 
  /* ── política de carga canónica: el techo de SOC y cada cuánto se calibra ──
-    Verano es lo normal; invierno sube el techo y calibra más a menudo. */
+    Verano es lo normal; invierno sube el techo y calibra más a menudo.
+
+    Y NADA MÁS. El winter mode es esto y solo esto — decisión del mantenedor,
+    2026-09-09: «únicamente cambiar la frecuencia de calibración y el SOC máximo,
+    nada más; ni velocidades ni límites de giro». Aquí vivieron un `DEG_H_NORMAL`
+    y un `DEG_H_WINTER` que acotaban el avance del eje a 3 °/h en invierno; se
+    retiraron porque no están en el core (`policy_for_mode` solo devuelve techo,
+    calibración y calefactor) y porque salían de §11.5b del cuaderno, que el
+    propio cuaderno marca como research/demo sobre datos sintéticos. */
  politica: {
    verano:   { socMax: 80, calibDias: 5 },
    invierno: { socMax: 90, calibDias: 3 }
@@ -117,9 +125,7 @@ var FISICA = {
   "K0": 0.0503,
   "K1": 0.000845,
   "JEITA_T3": 35,
-  "JEITA_T4": 45,
-  "DEG_H_NORMAL": 10,
-  "DEG_H_WINTER": 3
+  "JEITA_T4": 45
  }
 };
 
