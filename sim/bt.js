@@ -82,10 +82,21 @@ BT.prototype.motivo = function () { return this.detalle; };
 /* El bloque se evalúa con sus dependencias delante y devuelve SUS nombres. No se
    toca ni una línea de lo que viene: si el hermano cambia la física, aquí cambia
    sola, que es el propósito. */
-BT.prototype._construye = function (solJs, irrJs, htmlBt) {
+BT.prototype._construye = function (solJs, irrJs, htmlBt, htmlPr) {
   var i0 = htmlBt.indexOf(MARCA_INI), i1 = htmlBt.indexOf(MARCA_FIN);
   if (i0 < 0 || i1 < 0) throw new Error('backtracking.html sin los delimitadores ' + MARCA_INI + ' / FIN-FÍSICA');
   var fis = htmlBt.slice(htmlBt.lastIndexOf('/*', i0), i1);
+  /* Y LA LÓGICA PURA DE produccion.html, para su `buildTReal`: la T de un
+     levantamiento la arma esa página y armarla aquí serían dos geometrías. Se
+     extrae con sus propios delimitadores, el mismo contrato que usa su banco.
+     Comprobado que compila sin js/control_core.js: su única referencia al
+     núcleo del lazo está guardada con un `typeof`. */
+  var lg = null;
+  if (htmlPr) {
+    var j0 = htmlPr.indexOf('LÓGICA PURA'), j1 = htmlPr.indexOf('/* FIN-LÓGICA');
+    if (j0 < 0 || j1 < 0) throw new Error('produccion.html sin los delimitadores LÓGICA PURA / FIN-LÓGICA');
+    lg = htmlPr.slice(htmlPr.lastIndexOf('/*', j0), j1);
+  }
   var f = new Function(solJs + '\n' + irrJs + '\n' + fis + '\n' +
     'return {policyAngles:policyAngles, anglesAstro:anglesAstro, poaPlant:poaPlant,' +
     ' pairsFromElev:pairsFromElev, pairsFromElevX:pairsFromElevX, plantFromCotas:plantFromCotas,' +
@@ -102,9 +113,77 @@ BT.prototype._construye = function (solJs, irrJs, htmlBt) {
      produccion.html y el banco del hermano. */
   var GLOBAL = (typeof globalThis !== 'undefined') ? globalThis : global;
   this.F = f.call(GLOBAL);
+  if (lg) {
+    var g2 = new Function(solJs + '\n' + irrJs + '\n' + fis + '\n' + lg + '\n' +
+      'return {buildTReal:buildTReal, iamDe:iamDe, plantaCotas:(typeof plantaCotas!==\'undefined\')?plantaCotas:null,' +
+      ' ncuPorCoordenadas:(typeof ncuPorCoordenadas!==\'undefined\')?ncuPorCoordenadas:null};');
+    this.L = g2.call(GLOBAL);
+  }
   this.estado = 'listo';
   this.detalle = 'FÍSICA PURA de ' + this.base + '/backtracking.html';
   return this.F;
+};
+
+/* ── EL TERRENO MEDIDO (cotas) ───────────────────────────────────────────────
+   Con el BT compartido el gemelo ya usa el algoritmo bueno, pero se lo comía en
+   una planta LLANA de pitch canónico: el `Tllana` de planta.js. Y la mitad del
+   valor del bt3d está en el terreno — medido por el propio careo, con medio
+   metro de desnivel por vano el hermano se aparta hasta 23,71° del número único.
+
+   Las cotas son del hermano (`<planta>_cotas.json`, levantamiento real) y la T
+   la arma ÉL: `plantFromCotas` de su FÍSICA PURA más `buildTReal` de la LÓGICA
+   PURA de produccion.html. Aquí no se arma ninguna T a mano, y el motivo tiene
+   nombre: el canario de esa página se quedó CIEGO una vez porque su generador
+   usaba su propia copia de la geometría. La T real trae lo que el llano no
+   tiene — pitch por vano, pendiente por pareja, tilt por fila, y el
+   ACCIONAMIENTO (`groups`/`drive`: bifila en Ayora, quebrado en San José), que
+   es lo que acopla las mesas de un mismo motor al mismo θ.
+
+   Lo que eso cambia, medido a las 08:00 del 21-jun en Ayora (79 líneas del
+   levantamiento): la consigna de pairwise va de −3° a +55°, o sea 58° de
+   REPARTO, con 75 de las 79 líneas por debajo de 40°. Los +55 son las filas de
+   BORDE, que no tienen vecino que las sombree. Eso es lo que un ángulo común
+   no puede representar, y es justo lo que un gemelo por equipo necesita.
+
+   ⚠ QUÉ ES Y QUÉ NO ES EL REPARTO POR EQUIPO. Cada TCU recibe el ángulo de UNA
+   línea real, repartiendo los equipos en orden entre las líneas del bloque
+   cargado. Eso da la DISTRIBUCIÓN verdadera de consignas —bordes, interiores,
+   pendientes— que es lo que mueve las estadísticas de flota (batería, energía
+   de motor, alarmas). Lo que NO hace es afirmar que el TCU 7 sea el tracker que
+   está en tal x: esa identificación geométrica necesita casar el layout con las
+   cotas, que el hermano ya sabe hacer (`ncuPorCoordenadas`, con tolerancias de
+   3 m en x y 8 m en norte) pero en el marco del LAYOUT, mientras el `pos[]` del
+   gemelo va centrado en la planta. Es un paso aparte y no se finge aquí. */
+BT.prototype.cotasSync = function (planta, maxLineas) {
+  if (!this.listo()) throw new Error('el BT del hermano no está cargado: ' + this.detalle);
+  try {
+    var fs = require('fs'), path = require('path');
+    var j = JSON.parse(fs.readFileSync(path.join(this.base, planta + '_cotas.json'), 'utf8'));
+    return this.Tdesde(j, maxLineas);
+  } catch (e) {
+    this.detalleCotas = 'sin cotas de ' + planta + ': ' + e.message;
+    return null;
+  }
+};
+
+BT.prototype.cotas = function (planta, maxLineas) {
+  var self = this;
+  return fetch(this.base + '/' + planta + '_cotas.json', { cache: 'no-store' })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (j) { return self.Tdesde(j, maxLineas); })
+    .catch(function (e) {
+      self.detalleCotas = 'sin cotas de ' + planta + ': ' + e.message;
+      return null;
+    });
+};
+
+/* La T del levantamiento, con LOS CONSTRUCTORES DEL HERMANO y nada más. */
+BT.prototype.Tdesde = function (cotas, maxLineas) {
+  if (!this.listo()) throw new Error('el BT del hermano no está cargado');
+  var P = this.F.plantFromCotas(cotas, maxLineas || 80, null);
+  var T = this.L.buildTReal(this.F, { iamb0: 0.05 }, P);
+  T.nLineas = P.lineX.length;
+  return T;
 };
 
 /* En Node (los arneses y el servidor de escenarios): síncrono, del hermano al
@@ -114,7 +193,7 @@ BT.prototype.cargaSync = function (base) {
   try {
     var fs = require('fs'), path = require('path');
     var r = function (f) { return fs.readFileSync(path.join(base || BASE, f), 'utf8'); };
-    return this._construye(r('sol.js'), r('irradiancia.js'), r('backtracking.html'));
+    return this._construye(r('sol.js'), r('irradiancia.js'), r('backtracking.html'), r('produccion.html'));
   } catch (e) {
     this.estado = 'ausente';
     this.detalle = 'no encuentro el hermano en ' + (base || BASE) + ': ' + e.message;
@@ -132,8 +211,9 @@ BT.prototype.carga = function (base) {
       return r.text();
     });
   };
-  return Promise.all([pide('sol.js'), pide('irradiancia.js'), pide('backtracking.html')])
-    .then(function (t) { return self._construye(t[0], t[1], t[2]); })
+  return Promise.all([pide('sol.js'), pide('irradiancia.js'), pide('backtracking.html'),
+                      pide('produccion.html')])
+    .then(function (t) { return self._construye(t[0], t[1], t[2], t[3]); })
     .catch(function (e) {
       self.estado = 'ausente';
       self.detalle = 'no he podido cargar el BT de ' + self.base + ': ' + e.message;

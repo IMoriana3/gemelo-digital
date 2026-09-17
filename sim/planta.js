@@ -1302,7 +1302,8 @@ TCU.prototype.paso = function (dt) {
     return;
   }
   var ang = angulos(this.p.loc, this.p.t.dia, this.p.t.hora,
-                    { pol: this.p.cfg.polBT, T: this.p.Tbt || null, nFilas: this.p.cfg.nTcu });
+                    { pol: this.p.cfg.polBT, T: this.p.Tbt || null,
+                      nFilas: this.p.cfg.nTcu, fila: this.fila || 0 });
   this.cielo(ang);            /* la irradiancia del sitio, UNA vez por paso */
   this.solar = { real: ang.real, bt: ang.bt, zen: ang.sol.zen * R2D, az: ang.sol.az * R2D, dia: ang.dia };
   /* el orden importa: primero se LEEN las entradas (medida analógica y línea binaria),
@@ -1507,6 +1508,20 @@ function Planta(cfg) {
        venía dando (su fórmula plana era esa misma, medido: 0,0000° de
        separación en llano). */
     polBT: cfg.polBT || 'pairwise',
+    /* EL TERRENO. `cotas` es el nombre del levantamiento del hermano ('ayora',
+       'sanjose') o null para la planta llana de siempre. Con él, cada TCU
+       recibe el ángulo de UNA LÍNEA REAL en vez de uno común: en Ayora a las
+       08:00 del 21-jun eso son 58° de reparto entre líneas (de −3° a +55°, con
+       75 de 79 por debajo de 40° y los +55 en las filas de borde, que no tienen
+       vecino que las sombree). El detalle de qué es y qué no es ese reparto
+       está en sim/bt.js, donde se arma la T. */
+    cotas: cfg.cotas || null,
+    /* …o la T YA ARMADA. En Node las cotas se leen con fs dentro del
+       constructor; en el navegador no hay fs y el fetch es asíncrono, así que
+       la página las pide antes y entrega la T hecha. Las dos rutas acaban en el
+       mismo objeto —el que arma `buildTReal` del hermano—, y el arnés carea que
+       el θ de cada equipo es el de su línea al bit por las dos. */
+    Tbt: cfg.Tbt || null,
     /* Trayectoria del ángulo calculada por el MOTOR canónico (SolarGPT, POST /tracker).
        Si está, el gemelo la EJECUTA y no calcula ni el backtracking ni la política de
        cielo cubierto: el algoritmo es de allí. Si no está, se usa el modelo del
@@ -1558,6 +1573,25 @@ function Planta(cfg) {
      ángulo que le tocaría a esta hora — si no, una planta creada a mediodía sale
      entera en posición nocturna y con desviación de 50°, o sea toda en aviso, hasta
      que la simulación tarda diez minutos en recuperarla. */
+  /* LA T DEL LEVANTAMIENTO, UNA VEZ: armarla por paso costaría lo mismo que la
+     planta entera, y la geometría no cambia con la hora. Si no hay cotas —o no
+     se pudieron leer— se queda en null y `angulos` usa la llana de siempre, que
+     es lo que este simulador ha hecho hasta hoy; y se DICE en `avisoBT`, sin
+     fingir terreno que no se ha cargado. */
+  if (this.cfg.Tbt) this.Tbt = this.cfg.Tbt;
+  if (this.cfg.cotas && BTX && BTX.listo() && !this.Tbt) {
+    this.Tbt = (typeof require === 'function' && BTX.cotasSync)
+      ? BTX.cotasSync(this.cfg.cotas, 80) : null;
+    this.avisoBT = this.Tbt ? null : (BTX.detalleCotas || 'sin cotas');
+  }
+  /* El reparto de equipos entre líneas reales: en orden, repartidos. Mismo
+     criterio que documenta sim/bt.js — la DISTRIBUCIÓN es la de verdad, la
+     identificación tracker a tracker es otro paso. */
+  if (this.Tbt && this.Tbt.nLineas > 0) {
+    var nL = this.Tbt.nLineas;
+    for (i = 0; i < this.tcus.length; i++)
+      this.tcus[i].fila = Math.min(nL - 1, Math.floor(i * nL / Math.max(1, this.tcus.length)));
+  }
   var ang0 = angulos(this.loc, this.t.dia, this.t.hora,
                      { pol: this.cfg.polBT, T: this.Tbt || null, nFilas: this.cfg.nTcu });
   for (i = 0; i < this.tcus.length; i++) {

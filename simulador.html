@@ -678,6 +678,18 @@ var traza = [];              /* histórico del día del equipo seleccionado */
 var previos = {};            /* último valor de cada registro, para el destello */
 var destellos = {};
 
+/* ── EL TERRENO DE LA PLANTA ELEGIDA ─────────────────────────────────────────
+   Las cotas son del hermano (`<planta>_cotas.json`) y solo dos plantas las
+   tienen levantadas hoy: Ayora y San José. Se piden por `fetch` ANTES de
+   construir —en el navegador no hay fs— y se guardan, que un levantamiento no
+   cambia. Sin cotas la planta se queda en la llana de siempre y se DICE en la
+   nota: no se finge terreno que no se ha cargado. */
+var TERRENO = {};
+function cargaTerreno(k) {
+  if (!k || !SIM.btListo()) return Promise.resolve(null);
+  if (Object.prototype.hasOwnProperty.call(TERRENO, k)) return Promise.resolve(TERRENO[k]);
+  return SIM.BT.cotas(k, 80).then(function (T) { TERRENO[k] = T || null; return TERRENO[k]; });
+}
 function construye() {
   var L = PLANTAS[+$('loc').value];
   P = new SIM.Planta({
@@ -696,6 +708,7 @@ function construye() {
     },
     politicaDifusa: $('polDifusa').value,
     polBT: $('polBT').value,
+    Tbt: (L && !L.lab) ? (TERRENO[L.k] || null) : null,
     estrategia: {
       activa: $('estrOn').checked, socCrit: +$('socCrit').value, winter: $('winter').checked,
       tMin: +$('tMin').value, poaMin: +$('poaMin').value,
@@ -2619,7 +2632,26 @@ function aplicaPlanta() {
   return L;
 }
 $('loc').onchange = function () {
-  aplicaPlanta();
+  var L0 = aplicaPlanta();
+  /* SÍNCRONO, y el terreno se refina después. La primera versión esperaba al
+     `fetch` de las cotas antes de construir, y con eso el cambio de planta pasó
+     a ser asíncrono: quien cambia el selector y sigue —el banco del navegador,
+     y cualquier código de la página— se quedaba viendo la planta ANTERIOR. Lo
+     cazó con cuatro rojos («el campo usa su plano, no una rejilla: 24
+     seguidores» era Fayón, la de antes).
+     Así que se construye YA con lo que haya en caché —llano la primera vez— y
+     si el levantamiento llega se rehace. La nota dice en cada momento qué
+     terreno se está usando, que es lo que evita el engaño; lo que no se puede
+     hacer es dejar la página bloqueada esperando 1 MB de cotas. */
+  tocaPlanta();
+  if (L0 && !L0.lab && !Object.prototype.hasOwnProperty.call(TERRENO, L0.k))
+    cargaTerreno(L0.k).then(function (T) {
+      if (!T) { pintaNotaBT(); return; }
+      var L1 = PLANTAS[+$('loc').value];
+      if (L1 === L0) tocaPlanta();      /* si ya cambió de planta otra vez, no se pisa */
+    });
+};
+function tocaPlanta() {
   construye();
   if (CAMPO) {
     CAMPO.bifila = $('filas').value !== 'monofila';
@@ -2643,11 +2675,23 @@ $('polBT').onchange = function () {
 };
 function pintaNotaBT() {
   var n = $('btNota'); if (!n) return;
-  n.innerHTML = SIM.btListo()
-    ? 'El algoritmo es el de <b>cobertura-zigbee/backtracking.html</b> (bloque FÍSICA PURA), ' +
-      'cargado en caliente: el gemelo no lleva backtracking propio. Las mismas nueve ' +
-      'políticas que su tarjeta de producción.'
-    : '<b>Sin backtracking:</b> ' + (SIM.BT ? SIM.BT.motivo() : 'no está sim/bt.js');
+  if (!SIM.btListo()) {
+    n.innerHTML = '<b>Sin backtracking:</b> ' + (SIM.BT ? SIM.BT.motivo() : 'no está sim/bt.js');
+    return;
+  }
+  /* Y SE DICE QUÉ TERRENO SE ESTÁ USANDO, que es la mitad del resultado: con el
+     levantamiento cada equipo recibe el ángulo de SU línea (en Ayora, 58° de
+     reparto a las 08:00 del 21-jun), y sin él todos comparten uno. */
+  var T = P && P.Tbt, hay = !!(T && T.nLineas);
+  n.innerHTML = 'El algoritmo es el de <b>cobertura-zigbee/backtracking.html</b> (bloque FÍSICA ' +
+    'PURA), cargado en caliente: el gemelo no lleva backtracking propio. Las mismas nueve ' +
+    'políticas que su tarjeta de producción.<br>' +
+    (hay
+      ? 'Terreno <b>MEDIDO</b>: ' + T.nLineas + ' líneas del levantamiento, con su pitch por vano, ' +
+        'su pendiente por pareja y el accionamiento real (' + (T.drive || '—') + '). Cada equipo ' +
+        'recibe el ángulo de <b>su línea</b>.'
+      : 'Terreno <b>LLANO</b> (esta planta no tiene levantamiento en el hermano' +
+        (P && P.avisoBT ? ': ' + P.avisoBT : '') + '), así que todos los equipos comparten θ.');
 }
 $('btnCanon2').onclick = function () { conectaCanon(); };
 ['estrOn', 'socTgt', 'socCrit', 'fcDays', 'winter', 'tMin', 'poaMin', 'motorModel'].forEach(function (id) {
@@ -2674,7 +2718,14 @@ $('btnCanon').onclick = function () {
 function arranca() {
   cargaParams();      /* ANTES de construir: la planta nace ya con los valores puestos */
   pintaParams();
-  aplicaPlanta();     /* y con los equipos de la planta seleccionada, no con los de fábrica */
+  var L0 = aplicaPlanta();   /* y con los equipos de la planta seleccionada, no con los de fábrica */
+  /* El arranque tampoco espera a las cotas, por lo mismo: la página queda usable
+     en llano y el levantamiento entra en cuanto baja, rehaciendo la planta. La
+     nota dice cuál de los dos terrenos está puesto. */
+  if (L0 && !L0.lab)
+    cargaTerreno(L0.k).then(function (T) {
+      if (T && PLANTAS[+$('loc').value] === L0) tocaPlanta(); else pintaNotaBT();
+    });
   construye();
 aplicaEstrategia();
 aplicaPoliticaDifusa();
