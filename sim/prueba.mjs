@@ -907,9 +907,10 @@ ok(!/MOT_K0\s*\+\s*K\.MOT_K1/.test(fuentePlanta) && !/K\.IDLE_W\s*:\s*K\.SLEEP_W
 /* lo que el gemelo gasta moviendo tiene que ser LO QUE DICE el módulo.
    Se le manda a mano lejos para que el paso mueva de verdad: en seguimiento normal
    el lazo pasa la mayor parte del tiempo dentro de la banda muerta y no movería. */
-function unPasoMoviendo() {
+function unPasoMoviendo(modelo) {
   const P = new SIM.Planta({ nTCU: 1, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 10, dia: 172,
-                             lat: 42.82, lon: -1.60, tz: 1 });
+                             lat: 42.82, lon: -1.60, tz: 1,
+                             motorModel: modelo || 'factiun' });
   const t = P.tcu(1);
   t.modo = SIM.MODO.MANUAL; t.manual = 40;
   const a0 = t.anguloReal;
@@ -917,7 +918,7 @@ function unPasoMoviendo() {
   return { t: t, mov: Math.abs(t.anguloReal - a0), medio: (t.anguloReal + a0) / 2,
            wh: t.energiaMotorHoy / 3600 };
 }
-const p1 = unPasoMoviendo();
+const p1 = unPasoMoviendo('factiun');
 ok(p1.mov > 0.5, 'el TCU se mueve en el paso de prueba', p1.mov.toFixed(2) + '°');
 const esperado = SIM.FISICA.consumoTCU({
   dtH: 60 / 3600, dia: true, mov: p1.mov, pos: p1.medio,
@@ -938,11 +939,66 @@ ok(SIM.FISICA.motorW(0) < SIM.FISICA.motorW(30) && SIM.FISICA.motorW(30) < SIM.F
 /* y los parámetros del motor tienen que seguir teniendo efecto a través del módulo:
    moverlos sin que el consumo cambie sería peor que no poder moverlos */
 SIM.ajusta({ MOT_K0: SIM.K_CANON.MOT_K0 / 2 });
-const p2 = unPasoMoviendo();
+const p2 = unPasoMoviendo('factiun');
 ok(p2.wh < p1.wh * 0.9, 'bajar K0 baja lo que gasta el motor, pasando por el módulo',
    p1.wh.toFixed(4) + ' → ' + p2.wh.toFixed(4) + ' Wh');
 SIM.restauraCanon();
-ok(Math.abs(unPasoMoviendo().wh - p1.wh) < 1e-12, 'y volver al canon lo devuelve exacto');
+ok(Math.abs(unPasoMoviendo('factiun').wh - p1.wh) < 1e-12, 'y volver al canon lo devuelve exacto');
+
+/* ───────── el modelo del canon (el que viene puesto de fábrica) ─────────
+   Es un ajuste POR MANIOBRA: `intercepto + k·|Δθ|`. El gemelo lo cobra a trozos,
+   un paso de simulación cada vez, así que la única comprobación que vale es que
+   la SUMA de los trozos sea la fórmula entera. Enchufarlo mal —el fijo en cada
+   paso— multiplicaba por seis lo que cuesta moverse y dejaba el campo sin
+   batería a media mañana: es el fallo que este bloque existe para no repetir. */
+ok(new SIM.Planta({ nTCU: 1, nHSU: 1 }).cfg.motorModel === 'canon',
+   'el modelo de motor que viene puesto es el del canon');
+for (const [amp, tipo] of [[2, 'bifila'], [8, 'bifila'], [55, 'bifila'], [55, 'monofila']]) {
+  const pasos = 40, trozo = amp / pasos;
+  let suma = 0;
+  for (let i = 0; i < pasos; i++) suma += SIM.FISICA.motorManiobraPaso(trozo, i === 0, tipo);
+  const entera = SIM.FISICA.motorManiobraWh(amp, tipo);
+  /* por encima del dominio del ajuste de barrido (20°) la maniobra entera usa ESE
+     ajuste y el paso no puede conocerlo: ahí lo que se comprueba es que el gemelo
+     no se invente energía, no que coincidan dos ajustes distintos. */
+  if (amp < SIM.FISICA.MOTOR_CANON.dominioMin)
+    ok(Math.abs(suma - entera) < 1e-12,
+       'la maniobra de ' + amp + '° ' + tipo + ' troceada vale lo que entera',
+       suma.toFixed(6) + ' Wh');
+  else
+    ok(suma > 0 && suma < entera,
+       'la maniobra de ' + amp + '° ' + tipo + ' troceada no se inventa el ajuste de barrido',
+       suma.toFixed(4) + ' < ' + entera.toFixed(4) + ' Wh');
+}
+ok(SIM.FISICA.motorManiobraPaso(0, false, 'bifila') === 0,
+   'un paso quieto que no arranca no le cuesta nada al motor');
+ok(Math.abs(SIM.FISICA.motorManiobraWh(55, 'bifila') - 5.8075) < 1e-9,
+   'y la maniobra entera de 55° bífila da los 5,8075 Wh del módulo canónico');
+
+/* lo mismo, pero MEDIDO EN EL GEMELO: una maniobra ENTERA —arranque, recorrido y
+   parada— con el modelo del canon puesto tiene que costar lo que dice la fórmula.
+   Entera es la palabra: a mitad de camino ha pagado solo la parte proporcional del
+   fijo, así que hay que dejarla llegar. Y por debajo de los 20° del dominio de
+   barrido, `motorManiobraWh` es el ajuste de flota, que es el que usa el paso. */
+{
+  const P = new SIM.Planta({ nTCU: 1, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 10, dia: 172,
+                             lat: 42.82, lon: -1.60, tz: 1, motorModel: 'canon' });
+  const t = P.tcu(1);
+  t.modo = SIM.MODO.MANUAL; t.manual = t.anguloReal + 5;   /* 5° < 20°: dominio de flota */
+  const a0 = t.anguloReal, e0 = t.energiaMotorHoy;
+  let pasos = 0;
+  do { P.paso(1); pasos++; } while (t.moviendo !== 0 && pasos < 600);
+  const rec = Math.abs(t.anguloReal - a0), gasto = (t.energiaMotorHoy - e0) / 3600;
+  ok(pasos < 600 && rec > 4, 'la maniobra de 5° del gemelo llega a su destino',
+     rec.toFixed(3) + '° en ' + pasos + ' pasos');
+  ok(Math.abs(gasto - SIM.FISICA.motorManiobraWh(rec, 'bifila')) < 1e-9,
+     'y lo que le cuesta es exactamente la maniobra del canon',
+     gasto.toFixed(6) + ' Wh por ' + rec.toFixed(3) + '°');
+  /* y sin pico: el fijo repartido deja la corriente donde la deja la curva medida,
+     no en los 13 A que hacían que el firmware creyera el motor calado */
+  ok(t.iMotorPico < 4000, 'sin pico de arranque inventado',
+     t.iMotorPico.toFixed(0) + ' mA de pico');
+}
 
 /* ───────── cielo cubierto (overcast) ─────────
    Las cuatro políticas de DiffuseConfig, en su módulo. Lo que se comprueba no es

@@ -64,6 +64,15 @@ const RUTA = {
   sleepW: ['sleepW'],
   vNom: ['vNom'],
   slewDps: ['e', 'SLEW_DPS'],
+  /* los dos regímenes del modelo de maniobra del canon */
+  'maniobra.dominioMin': ['MOTOR_CANON', 'dominioMin'],
+  'maniobra.eps': ['MOTOR_CANON', 'eps'],
+  'maniobra.flota.k': ['MOTOR_CANON', 'flota', 'k'],
+  'maniobra.flota.b': ['MOTOR_CANON', 'flota', 'b'],
+  'maniobra.bifila.k': ['MOTOR_CANON', 'bifila', 'k'],
+  'maniobra.bifila.b': ['MOTOR_CANON', 'bifila', 'b'],
+  'maniobra.monofila.k': ['MOTOR_CANON', 'monofila', 'k'],
+  'maniobra.monofila.b': ['MOTOR_CANON', 'monofila', 'b'],
 };
 for (const [k, v] of Object.entries(G.constantes)) {
   const ruta = RUTA[k];
@@ -75,7 +84,7 @@ for (const [k, v] of Object.entries(G.constantes)) {
   } else careo(`constante ${k} (F.${ruta.join('.')})`, v, val);
 }
 
-/* ── las tres funciones vigiladas ── */
+/* ── las funciones vigiladas ── */
 for (const c of G.casos.motorW)  careo(`motorW(${c.ang})`,  c.W, F.motorW(c.ang));
 for (const c of G.casos.heaterW) careo(`heaterW(${c.t})`,   c.W, F.heaterW(c.t));
 for (const c of G.casos.etaCharger) careo(`etaCharger(${c.G})`, c.eta, F.etaCharger(c.G));
@@ -86,6 +95,17 @@ for (const c of G.casos.consumoTCU) {
     careo(`consumoTCU[${JSON.stringify(c.in.motorModel)} mov=${c.in.mov}].${k}`,
           c.out[k], r[k]);
 }
+
+/* EL MODELO DE MANIOBRA, EN SUS DOS REGÍMENES.
+   Esto es lo que impide que el gemelo se separe del canon sin que nadie se entere:
+   los 8 barridos por encima de 20° y el ajuste de 14.759 maniobras de flota por
+   debajo. El corte lo declara el GOLDEN (`regimen`) en vez de recalcularlo aquí:
+   un arnés que reimplementa la regla que vigila no vigila nada, solo se copia a
+   sí mismo. Si el core moviera el corte, este careo se pondría rojo; si lo
+   recalculase, se movería con él en silencio. */
+for (const c of G.casos.motorManiobraWh)
+  careo(`motorManiobraWh(${c.deg}, ${c.cfg}) [${c.regimen}]`,
+        c.Wh, F.motorManiobraWh(c.deg, c.cfg));
 
 /* ── N declarado: un conjunto vacío que «no encuentra diferencias» es la
       verdad vacua, no una verificación. Con 0 casos esto revienta. ── */
@@ -101,7 +121,19 @@ if (n !== N_ESPERADO) {
 
 /* ── informe ── */
 console.log(`\nfisica.js ↔ core · ${n} careos · tolerancia ${TOL}`);
-console.log(`cobertura: ${G.cobertura.vigiladas.join(', ')}  (${G.cobertura.vigiladas.length}/7)`);
+/* el total lo dice el GOLDEN. Estuvo tecleado a `/7` y se quedó viejo en cuanto
+   `fisica.js` exportó dos funciones más: el arnés cantaba «4/7» sobre un fichero
+   de nueve, que es exactamente la mentira que la cobertura existe para no contar. */
+console.log(`cobertura: ${G.cobertura.vigiladas.join(', ')}  ` +
+            `(${G.cobertura.vigiladas.length}/${G.cobertura.n_funciones})`);
+/* y que el golden no se quede corto: si fisica.js exporta una función nueva y
+   nadie toca la cobertura, esto lo dice en vez de seguir imprimiendo un total viejo */
+{
+  const declaradas = G.cobertura.vigiladas.length + Object.keys(G.cobertura.sin_vigilar).length;
+  if (declaradas !== G.cobertura.n_funciones)
+    fallos.push(`la cobertura declara ${G.cobertura.n_funciones} funciones pero `
+              + `solo clasifica ${declaradas}: falta decir qué pasa con el resto`);
+}
 for (const [f, motivo] of Object.entries(G.cobertura.sin_vigilar))
   console.log(`   SIN VIGILAR  ${f} — ${motivo}`);
 

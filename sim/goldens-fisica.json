@@ -5,16 +5,27 @@
    "motorW",
    "heaterW",
    "etaCharger",
-   "consumoTCU"
+   "consumoTCU",
+   "motorManiobraWh"
   ],
   "sin_vigilar": {
    "cRateSafeLFP": "contraparte solo en tcu_availability (sin mergear)",
    "hotDerate": "contraparte solo en tcu_availability (sin mergear)",
-   "poaAt": "contraparte solo en tcu_availability (sin mergear)"
+   "poaAt": "contraparte solo en tcu_availability (sin mergear)",
+   "motorManiobraPaso": "trocea una maniobra en pasos de simulación y el core no tiene pasos: no hay contraparte. Que la suma de los trozos sea maneuver_energy_wh lo vigila el banco del gemelo."
   },
-  "nota": "4 de 7. Entran las otras tres cuando aterrice la absorción de tcu_availability. Un arnés que cubre la mitad sin decirlo convierte su verde en «todo careado», que es mentira."
+  "n_funciones": 9,
+  "nota": "5 de 9. Entran tres más cuando aterrice la absorción de tcu_availability; motorManiobraPaso no tiene contraparte y nunca la tendrá. Un arnés que cubre la mitad sin decirlo convierte su verde en «todo careado», que es mentira."
  },
  "constantes": {
+  "maniobra.dominioMin": 20.0,
+  "maniobra.eps": 0.05,
+  "maniobra.flota.k": 0.0447,
+  "maniobra.flota.b": 0.0901,
+  "maniobra.bifila.k": 0.0615,
+  "maniobra.bifila.b": 2.425,
+  "maniobra.monofila.k": 0.0489,
+  "maniobra.monofila.b": 1.222,
   "motor.K0": 0.0503,
   "motor.K1": 0.000845,
   "idleW": 0.64,
@@ -346,7 +357,189 @@
      "total": 0.06113725490196077
     }
    }
+  ],
+  "motorManiobraWh": [
+   {
+    "deg": 0.0,
+    "cfg": "bifila",
+    "regimen": "nulo",
+    "Wh": 0.0
+   },
+   {
+    "deg": 0.0,
+    "cfg": "monofila",
+    "regimen": "nulo",
+    "Wh": 0.0
+   },
+   {
+    "deg": 0.04,
+    "cfg": "bifila",
+    "regimen": "nulo",
+    "Wh": 0.0
+   },
+   {
+    "deg": 0.04,
+    "cfg": "monofila",
+    "regimen": "nulo",
+    "Wh": 0.0
+   },
+   {
+    "deg": 0.05,
+    "cfg": "bifila",
+    "regimen": "nulo",
+    "Wh": 0.0
+   },
+   {
+    "deg": 0.05,
+    "cfg": "monofila",
+    "regimen": "nulo",
+    "Wh": 0.0
+   },
+   {
+    "deg": 0.051,
+    "cfg": "bifila",
+    "regimen": "flota",
+    "Wh": 0.0923797
+   },
+   {
+    "deg": 0.051,
+    "cfg": "monofila",
+    "regimen": "flota",
+    "Wh": 0.0923797
+   },
+   {
+    "deg": 0.5,
+    "cfg": "bifila",
+    "regimen": "flota",
+    "Wh": 0.11245
+   },
+   {
+    "deg": 0.5,
+    "cfg": "monofila",
+    "regimen": "flota",
+    "Wh": 0.11245
+   },
+   {
+    "deg": 2.0,
+    "cfg": "bifila",
+    "regimen": "flota",
+    "Wh": 0.1795
+   },
+   {
+    "deg": 2.0,
+    "cfg": "monofila",
+    "regimen": "flota",
+    "Wh": 0.1795
+   },
+   {
+    "deg": 5.0,
+    "cfg": "bifila",
+    "regimen": "flota",
+    "Wh": 0.3136
+   },
+   {
+    "deg": 5.0,
+    "cfg": "monofila",
+    "regimen": "flota",
+    "Wh": 0.3136
+   },
+   {
+    "deg": 10.0,
+    "cfg": "bifila",
+    "regimen": "flota",
+    "Wh": 0.5370999999999999
+   },
+   {
+    "deg": 10.0,
+    "cfg": "monofila",
+    "regimen": "flota",
+    "Wh": 0.5370999999999999
+   },
+   {
+    "deg": 19.99,
+    "cfg": "bifila",
+    "regimen": "flota",
+    "Wh": 0.9836529999999998
+   },
+   {
+    "deg": 19.99,
+    "cfg": "monofila",
+    "regimen": "flota",
+    "Wh": 0.9836529999999998
+   },
+   {
+    "deg": 20.0,
+    "cfg": "bifila",
+    "regimen": "barrido",
+    "Wh": 3.655
+   },
+   {
+    "deg": 20.0,
+    "cfg": "monofila",
+    "regimen": "barrido",
+    "Wh": 2.2
+   },
+   {
+    "deg": 20.01,
+    "cfg": "bifila",
+    "regimen": "barrido",
+    "Wh": 3.655615
+   },
+   {
+    "deg": 20.01,
+    "cfg": "monofila",
+    "regimen": "barrido",
+    "Wh": 2.200489
+   },
+   {
+    "deg": 35.0,
+    "cfg": "bifila",
+    "regimen": "barrido",
+    "Wh": 4.5775
+   },
+   {
+    "deg": 35.0,
+    "cfg": "monofila",
+    "regimen": "barrido",
+    "Wh": 2.9335
+   },
+   {
+    "deg": 55.0,
+    "cfg": "bifila",
+    "regimen": "barrido",
+    "Wh": 5.807499999999999
+   },
+   {
+    "deg": 55.0,
+    "cfg": "monofila",
+    "regimen": "barrido",
+    "Wh": 3.9114999999999998
+   },
+   {
+    "deg": 90.0,
+    "cfg": "bifila",
+    "regimen": "barrido",
+    "Wh": 7.96
+   },
+   {
+    "deg": 90.0,
+    "cfg": "monofila",
+    "regimen": "barrido",
+    "Wh": 5.622999999999999
+   },
+   {
+    "deg": 110.0,
+    "cfg": "bifila",
+    "regimen": "barrido",
+    "Wh": 9.19
+   },
+   {
+    "deg": 110.0,
+    "cfg": "monofila",
+    "regimen": "barrido",
+    "Wh": 6.600999999999999
+   }
   ]
  },
- "n_casos": 58
+ "n_casos": 88
 }

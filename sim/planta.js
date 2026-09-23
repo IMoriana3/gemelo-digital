@@ -693,6 +693,8 @@ function TCU(id, planta, opts) {
   this.modo = MODO.AUTO; this.manual = 0;
   this.sp = SP.NINGUNA; this.fuenteSp = FUENTE_SP.NINGUNA; this.criterio = CRIT.NOCHE;
   this.bt = false; this.moviendo = 0;      /* −1 este · 0 parado · +1 oeste */
+  this.maniobraAmp = 0;                    /* amplitud de la maniobra en curso, en grados */
+  this.maniobraRec = 0;                    /* y lo que lleva recorrido de ella */
   /* EL ADELANTO AL SOL necesita DOS estados más, y los dos por razones medidas
      (contrato direccional 2.0.0, `solargpt_core/direction.py`):
      · `park` — el DESTINO enclavado al arrancar, que es la consigna adelantada
@@ -1192,6 +1194,15 @@ TCU.prototype.mueve = function (dt, inhibido) {
     this.anguloReal = clamp(this.anguloReal + dir * real, C.topeEste, C.topeOeste);
   }
   var mov = Math.abs(this.anguloReal - antes);
+  /* ¿ARRANCA EL MOTOR EN ESTE PASO? Es el paso en que se paga el coste fijo de la
+     maniobra, así que la pregunta tiene que ser exactamente «¿venía parado o venía
+     en el otro sentido?». `this.moviendo` todavía vale lo del paso anterior: todas
+     las ramas que lo ponen a 0 más arriba RETORNAN. Una inversión sin pasar por
+     cero sí cuenta como arranque, porque es otra maniobra. */
+  var arrancaMotor = (this.moviendo === 0 || this.moviendo !== dir);
+  /* y CUÁNTO va a durar: la amplitud planificada al arrancar, que es lo que reparte
+     el coste fijo del modelo del canon sin inventarse un pico de potencia */
+  if (arrancaMotor) { this.maniobraAmp = Math.abs(destino - this.angulo); this.maniobraRec = 0; }
   this.moviendo = dir;                    /* está MANDADO a moverse, se mueva o no */
   this.dirUlt = dir;                      /* y el sentido se recuerda para la próxima parada */
 
@@ -1223,6 +1234,11 @@ TCU.prototype.mueve = function (dt, inhibido) {
      copiado íntegro de bateria.html por el generador). Este simulador decide cuánto se
      mueve y en qué ángulo; cuántos Wh cuesta eso lo dice el canon. */
   wh = consumoTCU({ dtH: dtH, dia: true, mov: efec, pos: medio,
+                    arranca: arrancaMotor, ampManiobra: this.maniobraAmp,
+                    recManiobra: this.maniobraRec,
+                    /* el modelo del canon distingue bífila de monofila: son dos
+                       ajustes medidos distintos, no el mismo con otro número */
+                    bifila: this.p.cfg.bifila !== false,
                     motorModel: this.p.cfg.motorModel, calefactada: false, tAmb: 20,
                     k0: K.MOT_K0, k1: K.MOT_K1,
                     vNom: K.V_NOM, slew: K.SLEW_DPS }).motor;
@@ -1232,6 +1248,7 @@ TCU.prototype.mueve = function (dt, inhibido) {
   if (this.ejeAtascado) wh = (this.p.cfg.iCalado / 1000) * this.vBat * dtH;
   else if (this.ejeDuro) wh = (this.p.cfg.iDuro / 1000) * this.vBat * dtH;
 
+  this.maniobraRec += mov;                 /* para repartir el fijo del arranque */
   this.energiaMotorHoy += wh * 3600; this.energiaMotorTotal += wh * 3600;   /* J */
   this.vMotor = this.vBat * 1000;
   var w = dtH > 0 ? wh / dtH : 0;
@@ -1688,7 +1705,10 @@ function Planta(cfg) {
     perfil: cfg.perfil || F.perfilPorDefecto, /* alimentación y batería (SP · STRING · AC) */
     /* modelo de consumo del motor: 'factiun' (Wh/° medidos) o los mA medios de
        del estudio a 25,6 V (2500 / 3250 / 4000), como en bateria.html */
-    motorModel: cfg.motorModel || 'factiun',
+    /* POR DEFECTO, EL DEL CANON. El `factiun` de antes cobra por grado y no sabe
+       lo que cuesta arrancar, así que diez pasos de 2° le salían igual que uno de
+       20; con el del canon, no. Sigue elegible para comparar. */
+    motorModel: cfg.motorModel || 'canon',
     estrategiaViento: cfg.estrategiaViento || 'B2',   /* A1 · A2 · B1 · B2 */
     /* averías por tasa: apagadas salvo que se pidan */
     averias: cfg.averias || { activo: false, comsMtbfH: 0, comsMin: 10,
