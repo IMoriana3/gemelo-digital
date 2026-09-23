@@ -451,6 +451,14 @@ const r = await pg.evaluate(async () => {
      para ver que NO se ha enterado nadie, y uno de 30 s -- una vuelta entera-- para ver
      que ya se han enterado todos. */
   P.meteo.viento = 2; P.paso(30); pintaTodo();            /* todos al dia, en calma */
+  /* CADA SEGUIDOR A SU LARGO. Se pintaban todos de 34 m y en una misma planta conviven
+     tallas de 9,9 a 82,4 m, asi que los cortos se metian dentro del vecino. */
+  o.largos = {
+    escalas: CAMPO.escalas ? [...new Set([...CAMPO.escalas].map((x) => +x.toFixed(3)))] : [],
+    nota: ($$('largoNota') || {}).textContent || '',
+    fuente: (window.PLANTAS[+$$('loc').value] || {}).largoFuente || null
+  };
+
   o.poleo = { calma: celda('lo sabe el tcu') };
   P.meteo.viento = 20;                                    /* 72 km/h de golpe */
   P.paso(1); pintaTodo();
@@ -788,6 +796,15 @@ ok(/⚠/.test(BA.soplando) && /km\/h/.test(BA.soplando),
    `con el viento por encima del umbral la bandera avisa, no cuenta: «${BA.soplando}»`);
 ok(/suelta en \d+:\d\d/.test(BA.amainado),
    `y en cuanto amaina arranca la cuenta atrás: «${BA.amainado}»`);
+const LG = r.largos;
+ok(LG.escalas.length >= 1 && LG.escalas.every((x) => x > 0.05 && x < 4),
+   `cada seguidor se escala a SU largo: ${LG.escalas.length} talla(s) en el campo · ` +
+   LG.escalas.map((x) => x.toFixed(2) + '×').join(' '));
+ok(LG.fuente === 'ninguna' ? LG.escalas.join() === '1' : true,
+   'y donde el DWG no da la talla se pinta el canónico, sin inventar');
+ok(/Largo:/.test(LG.nota),
+   `y la pantalla DICE de qué largo está pintando: «${LG.nota.slice(0, 90)}»`);
+
 const PO = r.poleo;
 ok(/hace \d+ s/.test(PO.calma),
    `la teja dice cuándo alcanzó la NCU a este equipo (lastComm 29500): «${PO.calma}»`);
