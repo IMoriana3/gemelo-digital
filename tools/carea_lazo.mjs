@@ -102,12 +102,12 @@ console.log('  núcleo: ' + ruta);
 
 for (const [nombre, f] of Object.entries(SERIES)) {
   const t = tcuLimpio();
-  const dead = t.cfgTcu.dbPulsosOeste / t.sensor.pulsosGrado;   /* SU margen, en pulsos */
+  const dead = t.cfgTcu.dbPulsos / t.sensor.pulsosGrado;        /* SU margen, en pulsos (41060) */
   const n = 120, cons = [];
   for (let k = 0; k < n; k++) cons.push(f(k));
   t.anguloReal = cons[0]; t.angulo = cons[0];
   const gem = [];
-  for (const c of cons) { t.mide(1); t.objetivo = c; t.sp = SIM.SP.NINGUNA; t.criterio = SIM.CRIT.SEGUIMIENTO; t.mueve(1, false); gem.push(t.anguloReal); }
+  for (const c of cons) { t.mide(1); t.objetivo = c; t.sp = SIM.SP.NINGUNA; t.criterio = SIM.CRIT.SEGUIMIENTO; t.bt = false; t.mueve(1, false); gem.push(t.anguloReal); }
 
   const loop = { deadbandDeg: dead, slewDegS: SIM.K ? SIM.K.SLEW_DPS : 0.17, maxAngle: 55, modo: 'libre', cicloSeg: 1 };
   if (!(loop.slewDegS > 0)) loop.slewDegS = 0.17;
@@ -138,11 +138,11 @@ for (const [nombre, f] of Object.entries(SERIES)) {
    una velocidad distinta, o sea una ley distinta. */
 {
   const t = tcuLimpio();
-  const dead = t.cfgTcu.dbPulsosOeste / t.sensor.pulsosGrado;
+  const dead = t.cfgTcu.dbPulsos / t.sensor.pulsosGrado;
   const cons = []; for (let k = 0; k < 120; k++) cons.push(k < 60 ? -40 - 0.2 * k : 0);
   t.anguloReal = -40; t.angulo = -40; t.sensor.filtrado = -40; t.sensor.crudo = -40;
   const gem = [];
-  for (const c of cons) { t.mide(1); t.objetivo = c; t.sp = SIM.SP.NINGUNA; t.criterio = SIM.CRIT.SEGUIMIENTO; t.mueve(1, false); gem.push(t.anguloReal); }
+  for (const c of cons) { t.mide(1); t.objetivo = c; t.sp = SIM.SP.NINGUNA; t.criterio = SIM.CRIT.SEGUIMIENTO; t.bt = false; t.mueve(1, false); gem.push(t.anguloReal); }
   let th = -40, dir = 0, park = null, dirUlt = 0; const nuc = [];
   for (const c of cons) {
     const r = C.step(th, c, 1, { deadbandDeg: dead, slewDegS: 0.17, maxAngle: 55, modo: 'libre', cicloSeg: 1 },
@@ -189,11 +189,11 @@ for (const [nombre, f] of Object.entries(SERIES)) {
    histéresis y por tanto sin adelanto. */
 {
   const t = tcuLimpio();
-  const dead = t.cfgTcu.dbPulsosOeste / t.sensor.pulsosGrado;
+  const dead = t.cfgTcu.dbPulsos / t.sensor.pulsosGrado;
   const cons = []; for (let k = 0; k < 120; k++) cons.push(k < 30 ? 0.05 * k : 1.5);
   t.anguloReal = 0; t.angulo = 0;
   const gem = [];
-  for (const c of cons) { t.mide(1); t.objetivo = c; t.sp = SIM.SP.NINGUNA; t.criterio = SIM.CRIT.SEGUIMIENTO; t.mueve(1, false); gem.push(t.anguloReal); }
+  for (const c of cons) { t.mide(1); t.objetivo = c; t.sp = SIM.SP.NINGUNA; t.criterio = SIM.CRIT.SEGUIMIENTO; t.bt = false; t.mueve(1, false); gem.push(t.anguloReal); }
   let th = 0, dir = 0, park = null, dirUlt = 0; const sinAdelanto = [];
   for (const c of cons) {
     const r = C.step(th, c, 1, { deadbandDeg: 0, slewDegS: 0.17, maxAngle: 55, modo: 'libre', cicloSeg: 1 },
