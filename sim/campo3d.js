@@ -298,10 +298,12 @@ Campo3D.prototype.construye = function (P) {
       this.rots[i] = rot;
       this.medios[i] = L[i][3] ? 1 : 0;
       /* ── EL LARGO DE CADA UNO ────────────────────────────────────────────────
-         Aquí se pintaban TODOS del largo canónico, y eso no es un plano: es un
-         dibujo. En una misma planta conviven tallas muy distintas —Polvorín tiene
-         seis, de 9,9 a 82,4 m— así que los cortos salían casi cuatro veces más
-         largos de lo que son y se metían dentro del vecino. Se veía, y con razón.
+         Aquí se pintaban TODOS del largo canónico —`D.span`, 64,70 m con los 28
+         módulos por ala de El Burgo y Ayora—, y eso no es un plano: es un dibujo. En
+         una misma planta conviven tallas muy distintas —Polvorín tiene seis, de 9,9 a
+         82,4 m— así que los cortos salían hasta SEIS VECES Y MEDIA más largos de lo
+         que son y se metían dentro del vecino. Se veía, y con razón: medido sobre las
+         posiciones del DWG, con 64,70 m se solapan en ONCE de las doce plantas.
          El sexto campo del layout es el largo en metros, medido en el DWG o derivado
          de sus constantes; `null` cuando no se sabe, y entonces se pinta el canónico
          (`escala` 1) y la interfaz lo dice. */
