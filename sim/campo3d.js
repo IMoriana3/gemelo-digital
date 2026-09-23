@@ -290,13 +290,26 @@ Campo3D.prototype.construye = function (P) {
     var cN = (mnN + mxN) / 2, cE = (mnE + mxE) / 2;
     this.rots = new Float32Array(this.n);
     this.medios = new Uint8Array(this.n);
+    this.escalas = new Float32Array(this.n);
     for (i = 0; i < L.length; i++) {
       x = -(L[i][0] - cN);                     /* norte → −X */
       z = -(L[i][1] - cE);                     /* este  → −Z */
       rot = (L[i][2] || 0) * D2R;
       this.rots[i] = rot;
       this.medios[i] = L[i][3] ? 1 : 0;
-      this.bases.push(new T.Matrix4().makeRotationY(-rot).setPosition(x, hEje, z));
+      /* ── EL LARGO DE CADA UNO ────────────────────────────────────────────────
+         Aquí se pintaban TODOS del largo canónico, y eso no es un plano: es un
+         dibujo. En una misma planta conviven tallas muy distintas —Polvorín tiene
+         seis, de 9,9 a 82,4 m— así que los cortos salían casi cuatro veces más
+         largos de lo que son y se metían dentro del vecino. Se veía, y con razón.
+         El sexto campo del layout es el largo en metros, medido en el DWG o derivado
+         de sus constantes; `null` cuando no se sabe, y entonces se pinta el canónico
+         (`escala` 1) y la interfaz lo dice. */
+      var Lg = L[i][5];
+      this.escalas[i] = (Lg != null && Lg > 0) ? (Lg / largo) : 1;
+      this.bases.push(new T.Matrix4().makeRotationY(-rot)
+                        .multiply(new T.Matrix4().makeScale(this.escalas[i], 1, 1))
+                        .setPosition(x, hEje, z));
       this.pos.push({ x: x, z: z });
     }
     this._ext = { x: (mxN - mnN) + largo, z: (mxE - mnE) + pitch + 4 };
@@ -305,6 +318,7 @@ Campo3D.prototype.construye = function (P) {
     var porLinea = Math.max(1, Math.round(Math.sqrt(this.n * pasoFila / largo * 2.2)));
     var lineas = Math.ceil(this.n / porLinea);
     this.rots = null; this.medios = null;
+    this.escalas = new Float32Array(this.n); this.escalas.fill(1);
     for (i = 0; i < this.n; i++) {
       var c = i % porLinea, f = Math.floor(i / porLinea);
       x = (c - (porLinea - 1) / 2) * (largo + 6);
@@ -343,6 +357,23 @@ Campo3D.prototype.construye = function (P) {
       return n;
     });
   }
+  /* Lo que SÍ se estira con el largo: el tubo de par y lo que va pegado a él a lo
+     largo. Todo lo demás conserva su tamaño. La lista es corta a propósito —es más
+     seguro enumerar lo que se estira que lo que no— y si un modelo nuevo trae una
+     pieza continua sin declarar, sale del tamaño canónico, que es el fallo benigno. */
+  var ESTIRA = { tube: 1, tubecap: 1, mesa: 1, panel: 1, glass: 1, cell: 1,
+                 eje: 1, ejetrans: 1, torque: 1 };
+  /* la contra-escala de cada seguidor, cacheada: en una planta hay dos o tres tallas,
+     no setecientas, así que esto son tres matrices y no una por equipo */
+  var _inv = {};
+  function contra(sx) {
+    if (!(sx > 0) || Math.abs(sx - 1) < 1e-6) return null;
+    var k = sx.toFixed(5);
+    if (!_inv[k]) _inv[k] = new T.Matrix4().makeScale(1 / sx, 1, 1);
+    return _inv[k];
+  }
+  yo._contra = contra;
+
   function monta(plan, dz, idxs) {
     if (!idxs.length) return;
     plan.forEach(function (p) {
@@ -357,7 +388,14 @@ Campo3D.prototype.construye = function (P) {
       yo.grupoPlanta.add(im);
       /* la traslación a SU viga va antes del giro: cada tubo bascula sobre su propio
          eje, no sobre el del vecino */
+      /* ESTIRAR EL TUBO, NO LA CAJA. La escala del seguidor va en `bases`, así que
+         la coge TODO — y una TCU estirada al doble no es un seguidor más largo, es un
+         seguidor mal dibujado. Las piezas que no son continuas a lo largo del eje
+         —la TCU, la antena, el seccionador, el motor— se contra-escalan para
+         conservar su tamaño; lo que sí cambia es DÓNDE caen, que es lo correcto:
+         viajan con el tubo. */
       var pz = { im: im, locals: p.locals, spin: !!p.spin, idxs: idxs,
+                 key: p.key, dura: !ESTIRA[p.key],
                  mT: dz ? new T.Matrix4().makeTranslation(0, 0, dz) : null };
       yo.piezas.push(pz);
       /* Las que NO basculan —corona, bracket, poste— están donde están: se escriben aquí
@@ -371,6 +409,10 @@ Campo3D.prototype.construye = function (P) {
             mm.copy(yo.bases[idxs[z2]]);
             if (pz.mT) mm.multiply(pz.mT);
             mm.multiply(p.locals[l2]);
+            if (pz.dura) {
+              var ci = contra(yo.escalas ? yo.escalas[idxs[z2]] : 1);
+              if (ci) mm.multiply(ci);
+            }
             im.setMatrixAt(kk++, mm);
           }
         }
@@ -544,6 +586,10 @@ Campo3D.prototype.actualiza = function (P) {
           if (pz.mT) this._acc.multiply(pz.mT);     /* a su viga, antes de bascular */
           if (pz.spin) this._acc.multiply(this._rx);
           this._acc.multiply(pz.locals[l]);
+          if (pz.dura && this._contra) {
+            var ci2 = this._contra(this.escalas ? this.escalas[i] : 1);
+            if (ci2) this._acc.multiply(ci2);
+          }
           pz.im.setMatrixAt(k++, this._acc);
         }
       }

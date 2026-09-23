@@ -78,6 +78,63 @@ for (const f of fs.readdirSync(COB).filter((x) => x.endsWith('_layout.json')).so
   const T = L.trackers || [];
   if (!T.length) { avisos.push(`${k}: el layout no trae trackers`); continue; }
 
+  /* ── EL LARGO DE CADA SEGUIDOR ────────────────────────────────────────────────
+     No todos miden lo mismo, ni de lejos: el DWG de Polvorín trae SIETE tallas, de
+     9,9 a 82,4 m, y una monofila suelta en una planta bífila. Pintarlas todas del
+     largo canónico es lo que mete unas dentro de otras.
+
+     Tres fuentes, en este orden:
+
+       1. MEDIDA — `mesa.tipos[tp].largo`, sacado del propio DWG. Manda siempre.
+       2. DERIVADA — de los módulos que lleva ese seguidor y las constantes del DWG
+          de esa planta (`modW`, `gapMod`, `gapDrive`):
+
+              largo = n·modW + (n−2)·gapMod + gapDrive
+
+          con `n` = módulos A LO LARGO DEL EJE. Careada contra las ONCE tallas que sí
+          están medidas (Polvorín 7, Panbianco 2, Benante 2): cuadra al milímetro en
+          las once.
+       3. NINGUNA — se emite `null` y el 3D pinta el canónico diciéndolo.
+
+     De dónde sale `n`, y por qué hacen falta las dos vías: el nombre del tipo es una
+     CAPA DEL DWG, no una fórmula, y cada planta la escribe a su manera.
+       · `1V62`, `1V28` … → n es el número: los módulos del eje. (panbianco, benante,
+         ayora, fayón, páramo)
+       · `31+31`, `24+23x3` … → ahí el nombre NO da n de forma fiable —probado: falla
+         en uno de siete, `7+8x3` sale 15 y son 16— así que n sale de `mods`, que es
+         el total de la bífila: n = ceil(mods/2), o `mods` si es monofila. (polvorín)
+     Las dos vías están careadas contra las medidas; ninguna se usa a ciegas. */
+  const nEje = (L, t) => {
+    const tp = String(t.tp || '');
+    const m1 = tp.match(/(?:^|\s)1V(\d+)/i);          /* «1V62», «Exterior 1V28» */
+    if (m1) return +m1[1];
+    if (t.mods != null) {
+      const mono = /mono/i.test(tp) ||
+                   !!(L.mesa && L.mesa.tipos && L.mesa.tipos[tp] && L.mesa.tipos[tp].mono);
+      return mono ? +t.mods : Math.ceil(+t.mods / 2);
+    }
+    return null;
+  };
+  const largoDe = (L, t) => {
+    const m = L.mesa || {}, tp = String(t.tp || '');
+    const med = m.tipos && m.tipos[tp] && m.tipos[tp].largo;
+    if (med != null) return +(+med).toFixed(2);        /* medido en el DWG: manda */
+    if (m.modW == null) return null;                   /* sin constantes no se inventa */
+    const n = nEje(L, t);
+    if (!n) return null;
+    return +(n * m.modW + (n - 2) * (m.gapMod || 0) + (m.gapDrive || 0)).toFixed(2);
+  };
+  const fuenteLargo = (L) => {
+    const T2 = L.trackers || [];
+    const conMedida = T2.filter((t) => L.mesa && L.mesa.tipos &&
+                                       L.mesa.tipos[String(t.tp || '')] &&
+                                       L.mesa.tipos[String(t.tp || '')].largo != null).length;
+    const con = T2.filter((t) => largoDe(L, t) != null).length;
+    if (!con) return 'ninguna';
+    if (con < T2.length) return 'parcial';
+    return conMedida === T2.length ? 'medida' : 'derivada';
+  };
+
   /* el tipo lo escribe cada layout a su manera: «medio», «Medio», «Medio sin rotula».
      Lo único que importa aquí es si la mesa es de media longitud. */
   const esMedio = (t) => /medio/i.test(String(t.t || ''));
@@ -135,11 +192,20 @@ for (const f of fs.readdirSync(COB).filter((x) => x.endsWith('_layout.json')).so
          : (g.pasoEntreFilas != null ? g.pasoEntreFilas : null),
     filaZ: (L.mesa && L.mesa.filaZ) != null ? L.mesa.filaZ
          : (g.filaZ != null ? g.filaZ : null),
-    /* posiciones: NORTE, ESTE, rotación, medio (0/1) y a qué NCU pertenece. Redondeadas
-       a un decimal — un centímetro no cambia dónde cae una sombra y el fichero se queda
-       en la cuarta parte. */
+    /* de dónde sale el largo de cada seguidor en esta planta: medido, derivado o
+       ninguno. Lo consume el 3D para no pintarlos todos iguales, y la interfaz para
+       decirlo cuando no se sabe. */
+    largoFuente: fuenteLargo(L),
+    /* posiciones: NORTE, ESTE, rotación, medio (0/1), NCU y LARGO en metros.
+       Redondeadas a un decimal — un centímetro no cambia dónde cae una sombra y el
+       fichero se queda en la cuarta parte.
+
+       EL LARGO ES EL SEXTO CAMPO, y es la diferencia entre un plano y un dibujo: en la
+       misma planta conviven tallas de 9,9 a 82,4 m (Polvorín, siete), y pintarlas todas
+       del largo canónico mete unas dentro de otras. Se emite `null` cuando no se puede
+       saber, que es mejor que un número inventado: el 3D lo pinta canónico Y LO DICE. */
     pos: T.map((t) => [+(+t.n).toFixed(1), +(+t.x).toFixed(1), +(+(t.rot || 0)).toFixed(1),
-                       esMedio(t) ? 1 : 0, t.ncu || 1])
+                       esMedio(t) ? 1 : 0, t.ncu || 1, largoDe(L, t)])
   });
 }
 
