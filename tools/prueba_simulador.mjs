@@ -192,10 +192,30 @@ ok(!arranque.esReal || arranque.tcuCasilla === arranque.tcuLayout,
    `al ABRIR ya está configurada la planta seleccionada: ${arranque.planta} → ` +
    `${arranque.tcuCasilla} TCU en la casilla (layout: ${arranque.tcuLayout})`);
 
+/* Y EL MODELO DE MOTOR QUE MUESTRA LA CASILLA ES EL QUE CORRE POR DENTRO.
+   La casilla no elige: refleja. Si el motor cambia su defecto y la casilla se queda
+   con el suyo, la página dice que simula una cosa y simula otra, y es un número de
+   consumo —nadie lo nota mirando—. Además la página tiene que saber leer los dos
+   tipos de valor: los dos modelos con nombre van como cadena y los mA del estudio
+   como número, y `+'canon'` es NaN. */
+const motor = await pg.evaluate(() => {
+  const sel = document.getElementById('motorModel');
+  const lee = (v) => (/^(canon|factiun)$/.test(v) ? v : +v);
+  const leidos = [...sel.options].map((o) => lee(o.value));
+  return { casilla: sel.value, motor: P.cfg.motorModel,
+           opciones: [...sel.options].map((o) => o.value),
+           sinNaN: leidos.every((v) => typeof v === 'string' || Number.isFinite(v)) };
+});
+ok(motor.casilla === motor.motor,
+   'la casilla de consumo de motor dice el modelo que de verdad corre',
+   `casilla ${motor.casilla} · motor ${motor.motor}`);
+ok(motor.sinNaN, 'y la página sabe leer las cinco opciones sin sacar NaN',
+   motor.opciones.join(' · '));
+
 /* A PARTIR DE AQUÍ, UNA ESCENA DE REFERENCIA. Las medidas de cadencia y de sombra se
    hacen sobre una planta pequeña y siempre la misma: si se miden sobre la que toque
    estar seleccionada, el día que la lista cambie de orden los números cambian solos.
-   Con Ayora (754 uds) el render por software tarda tanto que en 1,5 s no caben ni cuatro
+   Con Ayora (751 uds) el render por software tarda tanto que en 1,5 s no caben ni cuatro
    frames y contar renders deja de significar nada. */
 await pg.evaluate(() => {
   const s = document.getElementById('loc');

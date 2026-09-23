@@ -273,6 +273,7 @@
           <input type="range" id="poaMin" min="0" max="250" value="50"></div>
         <div class="fld"><label>Consumo del motor</label>
           <select id="motorModel">
+            <option value="canon">Canon · por maniobra (0,0901 + 0,0447·|Δθ|; barrido sobre 20°)</option>
             <option value="factiun">Factiun · Wh/° medidos (0,0503 + 0,000845·|θ|)</option>
             <option value="2500">2500 mA medio @25,6 V (estudio de disponibilidad)</option>
             <option value="3250">3250 mA medio @25,6 V (estudio de disponibilidad)</option>
@@ -715,7 +716,7 @@ function construye() {
     nRep: Math.max(0, +$('nRep').value || 0),
     grupos: +$('nGrup').value || 4,
     perfil: $('perfil').value,
-    motorModel: $('motorModel').value === 'factiun' ? 'factiun' : +$('motorModel').value,
+    motorModel: /^(canon|factiun)$/.test($('motorModel').value) ? $('motorModel').value : +$('motorModel').value,
     estrategiaViento: $('estrViento').value,
     averias: {
       activo: $('avOn').checked,
@@ -778,7 +779,7 @@ function aplicaEstrategia(manual) {
     E.fcDays = +$('fcDays').value;
   }
   var mm = $('motorModel').value;
-  P.cfg.motorModel = mm === 'factiun' ? 'factiun' : +mm;
+  P.cfg.motorModel = /^(canon|factiun)$/.test(mm) ? mm : +mm;
   var canon = E.politicaAuto ? '' : ' <b style="color:var(--warn)">· a mano</b>';
   $('socTgtV').innerHTML = E.socTgt + ' %' + canon;
   $('socCritV').textContent = E.socCrit + ' %';

@@ -135,6 +135,84 @@ var FISICA = {
 var D2R = Math.PI / 180;
 var JEITA_T3 = FISICA.e.JEITA_T3, JEITA_T4 = FISICA.e.JEITA_T4, ALBEDO = FISICA.e.ALBEDO;
 var K0 = FISICA.motor.K0, K1 = FISICA.motor.K1;
+
+/* ═══════ EL MODELO DE MOTOR DEL CANON (solargpt_core/motor_energy.py) ═══════
+   Hasta aquí el gemelo usaba `Wh = Δθ·(K0 + K1·|θ|)`: todo proporcional al
+   recorrido, SIN coste por maniobra. Con eso, diez movimientos de 2° cuestan lo
+   mismo que uno de 20, y el gemelo no puede ver lo que cuesta ARRANCAR — que es
+   precisamente lo que separa una política de otra.
+
+   El canon lo tiene medido, y en DOS regímenes que no se pueden mezclar:
+
+     · BARRIDOS COMPLETOS — 8 ensayos de ±55° en El Burgo, corriente a 1 Hz con
+       posición sincronizada (`Consumos_motor_02.xlsx`, abril–agosto 2025):
+           bífila    E = 2,425 + 0,0615·|Δθ|   Wh
+           monofila  E = 1,222 + 0,0489·|Δθ|   Wh
+       Válido SOLO para |Δθ| ≥ 20°, y el propio módulo lo grita: ese término
+       independiente NO es el coste de un arranque, sale de barridos de 110°.
+
+     · MANIOBRAS REALES DE FLOTA — 14.759 maniobras, El Burgo, 106 TCU:
+           E = 0,0901 + 0,0447·|Δθ|   Wh
+
+   La diferencia NO es un matiz: el intercepto del barrido es VEINTISIETE VECES
+   el de la flota. `maneuver_energy_wh` del core LANZA por debajo de 20° para que
+   nadie extrapole sin enterarse.
+
+   EL GEMELO VIVE EN EL RÉGIMEN PEQUEÑO: sus pasos son de dos márgenes, ~2°. Coger
+   la configuración de barrido sería meter un error de 27× en exactamente el
+   movimiento que más hace. Se usa el ajuste que corresponde a cada amplitud, con
+   el corte del canon. */
+var MOTOR_CANON = {
+  dominioMin: 20.0,        /* DOMINIO_MIN_DEG: por debajo manda el ajuste de flota */
+  eps: 0.05,               /* _EPS_DEG: ruido de encoder, no una maniobra */
+  flota:    { k: 0.0447, b: 0.0901 },   /* 14.759 maniobras reales */
+  bifila:   { k: 0.0615, b: 2.425 },    /* 8 barridos de ±55° */
+  monofila: { k: 0.0489, b: 1.222 }
+};
+/* Lo que cuesta ESTE PASO de una maniobra. El ajuste del canon es POR MANIOBRA
+   (`intercepto + k·|Δθ|`) y el gemelo la recorre a trozos, así que el fijo hay que
+   REPARTIRLO en proporción a lo que avanza cada paso —`ampTotal` es la amplitud
+   planificada al arrancar—. Soltarlo entero en el paso del arranque integra igual
+   pero miente en la POTENCIA: 0,0901 Wh en 1 s son 324 W, 13,5 A a 26 V, y el
+   firmware del TCU lo lee como motor calado y enclava el eje. Medido: el banco se
+   puso rojo en los cuatro casos de velocidad con el eje enclavado a los 0,17°.
+   Repartido sale ~55 W en un paso de seguimiento, que es el orden de la curva.
+   Sin `ampTotal` se cae al reparto de golpe, que es lo correcto si el paso ES la
+   maniobra entera. */
+function motorManiobraPaso(movPaso, arranca, cfg, ampTotal, recPrevio){
+  var d = Math.abs(movPaso);
+  if (!(d > 0) && !arranca) return 0;
+  /* el régimen lo decide la AMPLITUD de la maniobra, y desde un paso no se ve la
+     de barrido con garantías: se usa el de flota, que es donde vive el gemelo
+     (pasos de ~2°). El de barrido se reserva para `motorManiobraWh`, que sí recibe
+     la maniobra entera. `cfg` se acepta para que las dos funciones tengan la misma
+     firma, aunque por debajo de 20° el ajuste de flota no distingue bífila. */
+  var a = MOTOR_CANON.flota;
+  var fijo;
+  if (ampTotal > 0) {
+    /* la fracción que le toca a ESTE paso, contada sobre lo ya recorrido: así el
+       arranque se paga UNA vez y nunca más de una, aunque el eje acabe recorriendo
+       más de lo planificado (el destino se calcula con el ángulo MEDIDO, que lleva
+       offset y ruido, y el recorrido real no le cuadra al milímetro). Sin este
+       tope se le cobraban 1,047 arranques a una maniobra de 6,29° planificada en
+       6,01°: energía inventada por culpa del inclinómetro. */
+    var r0 = Math.min(1, Math.max(0, (recPrevio || 0)) / ampTotal);
+    var r1 = Math.min(1, (Math.max(0, (recPrevio || 0)) + d) / ampTotal);
+    fijo = a.b * Math.max(0, r1 - r0);
+  } else fijo = arranca ? a.b : 0;
+  return fijo + a.k * d;
+}
+/* Energía de UNA maniobra entera, en Wh. `cfg` solo manda por encima del dominio
+   medido; por debajo manda la flota, que es donde está medido el régimen pequeño.
+   Δθ = 0 no consume: una maniobra que no ocurre no cuesta. */
+function motorManiobraWh(deltaDeg, cfg){
+  var d = Math.abs(deltaDeg);
+  if (!(d > MOTOR_CANON.eps)) return 0;
+  var a = (d >= MOTOR_CANON.dominioMin)
+        ? MOTOR_CANON[cfg === 'monofila' ? 'monofila' : 'bifila']
+        : MOTOR_CANON.flota;
+  return a.b + a.k * d;
+}
 /* la curva de motor MEDIDA (Consumos motor_02.xlsx, TCU 33), tal cual la trae bateria.html */
 var MOTOR_ANG = [0,2.5,7.5,12.5,17.5,22.5,27.5,32.5,37.5,42.5,47.5,52.5,55];
 var MOTOR_MA = [1500,1588,1600,1714,1860,1975,2135,2277,2409,2497,2651,2740,2800];
@@ -241,6 +319,13 @@ function consumoTCU(o){
   if(o.mov>0.01){
     var slewH=o.mov/slew/3600;                              /* tiempo real de giro (h) */
     if(o.motorModel==='curva')      motorWh=motorW(o.pos)*Math.min(slewH,o.dtH);
+    /* EL DEL CANON: coste por maniobra más término lineal. Es el único de los
+       cuatro que sabe lo que cuesta ARRANCAR. Y `mov` es lo que se ha movido en
+       ESTE paso de simulación, no la maniobra: cobrar el intercepto aquí sin más
+       lo cobraría cada segundo de giro —1,2 Wh en vez de 0,18 para un paso de 2°,
+       y el campo sin batería a media mañana—. De repartirlo se encarga
+       `motorManiobraPaso` con `ampManiobra` y `recManiobra`. */
+    else if(o.motorModel==='canon')  motorWh=motorManiobraPaso(o.mov, o.arranca, o.bifila===false?'monofila':'bifila', o.ampManiobra, o.recManiobra);
     else if(o.motorModel==='factiun') motorWh=o.mov*(k0+k1*Math.abs(o.pos));
     else                            motorWh=(o.motorModel/1000)*vNom*Math.min(slewH,o.dtH);
   }
@@ -259,6 +344,9 @@ FISICA.e0De = e0De;
 FISICA.poaAt = poaAt;
 FISICA.motorW = motorW;
 FISICA.consumoTCU = consumoTCU;
+FISICA.motorManiobraWh = motorManiobraWh;
+FISICA.motorManiobraPaso = motorManiobraPaso;
+FISICA.MOTOR_CANON = MOTOR_CANON;
 
 if (typeof window !== "undefined") window.FISICA = FISICA;
 if (typeof module !== "undefined") module.exports = FISICA;
