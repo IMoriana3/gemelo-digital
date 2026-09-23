@@ -222,3 +222,61 @@ jobs:
         with: { node-version: '22' }
       - name: ¿se han movido los hermanos desde el pin?
         run: node tools/deriva_pines.mjs --owner "${{ github.repository_owner }}"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # LA PUERTA. Un solo check que mira a todos los demás.
+  #
+  # POR QUÉ. Hasta ahora este workflow tenía cuatro jobs y NINGUNA puerta: cada
+  # uno era su propio check, así que lo que bloquea o no dependía enteramente de
+  # qué exigiera la protección de rama — y un job NUEVO entra sin vigilancia
+  # hasta que alguien se acuerde de añadirlo a mano. Con la puerta, la
+  # protección de rama exige sólo esto y un job nuevo entra vigilado el día que
+  # se escribe, sin tocar ajustes.
+  #
+  # `!= success` Y NO `== failure`, a propósito: un job **cancelado** y uno
+  # **saltado** tampoco son un verde. Es la misma convención que
+  # `bancos en verde` de cobertura-zigbee y `ninguno ha fallado` de
+  # cobertura-rf-fv, y la misma que el censo de Siting aplica a los pasos:
+  # «no comprobado» tiene que salir distinto de «comprobado y pasa».
+  #
+  # `deriva` NO entra en la condición, y es la decisión que ya estaba escrita
+  # arriba: informa y no bloquea. Pero SÍ se publica su estado, porque un aviso
+  # que nadie ve no es un aviso. (Además lleva `continue-on-error` de job, así
+  # que su `result` sería `success` aunque fallara: meterlo en el `if` habría
+  # sido una puerta de mentira.)
+  # ═══════════════════════════════════════════════════════════════════════════
+  verde:
+    name: arneses en verde
+    runs-on: ubuntu-latest
+    needs: [arneses, navegador, inventario, deriva]
+    if: always() && !cancelled()
+    steps:
+      - name: los cuatro jobs, y cuáles bloquean
+        run: |
+          a="${{ needs.arneses.result }}"
+          n="${{ needs.navegador.result }}"
+          i="${{ needs.inventario.result }}"
+          d="${{ needs.deriva.result }}"
+          {
+            echo "### Arneses"
+            echo ""
+            echo "| job | resultado | ¿bloquea? |"
+            echo "|---|---|---|"
+            echo "| arneses | $a | sí |"
+            echo "| navegador | $n | sí |"
+            echo "| inventario | $i | sí |"
+            echo "| deriva | $d | no (informa, decisión escrita en el workflow) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '  %-12s %s\n' arneses "$a" navegador "$n" inventario "$i" "deriva*" "$d"
+          echo "  (* deriva informa y no bloquea)"
+          malo=""
+          for par in "arneses:$a" "navegador:$n" "inventario:$i"; do
+            if [ "${par#*:}" != "success" ]; then malo="$malo ${par%%:*}=${par#*:}"; fi
+          done
+          if [ -n "$malo" ]; then
+            echo "::error title=NO ESTÁN EN VERDE::$malo"
+            printf '\n> ❌ no están en verde:%s\n' "$malo" >> "$GITHUB_STEP_SUMMARY"
+            echo "  «cancelled» y «skipped» tampoco son un verde."
+            exit 1
+          fi
+          echo "  los tres que bloquean, en verde"
