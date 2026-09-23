@@ -199,6 +199,21 @@ ráfaga → [la HSU la mide] → [la NCU la lee en su ranura] → [el TCU la rec
 
 El **orden** dentro de la vuelta: primero las **estaciones** y después los **seguidores**. Estuvo aquí como suposición y está **confirmado** (mantenedor, 23-09-2026). Importa: con las estaciones delante, un seguidor puede enterarse de una ráfaga en su **misma** vuelta; al revés, siempre tendría que esperar a la siguiente.
 
+### Y entre los seguidores, por SALTOS
+
+Porque el poleo varía con la **posición**: lo que tarda cada equipo en que le toque depende de su **profundidad en la malla** —cuántos saltos hay del coordinador a él—, no de su número de serie. Con los saltos medidos, la vuelta va **por profundidad**: primero los que cuelgan directos del gateway, después los que van por un relé, después los de dos saltos. Medido en el banco: con la misma ráfaga, el de 0 saltos se entera a los **5,75 s** y el de 2 saltos a los **8,75 s**.
+
+Es **todo o nada** a propósito. Con saltos para la mitad del campo habría que mezclar dos criterios —profundidad para unos, número para otros— y el reparto no sería ni una cosa ni la otra, pero lo parecería. Si falta uno solo se usa el orden por número, **y se dice**: la ficha de la NCU lleva la fila *Orden de la vuelta*, y el HUD pone los saltos del equipo elegido, o su turno cuando no los hay.
+
+**De dónde salen.** De `zigbee_routes.csv` del hermano `cobertura-zigbee` —su `hop_count`, *«saltos = nodos − 1»*, del recolector por telnet contra el gateway Digi— pasado por `tools/extrae_saltos.mjs`, que escribe `sim/saltos/<planta>.json`. Con varias vueltas toma la **moda** por nodo, no la última —la malla se reorganiza y la última captura puede ser un transitorio— y avisa de cuántos nodos cambiaron de profundidad.
+
+Dos cosas que ese extractor **no** hace, y por qué:
+
+- **No usa el RSSI.** Lo prohíbe el propio README del hermano: *«El RSSI no es el mapa de cobertura: es el nivel del último salto al vecino, no la distancia al coordinador»*. Un orden sacado del RSSI parecería medido y no lo sería.
+- **No usa los `barrido_*.csv`** de `cobertura_coords/`: son el **plan** del barrido —`llega` y `rssi_medido_dbm` vacíos en los diez—, enlaces previstos y no medidos.
+
+Hoy **no hay ninguna captura de rutas en el repo**: existen el formato, el recolector y el visor que lo pinta, pero el CSV no está. Así que todas las plantas van hoy por número, y lo dicen. El día que alguien corra el recolector en una planta, el reparto se vuelve el real sin tocar una línea.
+
 Estaba modelado como si los tres compartieran memoria: se movía el deslizador del viento y los 750 seguidores arrancaban **en el mismo paso**. En campo no pasa. El poleo es de uno en uno, así que la planta abandera **en ola**, y los equipos del final de la vuelta salen hasta una vuelta entera más tarde. Medido en el banco con una vuelta de 5 s: la HSU a los 0,5 s, la NCU a 1 s, el primer TCU a 1 s y el último a 5 s — cuatro segundos de reparto.
 
 **No hay un número, y no lo va a haber.** El poleo **varía según la posición de los seguidores** (mantenedor, 23-09-2026): lo que tarda la vuelta depende de a qué distancia de radio queda cada equipo, de cuántos saltos y repetidores hay por medio — o sea de la topología de esa planta, no de un ajuste que alguien eligió. Por eso es un **parámetro** y no una constante, y por eso **no se pregunta cuál es el de verdad**: se pone el de la planta que se esté mirando.

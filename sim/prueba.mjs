@@ -209,6 +209,50 @@ console.log('\n── el viento no lo detecta el TCU: lo mide la HSU y llega por
      'mientras que a los que sí contestan sí');
 }
 
+console.log('\n── la vuelta se ordena por SALTOS, cuando se tienen ──');
+/* El poleo «varía según posición de los seguidores»: lo que tarda cada equipo en que le
+   toque depende de su profundidad en la malla, no de su número de serie. */
+{
+  /* sin saltos: el orden es el de los números, y se DICE */
+  const sinS = new SIM.Planta({ nTcu: 6, nHsu: 1, nRep: 0, dia: 172, hora: 11 });
+  ok(sinS.ordenVuelta === 'indice' && sinS.tcus.every((t, i) => t.turno === i),
+     'sin saltos medidos, la vuelta va por número de equipo y lo declara',
+     'orden ' + sinS.ordenVuelta);
+
+  /* con saltos: por profundidad, y a igualdad de saltos por número */
+  const S = { 1: 2, 2: 0, 3: 1, 4: 2, 5: 0, 6: 1 };
+  const conS = new SIM.Planta({ nTcu: 6, nHsu: 1, nRep: 0, dia: 172, hora: 11, saltos: S });
+  ok(conS.ordenVuelta === 'saltos', 'con los saltos de todos, la vuelta va por saltos');
+  const porTurno = conS.tcus.slice().sort((a, b) => a.turno - b.turno).map((t) => t.id);
+  ok(JSON.stringify(porTurno) === JSON.stringify([2, 5, 3, 6, 1, 4]),
+     'los de 0 saltos primero, luego los de 1, luego los de 2 — y a igualdad, por número',
+     porTurno.join(' → '));
+
+  /* TODO O NADA: con saltos a medias no se mezclan dos criterios */
+  const medio = new SIM.Planta({ nTcu: 6, nHsu: 1, nRep: 0, dia: 172, hora: 11,
+                                 saltos: { 1: 0, 2: 1, 3: 2 } });
+  ok(medio.ordenVuelta === 'indice' && medio.conSaltos === 3,
+     'con saltos para la mitad NO se mezcla: se usa el número y se dice cuántos hay',
+     medio.conSaltos + ' de ' + medio.tcus.length);
+
+  /* y el orden CAMBIA quién se entera antes, que es el motivo de todo esto */
+  const t0 = conS.ahora();
+  conS.meteo.viento = 19;
+  const cuando = {};
+  for (let i = 0; i < 400; i++) {
+    conS.paso(0.25);
+    for (const t of conS.tcus) {
+      if (cuando[t.id] == null && t.deNcu.nivelViento > 0) cuando[t.id] = conS.ahora() - t0;
+    }
+  }
+  const hondo = conS.tcus.find((t) => t.id === 1);     /* 2 saltos */
+  const cerca = conS.tcus.find((t) => t.id === 2);     /* 0 saltos */
+  ok(cuando[cerca.id] != null && cuando[hondo.id] != null &&
+     cuando[cerca.id] < cuando[hondo.id],
+     'el equipo que cuelga del gateway se entera antes que el que va a dos saltos',
+     '0 saltos: ' + cuando[cerca.id] + ' s · 2 saltos: ' + cuando[hondo.id] + ' s');
+}
+
 console.log('\n── la cuenta atrás para desabanderar ──');
 /* Abanderado son DOS estados y confundirlos es lo que hace que nadie entienda por qué
    el campo sigue de canto con el día en calma: mientras sopla por encima del umbral la

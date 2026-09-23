@@ -691,6 +691,21 @@ function cargaTerreno(k) {
   if (Object.prototype.hasOwnProperty.call(TERRENO, k)) return Promise.resolve(TERRENO[k]);
   return SIM.BT.cotas(k, 80).then(function (T) { TERRENO[k] = T || null; return TERRENO[k]; });
 }
+/* LOS SALTOS DE LA PLANTA, si los hay. Mismo patrón que el terreno: se piden una vez,
+   se guardan, y si no están se sigue igual — hoy NINGUNA planta los tiene, porque no hay
+   captura de rutas en el repo. El fallo es silencioso a propósito: no tenerlos no es un
+   error, es el caso normal, y lo que se ve es la fila «Orden de la vuelta» de la NCU
+   diciendo que se está repartiendo por número. */
+var SALTOS = {};
+function cargaSaltos(k) {
+  if (!k) return Promise.resolve(null);
+  if (Object.prototype.hasOwnProperty.call(SALTOS, k)) return Promise.resolve(SALTOS[k]);
+  return fetch('sim/saltos/' + k + '.json')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) { SALTOS[k] = (j && j.saltos) || null; return SALTOS[k]; })
+    .catch(function () { SALTOS[k] = null; return null; });
+}
+
 function construye() {
   var L = PLANTAS[+$('loc').value];
   P = new SIM.Planta({
@@ -725,6 +740,9 @@ function construye() {
        la trae —no tenemos el dato por planta— y por eso esto no inventa un número:
        cuando se sepa, se añade `poleoS` a esa planta en `sim/plantas.js` y ya. */
     poleoS: (L && L.poleoS) || undefined,
+    /* saltos medidos de ESTA planta, si se han cargado: con ellos la vuelta de poleo
+       se ordena por profundidad de malla en vez de por número de equipo */
+    saltos: (L && !L.lab) ? (SALTOS[L.k] || null) : null,
     loc: { n: L.n, lat: L.lat, lon: L.lon, tz: L.tz, dst: L.dst }
   });
   aplicaMeteo(); aplicaEstrategia(); aplicaEstrategiaViento();
@@ -1440,7 +1458,12 @@ function rumbo(g) { return ROSA[Math.round((((g % 360) + 360) % 360) / 22.5) % 1
 function edadPoleo(t) {
   if (!P || !t.deNcu || t.deNcu.t < 0) return 'sin sondear';
   var d = Math.max(0, P.ahora() - t.deNcu.t);
-  return d < 90 ? 'hace ' + d.toFixed(0) + ' s' : 'hace ' + Math.round(d / 60) + ' min';
+  var e = d < 90 ? 'hace ' + d.toFixed(0) + ' s' : 'hace ' + Math.round(d / 60) + ' min';
+  /* y DÓNDE cae en la vuelta, que es lo que explica ese retraso: con saltos medidos,
+     su profundidad en la malla; sin ellos, su turno, para que se vea que es el orden
+     de los números y no una medida */
+  return e + (t.saltos != null ? ' · ' + t.saltos + ' saltos'
+                               : ' · turno ' + ((t.turno != null ? t.turno : t.idx) + 1));
 }
 /* segundos → mm:ss, para las cuentas atrás. Redondeo ARRIBA: que ponga 0:00 con la
    bandera todavía puesta es exactamente el tipo de detalle que hace desconfiar. */
@@ -1900,6 +1923,14 @@ function pintaNcu() {
   for (var s = 1; s <= 7; s++) if (n.forzados[s]) fz.push('SP' + s + '→0x' + n.forzados[s].toString(16));
   $('kvNcu').innerHTML =
     kv('Reloj (30104)', dosD(f.dia) + '/' + dosD(f.mes) + ' ' + dosD(f.hora) + ':' + dosD(f.min)) +
+    /* QUÉ ORDEN SE ESTÁ USANDO, dicho donde se mira la NCU. Con los saltos medidos la
+       vuelta va por profundidad de malla; sin ellos, por número de equipo — y eso
+       cambia quién se entera antes de una ráfaga, así que no puede quedar implícito. */
+    kv('Vuelta de poleo', num(P.poleoS(), 1) + ' s · ' + (P.hsus.length + P.tcus.length) + ' equipos') +
+    kv('Orden de la vuelta', P.ordenVuelta === 'saltos'
+      ? 'por SALTOS medidos (' + P.conSaltos + ' equipos)'
+      : 'por número de equipo — no hay saltos medidos' +
+        (P.conSaltos ? ' para todos (' + P.conSaltos + ' de ' + P.tcus.length + ')' : '')) +
     kv('Nivel de viento global', n.nivelVientoGlobal + ' (' + (['calma', 'aviso', 'alarma'][n.nivelVientoGlobal] || '—') + ')') +
     kv('Alarma de viento', n.alarmaViento ? 'sí' : 'no') +
     kv('Alarma de nieve', n.alarmaNieve ? 'sí' : 'no') +
@@ -2673,6 +2704,13 @@ $('loc').onchange = function () {
      terreno se está usando, que es lo que evita el engaño; lo que no se puede
      hacer es dejar la página bloqueada esperando 1 MB de cotas. */
   tocaPlanta();
+  /* y los saltos, que llegan igual de tarde que el terreno y rehacen la planta igual */
+  if (L0 && !L0.lab && !Object.prototype.hasOwnProperty.call(SALTOS, L0.k))
+    cargaSaltos(L0.k).then(function (S) {
+      if (!S) return;
+      var L1 = PLANTAS[+$('loc').value];
+      if (L1 === L0) tocaPlanta();
+    });
   if (L0 && !L0.lab && !Object.prototype.hasOwnProperty.call(TERRENO, L0.k))
     cargaTerreno(L0.k).then(function (T) {
       if (!T) { pintaNotaBT(); return; }

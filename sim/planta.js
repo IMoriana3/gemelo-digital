@@ -748,7 +748,9 @@ TCU.prototype.poleaNcu = function () {
   /* MISMA vuelta que las estaciones, y detrás de ellas: la ranura de este seguidor
      es la suya desplazada por las estaciones que van delante */
   var H = this.p.hsus.length, enVuelta = H + this.p.tcus.length;
-  if (this.tPoleo == null) this.tPoleo = ahora - Tp + this.p.ranura(H + this.idx, enVuelta) * Tp;
+  /* su TURNO, no su número: con saltos medidos la vuelta va por profundidad de malla */
+  var turno = this.turno != null ? this.turno : this.idx;
+  if (this.tPoleo == null) this.tPoleo = ahora - Tp + this.p.ranura(H + turno, enVuelta) * Tp;
   if (ahora - this.tPoleo < Tp) return;
   this.tPoleo = ahora;
   if (!this.online) return;                /* sin radio no le llega nada */
@@ -1531,6 +1533,42 @@ NCU.prototype.fuerza = function (sp, grupo, on) {
 
 /* La vuelta de ESTA planta, en segundos. Sale de la configuración del emplazamiento
    si la trae —el ritmo depende de cada planta— y si no, del parámetro global. */
+/* ═══════════ EL ORDEN DE LA VUELTA ═══════════════════════════════════════════
+   El poleo «varía según posición de los seguidores» (mantenedor): lo que tarda cada
+   equipo en que le toque depende de su PROFUNDIDAD EN LA MALLA —cuántos saltos hay
+   del coordinador a él—, no de su número de serie. Con los saltos medidos, la vuelta
+   se ordena por ellos: primero los que cuelgan directos del gateway, después los que
+   van por un relé, después los de dos saltos.
+
+   Y esto es TODO O NADA a propósito. Con saltos para la mitad del campo habría que
+   mezclar dos criterios —profundidad para unos, número para otros— y el reparto
+   resultante no sería ni una cosa ni la otra, pero lo parecería. Si falta uno solo,
+   se usa el orden por número y se DICE (`ordenVuelta`), que es lo que la interfaz
+   enseña. Un reparto a medias que se presenta como medido es peor que uno declarado.
+
+   Los saltos vienen de `zigbee_routes.csv` del hermano cobertura-zigbee —su
+   `hop_count`, «saltos = nodos − 1», del recolector por telnet contra el gateway
+   Digi— pasados por `tools/extrae_saltos.mjs`. El RSSI NO vale para esto y no se usa:
+   lo dice el propio README de ese repo, «es el nivel del último salto al vecino, no
+   la distancia al coordinador». */
+Planta.prototype.ordenaVuelta = function () {
+  var T = this.tcus, S = this.cfg && this.cfg.saltos, con = 0, i;
+  for (i = 0; i < T.length; i++) {
+    var h = S ? S[T[i].id] : null;
+    T[i].saltos = (h != null && isFinite(h) && h >= 0) ? Math.round(h) : null;
+    if (T[i].saltos != null) con++;
+  }
+  this.ordenVuelta = (T.length > 0 && con === T.length) ? 'saltos' : 'indice';
+  this.conSaltos = con;
+  var orden = [];
+  for (i = 0; i < T.length; i++) orden.push({ t: T[i], k: i });
+  if (this.ordenVuelta === 'saltos') {
+    /* a igualdad de saltos, el número: un desempate estable, no el azar del sort */
+    orden.sort(function (a, b) { return (a.t.saltos - b.t.saltos) || (a.k - b.k); });
+  }
+  for (i = 0; i < orden.length; i++) orden[i].t.turno = i;
+};
+
 Planta.prototype.poleoS = function () {
   var v = this.cfg && this.cfg.poleoS;
   return Math.max(0.001, (v != null && v > 0) ? v : K.POLEO_S);
@@ -1639,7 +1677,9 @@ function Planta(cfg) {
   this.cfg = {
     nTcu: cfg.nTcu || 24,
     nHsu: cfg.nHsu || 2,
-    nRep: cfg.nRep || 1,
+    /* `|| 1` hacía que `nRep: 0` —cero repetidores, que es lo que pide media prueba
+       de este repo— cayera al defecto y montara uno igual. Se pregunta por null. */
+    nRep: cfg.nRep != null ? cfg.nRep : 1,
     grupos: cfg.grupos || 4,
     deadband: cfg.deadband != null ? cfg.deadband : K.HYST_DEG,
     iMotorMax: cfg.iMotorMax || 7000,        /* 41040: sobrecorriente por software (mA) */
@@ -1677,6 +1717,10 @@ function Planta(cfg) {
        mismo objeto —el que arma `buildTReal` del hermano—, y el arnés carea que
        el θ de cada equipo es el de su línea al bit por las dos. */
     Tbt: cfg.Tbt || null,
+    /* SALTOS POR EQUIPO, si se tienen: {idTCU: nSaltos} medidos al coordinador. Con
+       ellos la vuelta de poleo se ordena por PROFUNDIDAD DE RED en vez de por número de
+       equipo, que es lo que hace un maestro de malla. Ver `ordenaVuelta`. */
+    saltos: cfg.saltos || null,
     /* Trayectoria del ángulo calculada por el MOTOR canónico (SolarGPT, POST /tracker).
        Si está, el gemelo la EJECUTA y no calcula ni el backtracking ni la política de
        cielo cubierto: el algoritmo es de allí. Si no está, se usa el modelo del
@@ -1756,6 +1800,7 @@ function Planta(cfg) {
       t0.sensor.crudo = t0.sensor.filtrado = ang0.sel;
     }
   }
+  this.ordenaVuelta();
   this.repartaDesajustes(this.cfg.averias && this.cfg.averias.desajusteSig);
   /* y un paso mínimo para que el estado derivado (sol, objetivo, alarmas) exista */
   this.paso(0.001);
