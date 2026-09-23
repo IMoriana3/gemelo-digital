@@ -102,17 +102,24 @@ var K = {
   SLEW_DPS: F.e.SLEW_DPS,       /* velocidad real de giro (°/s) */
   HYST_DEG: F.e.HYST_DEG,       /* deadband del lazo */
   /* LA RED NO ES INSTANTÁNEA. La NCU es el maestro: sondea sus HSU y sus TCU por
-     Zigbee, de uno en uno, y cada equipo solo sabe lo que le tocó en SU vuelta.
-     Estos dos ritmos son la cadencia con la que la NCU DEJA GRABADO cada equipo en su
-     log de planta (`scada/tools/descarga-logs`: «la TCU cada ~10 s, las estaciones
-     cada ~5 s, la propia NCU cada segundo»), que es lo más cercano a un periodo de
-     poleo que hay documentado en casa: no puede grabar más a menudo de lo que lee.
-     Es una cota, no una medida del bus — y por eso son parámetros, no constantes. */
-  /* UNA SOLA VUELTA PARA TODOS. Esto estuvo un rato como dos ritmos —uno para las
-     HSU y otro para los TCU— y no es así: la NCU da UNA vuelta a su red y en ella
-     entran las estaciones y los seguidores por igual. Y el número DEPENDE DE CADA
-     PLANTA, así que es un parámetro y se puede fijar por emplazamiento
-     (`cfg.poleoS`), no una constante de la casa. */
+     Zigbee, de uno en uno, y cada equipo solo sabe lo que le tocó en SU vuelta. Es
+     UNA sola vuelta para todos —estuvo un rato aquí como dos ritmos, uno por tipo de
+     equipo, y no es así—, y en ella entran estaciones y seguidores por igual.
+
+     NO HAY UN NÚMERO, Y NO LO VA A HABER. El poleo «varía según posición de los
+     seguidores» (mantenedor, 23-09-2026): lo que tarda la vuelta depende de a qué
+     distancia de radio queda cada equipo, de cuántos saltos y repetidores hay por
+     medio — o sea de la TOPOLOGÍA de esa planta, no de un ajuste que alguien eligió.
+     Por eso esto es un parámetro y no una constante, y por eso no hay que ir a
+     buscar «el de verdad»: se pone el de la planta que se esté mirando, aquí o en
+     `cfg.poleoS` (la ficha del emplazamiento, que manda sobre este).
+
+     LOS 5 s SON UN MARCADOR DE POSICIÓN, no una medida. No hay periodo de poleo en
+     el mapa; lo único que lo acota es la cadencia con la que la NCU DEJA GRABADO
+     cada equipo en su log de planta (`scada/tools/descarga-logs`: «la TCU cada
+     ~10 s, las estaciones cada ~5 s, la propia NCU cada segundo»), y no puede grabar
+     más a menudo de lo que lee. Cualquier número que salga del simulador con este 5
+     puesto vale lo que valga ese 5. */
   POLEO_S: 5,                   /* s · la vuelta entera de la NCU a su red */
   POLEO_CADUCA: 3,              /* vueltas sin contestar antes de dar el dato por viejo */
   WIND_T1: F.e.WIND_T1,         /* 40 km/h → abanderamiento parcial */
@@ -741,7 +748,9 @@ TCU.prototype.poleaNcu = function () {
   /* MISMA vuelta que las estaciones, y detrás de ellas: la ranura de este seguidor
      es la suya desplazada por las estaciones que van delante */
   var H = this.p.hsus.length, enVuelta = H + this.p.tcus.length;
-  if (this.tPoleo == null) this.tPoleo = ahora - Tp + this.p.ranura(H + this.idx, enVuelta) * Tp;
+  /* su TURNO, no su número: con saltos medidos la vuelta va por profundidad de malla */
+  var turno = this.turno != null ? this.turno : this.idx;
+  if (this.tPoleo == null) this.tPoleo = ahora - Tp + this.p.ranura(H + turno, enVuelta) * Tp;
   if (ahora - this.tPoleo < Tp) return;
   this.tPoleo = ahora;
   if (!this.online) return;                /* sin radio no le llega nada */
@@ -1524,6 +1533,42 @@ NCU.prototype.fuerza = function (sp, grupo, on) {
 
 /* La vuelta de ESTA planta, en segundos. Sale de la configuración del emplazamiento
    si la trae —el ritmo depende de cada planta— y si no, del parámetro global. */
+/* ═══════════ EL ORDEN DE LA VUELTA ═══════════════════════════════════════════
+   El poleo «varía según posición de los seguidores» (mantenedor): lo que tarda cada
+   equipo en que le toque depende de su PROFUNDIDAD EN LA MALLA —cuántos saltos hay
+   del coordinador a él—, no de su número de serie. Con los saltos medidos, la vuelta
+   se ordena por ellos: primero los que cuelgan directos del gateway, después los que
+   van por un relé, después los de dos saltos.
+
+   Y esto es TODO O NADA a propósito. Con saltos para la mitad del campo habría que
+   mezclar dos criterios —profundidad para unos, número para otros— y el reparto
+   resultante no sería ni una cosa ni la otra, pero lo parecería. Si falta uno solo,
+   se usa el orden por número y se DICE (`ordenVuelta`), que es lo que la interfaz
+   enseña. Un reparto a medias que se presenta como medido es peor que uno declarado.
+
+   Los saltos vienen de `zigbee_routes.csv` del hermano cobertura-zigbee —su
+   `hop_count`, «saltos = nodos − 1», del recolector por telnet contra el gateway
+   Digi— pasados por `tools/extrae_saltos.mjs`. El RSSI NO vale para esto y no se usa:
+   lo dice el propio README de ese repo, «es el nivel del último salto al vecino, no
+   la distancia al coordinador». */
+Planta.prototype.ordenaVuelta = function () {
+  var T = this.tcus, S = this.cfg && this.cfg.saltos, con = 0, i;
+  for (i = 0; i < T.length; i++) {
+    var h = S ? S[T[i].id] : null;
+    T[i].saltos = (h != null && isFinite(h) && h >= 0) ? Math.round(h) : null;
+    if (T[i].saltos != null) con++;
+  }
+  this.ordenVuelta = (T.length > 0 && con === T.length) ? 'saltos' : 'indice';
+  this.conSaltos = con;
+  var orden = [];
+  for (i = 0; i < T.length; i++) orden.push({ t: T[i], k: i });
+  if (this.ordenVuelta === 'saltos') {
+    /* a igualdad de saltos, el número: un desempate estable, no el azar del sort */
+    orden.sort(function (a, b) { return (a.t.saltos - b.t.saltos) || (a.k - b.k); });
+  }
+  for (i = 0; i < orden.length; i++) orden[i].t.turno = i;
+};
+
 Planta.prototype.poleoS = function () {
   var v = this.cfg && this.cfg.poleoS;
   return Math.max(0.001, (v != null && v > 0) ? v : K.POLEO_S);
@@ -1632,7 +1677,9 @@ function Planta(cfg) {
   this.cfg = {
     nTcu: cfg.nTcu || 24,
     nHsu: cfg.nHsu || 2,
-    nRep: cfg.nRep || 1,
+    /* `|| 1` hacía que `nRep: 0` —cero repetidores, que es lo que pide media prueba
+       de este repo— cayera al defecto y montara uno igual. Se pregunta por null. */
+    nRep: cfg.nRep != null ? cfg.nRep : 1,
     grupos: cfg.grupos || 4,
     deadband: cfg.deadband != null ? cfg.deadband : K.HYST_DEG,
     iMotorMax: cfg.iMotorMax || 7000,        /* 41040: sobrecorriente por software (mA) */
@@ -1670,6 +1717,10 @@ function Planta(cfg) {
        mismo objeto —el que arma `buildTReal` del hermano—, y el arnés carea que
        el θ de cada equipo es el de su línea al bit por las dos. */
     Tbt: cfg.Tbt || null,
+    /* SALTOS POR EQUIPO, si se tienen: {idTCU: nSaltos} medidos al coordinador. Con
+       ellos la vuelta de poleo se ordena por PROFUNDIDAD DE RED en vez de por número de
+       equipo, que es lo que hace un maestro de malla. Ver `ordenaVuelta`. */
+    saltos: cfg.saltos || null,
     /* Trayectoria del ángulo calculada por el MOTOR canónico (SolarGPT, POST /tracker).
        Si está, el gemelo la EJECUTA y no calcula ni el backtracking ni la política de
        cielo cubierto: el algoritmo es de allí. Si no está, se usa el modelo del
@@ -1749,6 +1800,7 @@ function Planta(cfg) {
       t0.sensor.crudo = t0.sensor.filtrado = ang0.sel;
     }
   }
+  this.ordenaVuelta();
   this.repartaDesajustes(this.cfg.averias && this.cfg.averias.desajusteSig);
   /* y un paso mínimo para que el estado derivado (sol, objetivo, alarmas) exista */
   this.paso(0.001);
