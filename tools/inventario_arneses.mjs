@@ -101,6 +101,13 @@ const NO_ES_ARNES = {
   'tools/extrae_plantas.mjs':
     'GENERADOR: saca PLANTAS_REALES (posición de cada seguidor) de los layouts del '
     + 'DWG. Mismo caso que extrae_mapa: escribe, no juzga.',
+  'tools/extrae_saltos.mjs':
+    'GENERADOR: saca los saltos de cada equipo del zigbee_routes.csv del hermano '
+    + 'cobertura-zigbee y escribe sim/saltos/<planta>.json, con el que la vuelta de '
+    + 'poleo se ordena por profundidad de malla. Mismo caso que extrae_mapa: escribe, '
+    + 'no juzga. Para meterlo en la puerta haría falta una captura de rutas versionada '
+    + 'en el repo contra la que carear su salida, y hoy no hay ninguna: existen el '
+    + 'formato, el recolector y el visor, pero el CSV no está.',
   'sim/servidor.mjs':
     'SERVIDOR de desarrollo para abrir las páginas por http en vez de file://. Es '
     + 'una herramienta de escritorio: se queda escuchando y no termina, así que en '
