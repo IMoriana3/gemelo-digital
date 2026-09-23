@@ -162,6 +162,26 @@ kt > 0,80        kd = 0,165                                         → cielo li
 
 Con el cielo cerrado (kt ≈ 0,15) sale **kd ≈ 0,99**. Esa es la diferencia entre una política que no se activa jamás y una que se activa cuando toca.
 
+## El viento no lo detecta el TCU
+
+Lo mide la **HSU**. Y la HSU no habla con nadie por su cuenta: la **NCU es el maestro** de la Zigbee y la **sondea**. La NCU tampoco empuja nada al vuelo — alcanza a cada TCU en su vuelta. Así que entre que sopla y que un seguidor lo sabe hay **dos esperas**, no cero:
+
+```
+ráfaga → [la HSU la mide] → ~5 s → [la NCU la lee] → ~10 s → [el TCU se entera] → abandera
+```
+
+Estaba modelado como si los tres compartieran memoria: se movía el deslizador del viento y los 750 seguidores arrancaban **en el mismo paso**. En campo no pasa. El poleo es de uno en uno, así que la planta abandera **en ola**, y los equipos del final de la vuelta salen hasta una vuelta entera más tarde. Medido en el banco: la HSU a los 0,5 s, la NCU a los 3 s, el primer TCU a los 3 s y el último a los 12 s — nueve segundos de reparto.
+
+**De dónde salen los dos ritmos.** No hay un periodo de poleo documentado en el mapa, pero sí la cadencia con la que la NCU **deja grabado** cada equipo en su log de planta: *«la TCU cada ~10 s, las estaciones cada ~5 s, la propia NCU cada segundo»* (`scada/tools/descarga-logs`). No puede grabar más a menudo de lo que lee, así que es una **cota**, no una medida del bus — y por eso son parámetros (`POLEO_HSU_S`, `POLEO_TCU_S`), tocables en caliente como todo lo demás, y marcados `sim` y no `canon`.
+
+**Las marcas de tiempo ya estaban en el mapa** y ahora significan algo: `lastComm` de cada HSU (`29440+2·j`) y de cada TCU (`29500+2·i`) — *«Unix Epoch formatted timestamp of the last successful read»* — y `lastValidWind` (`29380`). Antes se renovaban en cada paso de simulación, o sea que no decían nada. Ahora las pone **quien sondea, cuando sondea**: un equipo que deja de contestar congela su `lastComm` y se ve envejecer.
+
+**Lo que NO pasa por la red.** La **seta** es una línea de contacto del propio equipo y corta el puente en H sin preguntarle a nadie: lo único que espera es su antirrebote, 50 ms contra los 10 s de una vuelta. Igual un `40000` escrito por RS485 contra ese TCU. Esa asimetría es el fondo del asunto, y el banco la fija.
+
+**Un equipo sin radio conserva la última orden.** No se queda a cero ni «se entera» de nada nuevo: sigue con lo que le dijeron la última vez, que es lo que hace de verdad.
+
+En el HUD, la teja **«Lo sabe el TCU»** enseña el desfase: con una ráfaga entrando, el viento de arriba y el que el equipo maneja no coinciden durante unos segundos, y debajo va la edad del último poleo.
+
 ## Las dos entradas físicas
 
 Las entradas que mandan sobre el seguidor no se parecen en nada, y modelarlas igual era lo que impedía representar los fallos que más se ven en planta.

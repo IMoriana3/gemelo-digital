@@ -1429,6 +1429,13 @@ function indiceDe(id) {
    pelea con la niebla y cuesta un render. */
 var ROSA = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
 function rumbo(g) { return ROSA[Math.round((((g % 360) + 360) % 360) / 22.5) % 16]; }
+/* Cuánto hace que la NCU alcanzó a este equipo. Es `lastComm` (29500+2·i) del mapa,
+   dicho en cristiano: si crece y no para, el equipo ha dejado de contestar. */
+function edadPoleo(t) {
+  if (!P || !t.deNcu || t.deNcu.t < 0) return 'sin sondear';
+  var d = Math.max(0, P.ahora() - t.deNcu.t);
+  return d < 90 ? 'hace ' + d.toFixed(0) + ' s' : 'hace ' + Math.round(d / 60) + ' min';
+}
 /* segundos → mm:ss, para las cuentas atrás. Redondeo ARRIBA: que ponga 0:00 con la
    bandera todavía puesta es exactamente el tipo de detalle que hace desconfiar. */
 function msS(seg) {
@@ -1493,6 +1500,12 @@ function pintaHud3D() {
     ro('Viento', vk.toFixed(1), 'km/h · ' + rumbo(m.dirViento) + camino,
        vk >= 60 ? 'no' : (vk >= 40 ? 'al' : '')) +
     ro('Rachas', rk.toFixed(0), 'km/h') +
+    /* LO QUE SABE EL EQUIPO, que no es lo que hace. El viento no lo detecta el TCU:
+       lo mide la HSU, la NCU la SONDEA en su vuelta y alcanza al TCU en la suya. Dos
+       esperas. Esta teja es la que enseña el desfase — y con una ráfaga entrando, el
+       número de arriba y este no coinciden durante unos segundos. */
+    ro('Lo sabe el TCU', (t.deNcu.viento * 3.6).toFixed(1), 'km/h · ' + edadPoleo(t),
+       Math.abs(t.deNcu.viento - n.vientoMax) * 3.6 > 1 ? 'al' : '') +
     ro('Bandera', bTxt, bSub, bCls) +
     (s.dia ? ro('Sol · altura', el.toFixed(1) + '°', rumbo(180 + s.az)) +
              ro('Sol · azimut', (s.az >= 0 ? '+' : '') + s.az.toFixed(1) + '°',

@@ -417,6 +417,23 @@ const r = await pg.evaluate(async () => {
   o.rampa = celda('viento');
   P.meteo.viento = 2; P.paso(10); pintaTodo();            /* amaina de golpe */
   o.bandera.amainado = celda('bandera');
+  /* EL VIENTO NO LO DETECTA EL TCU. Lo mide la HSU, la NCU la sondea en su vuelta y
+     alcanza al TCU en la suya: dos esperas. Con una rafaga entrando, la teja de arriba
+     y la de «lo sabe el TCU» NO coinciden durante unos segundos, y eso es el modelo
+     funcionando, no un fallo de pintado. */
+  P.meteo.viento = 2;
+  for (let i = 0; i < 40; i++) P.paso(1);                 /* todos al dia, en calma */
+  pintaTodo();
+  o.poleo = { calma: celda('lo sabe el tcu') };
+  P.meteo.viento = 20;                                    /* 72 km/h de golpe */
+  P.paso(1); pintaTodo();
+  o.poleo.reciennacido = celda('lo sabe el tcu');
+  o.poleo.ncuJusto = (P.ncu.vientoMax * 3.6).toFixed(1);
+  o.poleo.saben1s = P.tcus.filter((t) => t.deNcu.nivelViento > 0).length;
+  for (let i = 0; i < 30; i++) P.paso(1);
+  o.poleo.saben30s = P.tcus.filter((t) => t.deNcu.nivelViento > 0).length;
+  o.poleo.total = P.tcus.length;
+
   /* y se deja como estaba: los bloques de abajo dan por bueno el viento de antes */
   P.meteo.viento = 12;
   for (let i = 0; i < 20; i++) P.paso(20);
@@ -746,6 +763,14 @@ ok(/⚠/.test(BA.soplando) && /km\/h/.test(BA.soplando),
    `con el viento por encima del umbral la bandera avisa, no cuenta: «${BA.soplando}»`);
 ok(/suelta en \d+:\d\d/.test(BA.amainado),
    `y en cuanto amaina arranca la cuenta atrás: «${BA.amainado}»`);
+const PO = r.poleo;
+ok(/hace \d+ s/.test(PO.calma),
+   `la teja dice cuándo alcanzó la NCU a este equipo (lastComm 29500): «${PO.calma}»`);
+ok(PO.saben1s < PO.total,
+   `un segundo después de la ráfaga NO se ha enterado toda la planta: ${PO.saben1s} de ${PO.total}`);
+ok(PO.saben30s === PO.total,
+   `y pasada una vuelta de poleo, sí: ${PO.saben30s} de ${PO.total}`);
+
 ok(/pide 80, meteo en ~\d+ (min|s)/.test(r.rampa),
    `el viento se PIDE y llega por rampa, y la teja dice cuánto falta: «${r.rampa}»`);
 

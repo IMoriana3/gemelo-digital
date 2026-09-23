@@ -89,6 +89,123 @@ ok(Math.sign(pl.tcu(1).anguloReal) === ladoMañana,
    'sigue en el mismo lado después del mediodía solar', pl.tcu(1).anguloReal.toFixed(0) + '°');
 ok(cruce < 1, 'y no ha dado ningún viaje al otro lado con el viento encima');
 
+console.log('\n── el eje no pasa de su velocidad, pase lo que pase ──');
+/* Un lazo con banda muerta, adelanto y una orden de seguridad que va «sin histéresis»
+   tiene varios caminos por los que colar un salto. Que ninguno lo haga no se deduce
+   leyendo: se mide, en los regímenes donde podría romperse y con el dt que usa la
+   interfaz (el bucle trocea a 60 s como mucho). */
+{
+  const S = SIM.K.SLEW_DPS;
+  const mide = (nombre, prep, dt, segs, hora) => {
+    const pv = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, dia: 172, hora: hora || 9 });
+    for (let i = 0; i < 60; i++) pv.paso(1);
+    if (prep) prep(pv);
+    const t = pv.tcu(1); let prev = t.anguloReal, peor = 0, recorrido = 0;
+    for (let i = 0; i < Math.ceil(segs / dt); i++) {
+      pv.paso(dt);
+      const paso = Math.abs(t.anguloReal - prev);
+      recorrido += paso;
+      if (paso / dt > peor) peor = paso / dt;
+      prev = t.anguloReal;
+    }
+    /* un máximo de cero no es un aprobado, es una prueba que no ha medido nada: si el
+       eje no se ha movido, este caso no dice nada del límite y hay que arreglarlo */
+    ok(recorrido > 1 && peor <= S * 1.0001, nombre + ' respeta los ' + S + ' °/s',
+       'dt=' + dt + ' s · máximo ' + peor.toFixed(5) + ' °/s · recorrido ' +
+       recorrido.toFixed(1) + '°');
+  };
+  mide('el seguimiento normal', null, 1, 3600);
+  mide('el seguimiento a dt grande', null, 60, 6 * 3600);
+  /* el abanderamiento es el caso caro: va SIN banda muerta y cruza medio recorrido.
+     A las 14 h el seguimiento va por el oeste y la bandera manda al ESTE —el lado del
+     sol se fija al abanderar—, así que el eje cruza de verdad; a las 9 estaría ya
+     pegado a su tope y la prueba no mediría nada. */
+  mide('el abanderamiento por viento', (pv) => { pv.meteo.viento = 19; }, 1, 1800, 14);
+  mide('el abanderamiento a dt grande', (pv) => { pv.meteo.viento = 19; }, 60, 7200, 14);
+  mide('soltar una seta enclavada', (pv) => {
+    const t = pv.tcu(1); t.setaLocal = true;
+    for (let i = 0; i < 60; i++) pv.paso(1);
+    t.setaLocal = false;
+    for (let i = 0; i < 60; i++) pv.paso(1);
+    t.limpiaAlarmas();
+  }, 1, 1800, 11);
+  mide('un salto de hora en marcha', (pv) => { pv.t.hora = 17; }, 1, 1800);
+}
+
+console.log('\n── el viento no lo detecta el TCU: lo mide la HSU y llega por poleo ──');
+/* La NCU es el maestro de la Zigbee: SONDEA a sus HSU y alcanza a sus TCU, de uno en
+   uno. Entre que sopla y que un seguidor lo sabe hay DOS esperas, no cero. Esto estaba
+   modelado como si los tres compartieran memoria. */
+{
+  const pp = new SIM.Planta({ nTcu: 8, nHsu: 2, nRep: 0, dia: 172, hora: 11 });
+  for (let i = 0; i < 600; i++) pp.paso(1);
+  ok(pp.ncu.nivelVientoGlobal === 0 && pp.tcu(1).deNcu.nivelViento === 0,
+     'en calma nadie ve viento');
+
+  pp.meteo.viento = 19;                                   /* 68 km/h de golpe */
+  const t0 = pp.ahora();
+  let tHsu = null, tNcu = null, tPrim = null, tUlt = null;
+  for (let i = 0; i < 400; i++) {
+    pp.paso(0.5);
+    if (tHsu === null && pp.hsus[0].nivel > 0) tHsu = pp.ahora() - t0;
+    if (tNcu === null && pp.ncu.nivelVientoGlobal > 0) tNcu = pp.ahora() - t0;
+    const saben = pp.tcus.filter((t) => t.deNcu.nivelViento > 0).length;
+    if (tPrim === null && saben > 0) tPrim = pp.ahora() - t0;
+    if (tUlt === null && saben === pp.tcus.length) tUlt = pp.ahora() - t0;
+  }
+  ok(tHsu !== null && tNcu !== null && tUlt !== null, 'el viento acaba llegando a todos');
+  ok(tHsu < tNcu, 'la HSU lo mide ANTES de que la NCU lo lea',
+     'HSU ' + tHsu + ' s · NCU ' + tNcu + ' s');
+  ok(tNcu <= tPrim && tPrim < tUlt,
+     'y la NCU lo sabe antes que el primer TCU, que lo sabe antes que el último',
+     'NCU ' + tNcu + ' s · 1.º ' + tPrim + ' s · último ' + tUlt + ' s');
+  /* LA OLA: los equipos del final de la vuelta salen casi una vuelta entera más tarde.
+     Es lo que hace que una planta no abandere de golpe, y lo que no se veía. */
+  ok(tUlt - tPrim > SIM.K.POLEO_TCU_S * 0.5,
+     'la planta abandera EN OLA, no a la vez', 'reparto de ' + (tUlt - tPrim) + ' s');
+  ok(tNcu <= SIM.K.POLEO_HSU_S + 0.5 && tUlt <= SIM.K.POLEO_HSU_S + SIM.K.POLEO_TCU_S + 1,
+     'y ninguna espera pasa de su vuelta', 'tope ' + (SIM.K.POLEO_HSU_S + SIM.K.POLEO_TCU_S) + ' s');
+}
+
+/* LA SETA NO PASA POR LA RED. Es una línea de contacto del propio equipo: corta el
+   puente en H sin preguntarle a nadie. Esa es la diferencia que este modelo defiende. */
+{
+  const pl = new SIM.Planta({ nTcu: 8, nHsu: 1, nRep: 0, dia: 172, hora: 11 });
+  for (let i = 0; i < 60; i++) pl.paso(1);
+  const t = pl.tcu(8);                                    /* el último de la vuelta */
+  t.setaLocal = true;
+  /* lo único que espera es SU antirrebote —la línea tiene que estar estable—, que se
+     mide en centésimas y no en vueltas de poleo: dos pasos de 50 ms */
+  const tSeta = SIM.K.ANTIRREBOTE_S + 0.01;
+  pl.paso(tSeta); pl.paso(tSeta);
+  ok(!t.motorHabilitado,
+     'la seta corta el motor sin esperar al poleo: es SUYA, no de la red',
+     (2 * tSeta).toFixed(2) + ' s de antirrebote contra ' + SIM.K.POLEO_TCU_S + ' s de vuelta');
+}
+
+/* SIN RADIO NO LLEGAN ÓRDENES, y la marca de contacto lo dice. Antes `ultimoContacto`
+   se renovaba en cada paso, así que `lastComm` (29500) no significaba nada. */
+{
+  const pr = new SIM.Planta({ nTcu: 4, nHsu: 1, nRep: 0, grupos: 1, dia: 172, hora: 11 });
+  for (let i = 0; i < 60; i++) pr.paso(1);
+  const t = pr.tcu(1);
+  const marcaViva = t.ultimoContacto;
+  t.online = false;
+  for (let i = 0; i < 120; i++) pr.paso(1);
+  ok(t.ultimoContacto === marcaViva,
+     'un TCU que no contesta congela su lastComm', 'se quedó en ' + marcaViva);
+  ok(pr.ahora() - t.ultimoContacto > 100,
+     'y su dato envejece a la vista', Math.round(pr.ahora() - t.ultimoContacto) + ' s de retraso');
+  /* y lo que ya sabía NO se le borra: se queda con la última orden */
+  const antes = JSON.stringify(t.deNcu);
+  pr.ncu.fuerza(SIM.SP.LIMPIEZA, 1, true);
+  for (let i = 0; i < 60; i++) pr.paso(1);
+  ok(JSON.stringify(t.deNcu) === antes,
+     'y la orden nueva no le llega: sigue con la última que le dieron');
+  ok(pr.tcu(2).deNcu.forzado === SIM.SP.LIMPIEZA,
+     'mientras que a los que sí contestan sí');
+}
+
 console.log('\n── la cuenta atrás para desabanderar ──');
 /* Abanderado son DOS estados y confundirlos es lo que hace que nadie entienda por qué
    el campo sigue de canto con el día en calma: mientras sopla por encima del umbral la
@@ -711,7 +828,9 @@ ok(marcados.SLEW_DPS && marcados.SLEW_DPS.canon === 0.17,
 const Pc = new SIM.Planta({ nTCU: 2, nHSU: 1, perfil: 'SP_45W_6Ah', hora: 11, dia: 172,
                             lat: 42.82, lon: -1.60, tz: 1 });
 Pc.meteo.viento = 9; Pc.meteo.rachas = 0;    /* 32 km/h: bajo el umbral canónico, sobre el ajustado */
-Pc.paso(1); Pc.paso(1);
+/* y se le da una vuelta de poleo entera: el viento no salta del anemómetro al TCU,
+   lo lee la NCU en su vuelta y lo reparte en la suya */
+for (let i = 0; i < 20; i++) Pc.paso(1);
 ok(Pc.tcu(1).stow > 0, 'un umbral de viento bajado abandera con menos viento', '9 m/s con T1 = 8');
 
 let pegas = 0;
@@ -943,11 +1062,11 @@ ok(!Pw.escribe('tcu', 1, 47777, [1]).ok, 'y una dirección que no existe');
 
 /* 7 · los forzados de la NCU son un mapa de bits POR GRUPO */
 Pw.escribe('ncu', 0, 40001, [0b0011]);                /* SP1 a los grupos 1 y 2 */
-Pw.paso(1);
+for (let i = 0; i < 20; i++) Pw.paso(1);              /* una vuelta de poleo: la orden viaja */
 ok(Pw.tcu(1).sp === SIM.SP.VIENTO && Pw.tcu(3).sp !== SIM.SP.VIENTO,
    'force_sp_1 llega solo a los grupos de su máscara');
 Pw.escribe('ncu', 0, 40001, [0]);
-Pw.paso(1);
+for (let i = 0; i < 20; i++) Pw.paso(1);              /* soltar también viaja */
 ok(Pw.tcu(1).sp !== SIM.SP.VIENTO, 'y escribir 0 lo suelta');
 
 /* 8 · limpiar alarmas por 40007.13, que es como se hace de verdad */

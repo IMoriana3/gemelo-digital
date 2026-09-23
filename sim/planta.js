@@ -101,6 +101,16 @@ var K = {
   DEFENSE_POS: F.e.DEFENSE_POS, /* defensa por batería */
   SLEW_DPS: F.e.SLEW_DPS,       /* velocidad real de giro (°/s) */
   HYST_DEG: F.e.HYST_DEG,       /* deadband del lazo */
+  /* LA RED NO ES INSTANTÁNEA. La NCU es el maestro: sondea sus HSU y sus TCU por
+     Zigbee, de uno en uno, y cada equipo solo sabe lo que le tocó en SU vuelta.
+     Estos dos ritmos son la cadencia con la que la NCU DEJA GRABADO cada equipo en su
+     log de planta (`scada/tools/descarga-logs`: «la TCU cada ~10 s, las estaciones
+     cada ~5 s, la propia NCU cada segundo»), que es lo más cercano a un periodo de
+     poleo que hay documentado en casa: no puede grabar más a menudo de lo que lee.
+     Es una cota, no una medida del bus — y por eso son parámetros, no constantes. */
+  POLEO_HSU_S: 5,               /* s · cada cuánto la NCU lee una HSU */
+  POLEO_TCU_S: 10,              /* s · cada cuánto la NCU alcanza un TCU */
+  POLEO_CADUCA: 3,              /* vueltas sin contestar antes de dar el dato por viejo */
   WIND_T1: F.e.WIND_T1,         /* 40 km/h → abanderamiento parcial */
   WIND_T2: F.e.WIND_T2,         /* 60 km/h → abanderamiento total */
   PARTIAL_STOW: F.e.PARTIAL_STOW_DEG,
@@ -179,6 +189,10 @@ var PARAMS = [
   { k: 'SLEW_DPS',      n: 'Velocidad del actuador',       u: '°/s',   d: 3, g: 'Geometría y movimiento', o: 'canon' },
   { k: 'HYST_DEG',      n: 'Banda muerta del lazo',        u: '°',     d: 2, g: 'Geometría y movimiento', o: 'canon' },
   { k: 'VEL_SIN_CARGA', n: 'Velocidad del motor en vacío', u: '°/s',   d: 2, g: 'Geometría y movimiento', o: 'sim' },
+
+  { k: 'POLEO_HSU_S',   n: 'Poleo NCU → HSU',              u: 's',     d: 1, g: 'Red y poleo', o: 'sim' },
+  { k: 'POLEO_TCU_S',   n: 'Poleo NCU → TCU',              u: 's',     d: 1, g: 'Red y poleo', o: 'sim' },
+  { k: 'POLEO_CADUCA',  n: 'Vueltas para dar el dato viejo', u: '',     d: 0, g: 'Red y poleo', o: 'sim' },
 
   { k: 'WIND_T1',       n: 'Umbral parcial',               u: 'm/s',   d: 3, g: 'Abanderamiento', o: 'canon' },
   { k: 'WIND_T2',       n: 'Umbral total',                 u: 'm/s',   d: 3, g: 'Abanderamiento', o: 'canon' },
@@ -496,7 +510,9 @@ HSU.prototype.paso = function (dt) {
      anemómetro reporta media y racha por separado, y la racha ya tiene su propio bit
      (`alarmaRacha`, 30002.10). */
   this.nivel = this.viento >= K.WIND_T2 ? 2 : (this.viento >= K.WIND_T1 ? 1 : 0);
-  if (this.online) this.ultimoContacto = this.p.t.epoch;
+  /* la marca de último contacto NO se pone aquí: la pone la NCU cuando la LEE. Una
+     estación que mide de maravilla y a la que nadie sondea lleva su dato a ninguna
+     parte, y eso es exactamente lo que `lastComm` (29440) sirve para ver. */
 };
 HSU.prototype.alarmaViento = function () { return this.nivel >= 2; };
 HSU.prototype.alarmaNieve = function () { return this.nieve >= K.SNOW_ALARM_M; };
@@ -545,6 +561,7 @@ function TCU(id, planta, opts) {
   this.repetidor = !!opts.repetidor;      /* un repetidor es una TCU fija: misma
                                              electrónica y batería, sin seguidor */
   this.rnd = new Rnd(1000 + id * 13);
+  this.idx = opts.idx != null ? opts.idx : (id - 1);   /* su sitio en la vuelta de poleo */
   /* de qué come este TCU: perfil de planta salvo que se le fije uno propio */
   this.perfil = perfilDe(opts.perfil || (planta.cfg && planta.cfg.perfil));
   this.ah = this.perfil.ah;                /* 3 Ah o 6 Ah según el perfil; 0 si no lleva batería */
@@ -558,6 +575,12 @@ function TCU(id, planta, opts) {
   this.stowCuenta = 0;                    /* s para desabanderar, si ya ha bajado el viento */
   this.stowRearma = false;                /* el viento sigue por encima del umbral */
   this.stowHisteresis = 0; this.stowLado = 0;
+
+  /* la copia de lo que la NCU le ha dicho. Nace en calma: un equipo recién arrancado
+     no sabe nada del viento hasta que le sondean por primera vez. */
+  this.deNcu = { nivelViento: 0, viento: 0, dir: 180, vientoInvertido: false,
+                 nieve: false, limpieza: false, forzado: 0, t: -1e9 };
+  this.tPoleo = null;
 
   this.forzadoLocal = 0;             /* 40000 = 11..17: forzado escrito a ESTE equipo */
   this.jog = 0;                      /* 40017: mando manual del motor (−1 este, +1 oeste) */
@@ -688,18 +711,45 @@ function TCU(id, planta, opts) {
   this.solar = { real: 0, bt: 0, zen: 0, az: 0, dia: false };
 }
 
-/* Entradas que llegan de fuera del TCU en este instante. */
-TCU.prototype.entradas = function () {
-  var n = this.p.ncu, g = this.grupo;
-  return {
-    seta: this.seta,                       /* ya filtrada por el antirrebote */
+/* LO QUE LE LLEGÓ EN SU VUELTA. La NCU alcanza a cada TCU de uno en uno, así que lo
+   que este equipo sabe del mundo es la foto de su último poleo, no el instante. Y si
+   no contesta, no se renueva: se queda con la última orden, que es lo que hace un
+   equipo real y lo que hace que su `lastComm` (29500+2·i) envejezca. */
+TCU.prototype.poleaNcu = function () {
+  var n = this.p.ncu, ahora = this.p.ahora(), N = Math.max(1, this.p.tcus.length);
+  var Tp = Math.max(0.001, K.POLEO_TCU_S);
+  if (this.tPoleo == null) this.tPoleo = ahora - Tp + (this.idx * Tp / N);
+  if (ahora - this.tPoleo < Tp) return;
+  this.tPoleo = ahora;
+  if (!this.online) return;                /* sin radio no le llega nada */
+  this.ultimoContacto = Math.floor(ahora);
+  this.deNcu = {
     nivelViento: n.nivelVientoGlobal,
+    viento: n.vientoMax,                   /* con esto decide su abanderamiento */
+    dir: n.dirVientoMax,
     vientoInvertido: n.vientoInvertido,
     nieve: n.alarmaNieve,
-    limpieza: n.limpieza[g - 1],
+    limpieza: n.limpieza[this.grupo - 1],
+    forzado: n.forzadoDe(this.grupo),
+    t: ahora
+  };
+};
+
+/* Entradas que llegan de fuera del TCU en este instante. Las de la RED son la copia
+   de su último poleo; las FÍSICAS —su seta, un 40000 escrito por RS485 contra este
+   equipo— no pasan por la NCU y valen ya. Esa diferencia es el fondo del asunto: la
+   seta corta el motor en el acto y el viento tarda dos vueltas en llegar. */
+TCU.prototype.entradas = function () {
+  var d = this.deNcu;
+  return {
+    seta: this.seta,                       /* ya filtrada por el antirrebote */
+    nivelViento: d.nivelViento,
+    vientoInvertido: d.vientoInvertido,
+    nieve: d.nieve,
+    limpieza: d.limpieza,
     /* el forzado puede venir de la NCU (a todo el grupo) o del propio equipo, si
        alguien le ha escrito 40000 con 11..17. Gana el local, que es el más cercano. */
-    forzado: this.forzadoLocal || n.forzadoDe(g),
+    forzado: this.forzadoLocal || d.forzado,
     comNcu: this.online
   };
 };
@@ -773,7 +823,9 @@ TCU.prototype.decide = function (dt, ang) {
   /* el eje A necesita además de dónde VIENE el viento, que es lo que miden las HSU */
   /* los umbrales se releen de K en cada paso: así mover uno con la planta en marcha
      surte efecto ya, sin perderle el estado a la máquina (ni el lado abanderado) */
-  var rAb = sincronizaBandera(this.ab).paso(dt, this.p.ncu.vientoMax, ang.sel, azSol, this.p.ncu.dirVientoMax);
+  /* el viento con el que decide es EL QUE LE LLEGÓ, no el que hace ahora mismo en la
+     estación: por eso abandera con retraso, y por eso la planta lo hace en ola */
+  var rAb = sincronizaBandera(this.ab).paso(dt, this.deNcu.viento, ang.sel, azSol, this.deNcu.dir);
   this.stow = rAb.estado;
   /* Lo que hace falta para saber CUÁNDO se suelta la bandera, que es la pregunta que
      se hace el operario mirando el SCADA. Dos situaciones distintas:
@@ -1304,6 +1356,7 @@ TCU.prototype.paso = function (dt) {
   var ang = angulos(this.p.loc, this.p.t.dia, this.p.t.hora,
                     { pol: this.p.cfg.polBT, T: this.p.Tbt || null,
                       nFilas: this.p.cfg.nTcu, fila: this.fila || 0 });
+  this.poleaNcu();            /* ¿me ha alcanzado la NCU en esta vuelta? */
   this.cielo(ang);            /* la irradiancia del sitio, UNA vez por paso */
   this.solar = { real: ang.real, bt: ang.bt, zen: ang.sol.zen * R2D, az: ang.sol.az * R2D, dia: ang.dia };
   /* el orden importa: primero se LEEN las entradas (medida analógica y línea binaria),
@@ -1322,7 +1375,7 @@ TCU.prototype.paso = function (dt) {
     this.sobrecorriente = true;
     this.alarmaMotorEnclavada = true;
   }
-  if (this.online) this.ultimoContacto = this.p.t.epoch;
+  /* igual que en la HSU: el contacto lo marca QUIEN SONDEA, en `poleaNcu()` */
 };
 
 /* Alarmas y estado, en el mismo criterio que el SCADA y la toolbox:
@@ -1390,6 +1443,9 @@ function NCU(planta) {
   this.alarmaRacha = false; this.falloWs = false; this.falloSs = false;
   this.vientoInvertido = false;
   this.timeoutPosicion = 3600;             /* 40080: vuelta a automático (s) */
+  /* LO QUE LA NCU HA LEÍDO de cada HSU, que no es lo que la HSU está midiendo: una
+     copia por estación, con la marca de cuándo se sacó. Ver `NCU.prototype.paso`. */
+  this.visto = [];
 }
 /* Devuelve la safe position forzada a un grupo (la de más prioridad si hay varias). */
 NCU.prototype.forzadoDe = function (grupo) {
@@ -1401,21 +1457,59 @@ NCU.prototype.fuerza = function (sp, grupo, on) {
   var bit = 1 << (grupo - 1);
   this.forzados[sp] = on ? (this.forzados[sp] | bit) : (this.forzados[sp] & ~bit);
 };
+/* ═══════════ EL POLEO: LA NCU NO VE, LEE ═══════════════════════════════════
+   El viento NO lo detecta el TCU. Lo mide la HSU, que no habla con nadie por su
+   cuenta: la NCU es el maestro de la Zigbee y la SONDEA. Y la NCU tampoco empuja
+   nada al vuelo: alcanza a cada TCU en su vuelta. Así que entre que sopla y que un
+   seguidor lo sabe hay DOS esperas, no cero:
+
+       ráfaga → [HSU la mide] → ~POLEO_HSU_S → [la NCU la lee]
+                              → ~POLEO_TCU_S → [el TCU se entera] → abandera
+
+   Esto estaba modelado como si los tres compartieran memoria: se movía el
+   deslizador del viento y los 750 seguidores arrancaban en el MISMO paso. En campo
+   no pasa: el poleo es de uno en uno, así que la planta abandera EN OLA, y los
+   equipos del final de la vuelta salen hasta una vuelta entera más tarde. Esa ola es
+   justo lo que un simulador de planta tiene que enseñar.
+
+   Las marcas de tiempo de todo esto ya están en el mapa y son suyas, no inventadas:
+   `lastComm` de cada HSU (29440+2·j) y de cada TCU (29500+2·i), «Unix Epoch formatted
+   timestamp of the last successful read», y `lastValidWind` (29380). Si el simulador
+   las renovaba en cada paso, esos registros no significaban nada.
+
+   Un equipo que no contesta NO renueva su copia: la NCU se queda con lo último que le
+   sacó, que es lo que hace de verdad y lo que hace que `lastComm` envejezca. */
 NCU.prototype.paso = function () {
-  /* la NCU se queda con el nivel MÁS ALTO de todas sus HSU y con el «o» de sus alarmas */
+  var H = this.p.hsus, ahora = this.p.ahora(), Tp = Math.max(0.001, K.POLEO_HSU_S);
+  for (var k = 0; k < H.length; k++) {
+    var hh = H[k];
+    /* la vuelta se reparte: la estación k entra en la fase k/N del ciclo, que es lo
+       que hace un maestro que las recorre en orden */
+    if (hh.tPoleo == null) hh.tPoleo = ahora - Tp + (k * Tp / H.length);
+    if (ahora - hh.tPoleo < Tp) continue;
+    hh.tPoleo = ahora;
+    if (!hh.online) continue;              /* no contesta: la copia no se renueva */
+    hh.ultimoContacto = Math.floor(ahora);
+    this.visto[k] = { nivel: hh.nivel, viento: hh.viento, dir: hh.dir,
+                      av: hh.alarmaViento(), an: hh.alarmaNieve(), ar: hh.alarmaRacha(),
+                      fw: hh.falloVientoSensor, fs: hh.falloNieveSensor, t: ahora };
+  }
+
+  /* y ahora agrega SOBRE SU COPIA, no sobre las estaciones */
   var n = 0, av = false, an = false, ar = false, fw = false, fs = false, este = false, vmax = 0, dmax = 180;
-  var H = this.p.hsus;
   for (var i = 0; i < H.length; i++) {
-    var h = H[i];
-    if (!h.online) { fw = true; fs = true; continue; }
+    var h = this.visto[i];
+    /* sin lectura todavía, o una estación que dejó de contestar y a la que se le ha
+       pasado el plazo: para la NCU es un fallo de sensor, que es su bit */
+    if (!h || (ahora - h.t) > Tp * K.POLEO_CADUCA) { fw = true; fs = true; continue; }
     if (h.nivel > n) n = h.nivel;
     /* para decidir un abanderamiento, el peor dato es el que cuenta (CONTRATO.md) */
     /* la MEDIA de la estación que más sopla, no su pico. El abanderamiento se decide
        sobre esto, y con rachas de verdad —picos de segundos— tomar el máximo hace que el
        seguidor abandere y desabandere con cada ráfaga. La racha tiene su alarma aparte. */
     if (h.viento > vmax) { vmax = h.viento; dmax = h.dir; }
-    av = av || h.alarmaViento(); an = an || h.alarmaNieve(); ar = ar || h.alarmaRacha();
-    fw = fw || h.falloVientoSensor; fs = fs || h.falloNieveSensor;
+    av = av || h.av; an = an || h.an; ar = ar || h.ar;
+    fw = fw || h.fw; fs = fs || h.fs;
     /* dirección de viento del ESTE (45°–135°): el R7 lo republica como «inverted wind» */
     if (h.nivel > 0 && h.dir > 45 && h.dir < 135) este = true;
   }
@@ -1563,10 +1657,10 @@ function Planta(cfg) {
   var i;
   for (i = 1; i <= this.cfg.nHsu; i++) this.hsus.push(new HSU(i, this));
   for (i = 1; i <= this.cfg.nTcu; i++) {
-    this.tcus.push(new TCU(i, this, { grupo: 1 + ((i - 1) % this.cfg.grupos) }));
+    this.tcus.push(new TCU(i, this, { grupo: 1 + ((i - 1) % this.cfg.grupos), idx: this.tcus.length }));
   }
   for (i = 1; i <= this.cfg.nRep; i++) {
-    this.tcus.push(new TCU(this.cfg.nTcu + i, this, { grupo: 1, repetidor: true }));
+    this.tcus.push(new TCU(this.cfg.nTcu + i, this, { grupo: 1, repetidor: true, idx: this.tcus.length }));
   }
   this.ncu.paso();
   /* La planta no acaba de nacer: lleva funcionando. Se arranca a cada seguidor en el
@@ -1637,6 +1731,12 @@ Planta.prototype.paso = function (dt) {
      Lo que se congela es su marca de último contacto, que es lo que ve el SCADA. */
   for (i = 0; i < this.tcus.length; i++) this.tcus[i].paso(dt);
 };
+
+/* El reloj de la simulación en segundos, CON decimales. `t.epoch` va en segundos
+   enteros a propósito —las marcas del mapa son U32 y un epoch con decimales hace que
+   dos lecturas idénticas salgan distintas—, pero el poleo se cuenta en pasos de 5 y
+   10 s y necesita la parte fraccionaria: sin ella, un paso de 0,001 s nunca avanza. */
+Planta.prototype.ahora = function () { return this.t.epoch + this.tResto; };
 
 Planta.prototype.tcu = function (id) {
   for (var i = 0; i < this.tcus.length; i++) if (this.tcus[i].id === id) return this.tcus[i];
