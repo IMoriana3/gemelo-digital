@@ -1502,9 +1502,11 @@ NCU.prototype.fuerza = function (sp, grupo, on) {
    enterarse depende de DÓNDE CAE respecto de la estación. El que va detrás de ella
    se entera en la misma vuelta; el que va delante, en la siguiente.
 
-   El ORDEN dentro de la vuelta no está documentado. Aquí van primero las estaciones
-   y después los seguidores, que es el caso favorable —la NCU se entera del tiempo
-   antes de repartir— y queda dicho por si algún día se sabe que es al revés.
+   EL ORDEN dentro de la vuelta: primero las ESTACIONES y después los SEGUIDORES.
+   Estuvo aquí como suposición —era el caso favorable, la NCU se entera del tiempo
+   antes de repartir— y está CONFIRMADO por el mantenedor (2026-09-23). Importa: con
+   las estaciones delante, un seguidor puede enterarse de una ráfaga en su MISMA
+   vuelta; al revés, siempre tendría que esperar a la siguiente.
 
    Esto estaba modelado como si los tres compartieran memoria: se movía el
    deslizador del viento y los 750 seguidores arrancaban en el MISMO paso. En campo

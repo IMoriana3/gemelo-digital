@@ -197,7 +197,7 @@ ráfaga → [la HSU la mide] → [la NCU la lee en su ranura] → [el TCU la rec
 
 **Es UNA sola vuelta**, y en ella entran las estaciones y los seguidores por igual. Esto estuvo un rato aquí como dos ritmos —uno para las HSU y otro para los TCU— y no es así. La consecuencia no es cosmética: lo que un seguidor tarda en enterarse depende de **dónde cae respecto de la estación**. El que va detrás se entera en la misma vuelta; el que va delante, en la siguiente.
 
-El **orden** dentro de la vuelta no está documentado. Aquí van primero las estaciones y después los seguidores, que es el caso favorable —la NCU se entera del tiempo antes de repartir— y queda dicho por si algún día se sabe que es al revés.
+El **orden** dentro de la vuelta: primero las **estaciones** y después los **seguidores**. Estuvo aquí como suposición y está **confirmado** (mantenedor, 23-09-2026). Importa: con las estaciones delante, un seguidor puede enterarse de una ráfaga en su **misma** vuelta; al revés, siempre tendría que esperar a la siguiente.
 
 Estaba modelado como si los tres compartieran memoria: se movía el deslizador del viento y los 750 seguidores arrancaban **en el mismo paso**. En campo no pasa. El poleo es de uno en uno, así que la planta abandera **en ola**, y los equipos del final de la vuelta salen hasta una vuelta entera más tarde. Medido en el banco con una vuelta de 5 s: la HSU a los 0,5 s, la NCU a 1 s, el primer TCU a 1 s y el último a 5 s — cuatro segundos de reparto.
 
