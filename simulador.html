@@ -503,6 +503,7 @@
           <div id="mb3dCuerpo"></div>
         </div>
         <div class="card">
+          <div class="sub" id="largoNota" style="margin:0 0 4px;display:none"></div>
           <div class="sub" id="nota3d" style="margin:0">Cada seguidor gira a su <b>inclinación REAL</b>, no a la que publica. Si el inclinómetro va descalibrado, aquí se ve la mesa torcida mientras el mapa Modbus dice que está clavada en su objetivo. El testigo de encima es la salud, con el criterio del SCADA: <b style="color:var(--ok)">verde</b> · <b style="color:var(--warn)">ámbar</b> · <b style="color:var(--danger)">rojo</b> · <b style="color:var(--tx3)">gris sin comunicación</b>. Clic en un seguidor para seleccionarlo · arrastrar gira · botón derecho desplaza · rueda acerca.</div>
         </div>
       </div>
@@ -1780,6 +1781,24 @@ function pintaTodo() {
     pintaHud3D();
     sincroViento();
     pintaModbus3D();
+    /* DE QUÉ LARGO SE ESTÁ PINTANDO. No todos los seguidores de una planta miden lo
+       mismo —Polvorín tiene seis tallas, de 9,9 a 82,4 m— y hasta ahora se pintaban
+       todos del canónico, con los cortos metiéndose dentro del vecino. Donde el DWG no
+       da la talla se sigue pintando el canónico, y eso NO puede quedar callado: quien
+       mire este campo tiene que saber si está viendo un plano o una aproximación. */
+    if (CAMPO && $('largoNota')) {
+      var LN = PLANTAS[+$('loc').value], f3 = LN && LN.largoFuente, e3 = $('largoNota');
+      var txt = { medida:   ['ok',   'Largos <b>medidos en el DWG</b>: cada seguidor sale del suyo.'],
+                  derivada: ['ok',   'Largos <b>derivados</b> de las constantes del DWG de esta planta ' +
+                                     '(careado al milímetro contra las once tallas medidas de la casa).'],
+                  parcial:  ['warn', 'Largos <b>solo para parte</b> de los seguidores: los demás salen del ' +
+                                     'largo canónico, que no es el suyo.'],
+                  ninguna:  ['warn', 'El DWG de esta planta <b>no da la talla</b>: todos los seguidores se ' +
+                                     'pintan del largo canónico. Las POSICIONES sí son las del plano; ' +
+                                     'los largos, no.'] }[f3];
+      e3.innerHTML = txt ? '<b style="color:var(--' + txt[0] + ')">Largo:</b> ' + txt[1] : '';
+      e3.style.display = txt ? '' : 'none';
+    }
     if (CAMPO && $('nota3d')) {
       var n3 = $('nota3d');
       if (CAMPO.detalleReducido && !n3.dataset.red) {
