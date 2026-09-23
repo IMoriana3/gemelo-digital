@@ -161,10 +161,13 @@ console.log('\n── el viento no lo detecta el TCU: lo mide la HSU y llega por
      'NCU ' + tNcu + ' s · 1.º ' + tPrim + ' s · último ' + tUlt + ' s');
   /* LA OLA: los equipos del final de la vuelta salen casi una vuelta entera más tarde.
      Es lo que hace que una planta no abandere de golpe, y lo que no se veía. */
-  ok(tUlt - tPrim > SIM.K.POLEO_TCU_S * 0.5,
+  ok(tUlt - tPrim > SIM.K.POLEO_S * 0.3,
      'la planta abandera EN OLA, no a la vez', 'reparto de ' + (tUlt - tPrim) + ' s');
-  ok(tNcu <= SIM.K.POLEO_HSU_S + 0.5 && tUlt <= SIM.K.POLEO_HSU_S + SIM.K.POLEO_TCU_S + 1,
-     'y ninguna espera pasa de su vuelta', 'tope ' + (SIM.K.POLEO_HSU_S + SIM.K.POLEO_TCU_S) + ' s');
+  /* UNA sola vuelta: ninguna espera puede pasar de dos vueltas, y la de la NCU con la
+     estación no pasa de una. Si algún día se pone rojo con el mismo POLEO_S es que se
+     han vuelto a separar los ritmos. */
+  ok(tNcu <= SIM.K.POLEO_S + 0.5 && tUlt <= 2 * SIM.K.POLEO_S + 1,
+     'y ninguna espera pasa de dos vueltas', 'vuelta de ' + SIM.K.POLEO_S + ' s');
 }
 
 /* LA SETA NO PASA POR LA RED. Es una línea de contacto del propio equipo: corta el
@@ -180,7 +183,7 @@ console.log('\n── el viento no lo detecta el TCU: lo mide la HSU y llega por
   pl.paso(tSeta); pl.paso(tSeta);
   ok(!t.motorHabilitado,
      'la seta corta el motor sin esperar al poleo: es SUYA, no de la red',
-     (2 * tSeta).toFixed(2) + ' s de antirrebote contra ' + SIM.K.POLEO_TCU_S + ' s de vuelta');
+     (2 * tSeta).toFixed(2) + ' s de antirrebote contra ' + SIM.K.POLEO_S + ' s de vuelta');
 }
 
 /* SIN RADIO NO LLEGAN ÓRDENES, y la marca de contacto lo dice. Antes `ultimoContacto`
