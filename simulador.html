@@ -719,6 +719,11 @@ function construye() {
       fcDays: P && !P.cfg.estrategia.politicaAuto ? +$('fcDays').value : undefined
     },
     dia: +$('dia').value, hora: +$('hora').value,
+    /* LA VUELTA DE POLEO DEPENDE DE CADA PLANTA. Si el emplazamiento trae la suya en
+       el catálogo, manda la suya; si no, el parámetro global del panel. Hoy ninguna
+       la trae —no tenemos el dato por planta— y por eso esto no inventa un número:
+       cuando se sepa, se añade `poleoS` a esa planta en `sim/plantas.js` y ya. */
+    poleoS: (L && L.poleoS) || undefined,
     loc: { n: L.n, lat: L.lat, lon: L.lon, tz: L.tz, dst: L.dst }
   });
   aplicaMeteo(); aplicaEstrategia(); aplicaEstrategiaViento();

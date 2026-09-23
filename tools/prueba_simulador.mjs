@@ -54,8 +54,32 @@ const PUERTO = 8391 + (process.pid % 80);
 const srv = spawn('python3', ['-m', 'http.server', String(PUERTO), '--directory', PADRE],
                   { stdio: 'ignore' });
 process.on('exit', () => { try { srv.kill(); } catch { /* nada */ } });
-await new Promise((r) => setTimeout(r, 1200));
 const PAG = `http://localhost:${PUERTO}/${CARPETA}/simulador.html`;
+
+/* ── SE ESPERA A QUE EL SERVIDOR ESCUCHE, NO 1,2 SEGUNDOS ──────────────────────
+   Aquí había un `setTimeout(1200)` y en CI se cayó: `ERR_CONNECTION_REFUSED`, con el
+   banco muerto antes de correr una sola prueba. En una máquina cargada 1,2 s no basta
+   para que Python ate el puerto, y un número fijo solo aplaza el problema — el que lo
+   sube a 3 s se lo encuentra a los 4. Así que se PREGUNTA: se llama al servidor hasta
+   que contesta, con un tope de 20 s y un mensaje que dice qué pasó si no contesta.
+   Un arnés que falla por su propio arranque enseña a desconfiar de sus rojos, que es
+   lo más caro que puede hacer una prueba. */
+{
+  const t0 = Date.now();
+  let vivo = false;
+  while (Date.now() - t0 < 20000) {
+    try {
+      const r = await fetch(`http://localhost:${PUERTO}/`, { signal: AbortSignal.timeout(1000) });
+      if (r.ok || r.status === 404) { vivo = true; break; }
+    } catch { /* todavía no escucha */ }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!vivo) {
+    console.error(`el servidor de pruebas no llegó a escuchar en el puerto ${PUERTO} ` +
+                  'en 20 s: sin él no se puede abrir la página');
+    process.exit(2);
+  }
+}
 
 /* ── GUARDIA DE NADA DUPLICADO, antes de abrir el navegador ────────────────────
    Un fichero de un solo <script> con una funcion definida dos veces NO da error: en

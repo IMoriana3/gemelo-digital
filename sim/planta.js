@@ -108,8 +108,12 @@ var K = {
      cada ~5 s, la propia NCU cada segundo»), que es lo más cercano a un periodo de
      poleo que hay documentado en casa: no puede grabar más a menudo de lo que lee.
      Es una cota, no una medida del bus — y por eso son parámetros, no constantes. */
-  POLEO_HSU_S: 5,               /* s · cada cuánto la NCU lee una HSU */
-  POLEO_TCU_S: 10,              /* s · cada cuánto la NCU alcanza un TCU */
+  /* UNA SOLA VUELTA PARA TODOS. Esto estuvo un rato como dos ritmos —uno para las
+     HSU y otro para los TCU— y no es así: la NCU da UNA vuelta a su red y en ella
+     entran las estaciones y los seguidores por igual. Y el número DEPENDE DE CADA
+     PLANTA, así que es un parámetro y se puede fijar por emplazamiento
+     (`cfg.poleoS`), no una constante de la casa. */
+  POLEO_S: 5,                   /* s · la vuelta entera de la NCU a su red */
   POLEO_CADUCA: 3,              /* vueltas sin contestar antes de dar el dato por viejo */
   WIND_T1: F.e.WIND_T1,         /* 40 km/h → abanderamiento parcial */
   WIND_T2: F.e.WIND_T2,         /* 60 km/h → abanderamiento total */
@@ -190,8 +194,7 @@ var PARAMS = [
   { k: 'HYST_DEG',      n: 'Banda muerta del lazo',        u: '°',     d: 2, g: 'Geometría y movimiento', o: 'canon' },
   { k: 'VEL_SIN_CARGA', n: 'Velocidad del motor en vacío', u: '°/s',   d: 2, g: 'Geometría y movimiento', o: 'sim' },
 
-  { k: 'POLEO_HSU_S',   n: 'Poleo NCU → HSU',              u: 's',     d: 1, g: 'Red y poleo', o: 'sim' },
-  { k: 'POLEO_TCU_S',   n: 'Poleo NCU → TCU',              u: 's',     d: 1, g: 'Red y poleo', o: 'sim' },
+  { k: 'POLEO_S',       n: 'Vuelta de poleo de la NCU',    u: 's',     d: 1, g: 'Red y poleo', o: 'sim' },
   { k: 'POLEO_CADUCA',  n: 'Vueltas para dar el dato viejo', u: '',     d: 0, g: 'Red y poleo', o: 'sim' },
 
   { k: 'WIND_T1',       n: 'Umbral parcial',               u: 'm/s',   d: 3, g: 'Abanderamiento', o: 'canon' },
@@ -734,9 +737,11 @@ function TCU(id, planta, opts) {
    no contesta, no se renueva: se queda con la última orden, que es lo que hace un
    equipo real y lo que hace que su `lastComm` (29500+2·i) envejezca. */
 TCU.prototype.poleaNcu = function () {
-  var n = this.p.ncu, ahora = this.p.ahora(), N = Math.max(1, this.p.tcus.length);
-  var Tp = Math.max(0.001, K.POLEO_TCU_S);
-  if (this.tPoleo == null) this.tPoleo = ahora - Tp + (this.idx * Tp / N);
+  var n = this.p.ncu, ahora = this.p.ahora(), Tp = this.p.poleoS();
+  /* MISMA vuelta que las estaciones, y detrás de ellas: la ranura de este seguidor
+     es la suya desplazada por las estaciones que van delante */
+  var H = this.p.hsus.length, enVuelta = H + this.p.tcus.length;
+  if (this.tPoleo == null) this.tPoleo = ahora - Tp + this.p.ranura(H + this.idx, enVuelta) * Tp;
   if (ahora - this.tPoleo < Tp) return;
   this.tPoleo = ahora;
   if (!this.online) return;                /* sin radio no le llega nada */
@@ -1484,11 +1489,24 @@ NCU.prototype.fuerza = function (sp, grupo, on) {
 /* ═══════════ EL POLEO: LA NCU NO VE, LEE ═══════════════════════════════════
    El viento NO lo detecta el TCU. Lo mide la HSU, que no habla con nadie por su
    cuenta: la NCU es el maestro de la Zigbee y la SONDEA. Y la NCU tampoco empuja
-   nada al vuelo: alcanza a cada TCU en su vuelta. Así que entre que sopla y que un
-   seguidor lo sabe hay DOS esperas, no cero:
+   nada al vuelo: alcanza a cada TCU cuando le toca. Así que entre que sopla y que un
+   seguidor lo sabe hay una espera, no cero.
 
-       ráfaga → [HSU la mide] → ~POLEO_HSU_S → [la NCU la lee]
-                              → ~POLEO_TCU_S → [el TCU se entera] → abandera
+   ES UNA SOLA VUELTA, y en ella entran las estaciones y los seguidores por igual:
+
+       ráfaga → [la HSU la mide] → [la NCU la lee en su ranura]
+                                 → [el TCU la recibe en la suya] → abandera
+
+   Estuvo un rato aquí como DOS ritmos, uno por tipo de equipo, y no es así. La
+   consecuencia no es cosmética: en una sola vuelta, lo que un seguidor tarda en
+   enterarse depende de DÓNDE CAE respecto de la estación. El que va detrás de ella
+   se entera en la misma vuelta; el que va delante, en la siguiente.
+
+   EL ORDEN dentro de la vuelta: primero las ESTACIONES y después los SEGUIDORES.
+   Estuvo aquí como suposición —era el caso favorable, la NCU se entera del tiempo
+   antes de repartir— y está CONFIRMADO por el mantenedor (2026-09-23). Importa: con
+   las estaciones delante, un seguidor puede enterarse de una ráfaga en su MISMA
+   vuelta; al revés, siempre tendría que esperar a la siguiente.
 
    Esto estaba modelado como si los tres compartieran memoria: se movía el
    deslizador del viento y los 750 seguidores arrancaban en el MISMO paso. En campo
@@ -1503,13 +1521,25 @@ NCU.prototype.fuerza = function (sp, grupo, on) {
 
    Un equipo que no contesta NO renueva su copia: la NCU se queda con lo último que le
    sacó, que es lo que hace de verdad y lo que hace que `lastComm` envejezca. */
+
+/* La vuelta de ESTA planta, en segundos. Sale de la configuración del emplazamiento
+   si la trae —el ritmo depende de cada planta— y si no, del parámetro global. */
+Planta.prototype.poleoS = function () {
+  var v = this.cfg && this.cfg.poleoS;
+  return Math.max(0.001, (v != null && v > 0) ? v : K.POLEO_S);
+};
+/* Cuántos equipos hay en la vuelta y en qué ranura va cada uno: estaciones primero,
+   seguidores después. Devuelve la fase 0..1 dentro del ciclo. */
+Planta.prototype.ranura = function (i, n) { return n > 0 ? i / n : 0; };
+
 NCU.prototype.paso = function () {
-  var H = this.p.hsus, ahora = this.p.ahora(), Tp = Math.max(0.001, K.POLEO_HSU_S);
+  var H = this.p.hsus, ahora = this.p.ahora(), Tp = this.p.poleoS();
+  var enVuelta = H.length + this.p.tcus.length;
   for (var k = 0; k < H.length; k++) {
     var hh = H[k];
-    /* la vuelta se reparte: la estación k entra en la fase k/N del ciclo, que es lo
-       que hace un maestro que las recorre en orden */
-    if (hh.tPoleo == null) hh.tPoleo = ahora - Tp + (k * Tp / H.length);
+    /* la vuelta se reparte entre TODOS los equipos: la estación k entra en la ranura
+       k de una vuelta de `enVuelta` paradas */
+    if (hh.tPoleo == null) hh.tPoleo = ahora - Tp + this.p.ranura(k, enVuelta) * Tp;
     if (ahora - hh.tPoleo < Tp) continue;
     hh.tPoleo = ahora;
     if (!hh.online) continue;              /* no contesta: la copia no se renueva */
