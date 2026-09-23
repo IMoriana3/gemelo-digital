@@ -56,3 +56,15 @@ Local: sirve la carpeta por HTTP (`python3 -m http.server 8080`) y abre `http://
 - Procedencia: extraído de `IMoriana3/SolarGPTfull` (carpeta `viewers/`). `docs/` contiene la integración con el Panel de Proyectos.
 
 *Factiun · proyecto interno.*
+
+---
+
+## Cómo se comprueba una comprobación
+
+El estándar de puertas —piso por banco, alcance publicado, los tres estados
+MIDE / NO COMPROBADO / ROJO— vive en un solo sitio:
+**[`proyectos/docs/puertas-y-alcance.md`](https://github.com/IMoriana3/proyectos/blob/main/docs/puertas-y-alcance.md)**.
+
+Un original y enlaces; dos copias divergen. `docs/enlace_guia.sh` comprueba en
+CI que este enlace apunta a algo que existe — un enlace roto a la guía de
+puertas sería el chiste final.
