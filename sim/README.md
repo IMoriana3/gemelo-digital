@@ -201,9 +201,16 @@ El **orden** dentro de la vuelta: primero las **estaciones** y después los **se
 
 Estaba modelado como si los tres compartieran memoria: se movía el deslizador del viento y los 750 seguidores arrancaban **en el mismo paso**. En campo no pasa. El poleo es de uno en uno, así que la planta abandera **en ola**, y los equipos del final de la vuelta salen hasta una vuelta entera más tarde. Medido en el banco con una vuelta de 5 s: la HSU a los 0,5 s, la NCU a 1 s, el primer TCU a 1 s y el último a 5 s — cuatro segundos de reparto.
 
-**El número depende de cada planta**, así que no es una constante de la casa: es un parámetro, `POLEO_S`, que se toca en caliente en el panel como todo lo demás, y que un emplazamiento puede traer propio (`poleoS` en su ficha de `sim/plantas.js`, y de ahí a `cfg.poleoS`). Hoy ninguna planta lo trae, porque no tenemos el dato por planta; cuando se sepa, se añade ahí y manda sobre el global.
+**No hay un número, y no lo va a haber.** El poleo **varía según la posición de los seguidores** (mantenedor, 23-09-2026): lo que tarda la vuelta depende de a qué distancia de radio queda cada equipo, de cuántos saltos y repetidores hay por medio — o sea de la topología de esa planta, no de un ajuste que alguien eligió. Por eso es un **parámetro** y no una constante, y por eso **no se pregunta cuál es el de verdad**: se pone el de la planta que se esté mirando.
 
-El valor por defecto, 5 s, es una **cota, no una medida del bus**: no hay periodo de poleo documentado en el mapa, pero sí la cadencia con la que la NCU **deja grabado** cada equipo en su log de planta —*«la TCU cada ~10 s, las estaciones cada ~5 s, la propia NCU cada segundo»* (`scada/tools/descarga-logs`)— y no puede grabar más a menudo de lo que lee. Va marcado `sim`, no `canon`.
+Dónde se toca:
+
+| | |
+|---|---|
+| `POLEO_S` | en el panel de parámetros, en caliente, como todo lo demás |
+| `poleoS` en la ficha de un emplazamiento (`sim/plantas.js` → `cfg.poleoS`) | manda sobre el global para esa planta |
+
+El **5 s por defecto es un marcador de posición**, no una medida: no hay periodo de poleo en el mapa. Lo único que lo acota es la cadencia con la que la NCU **deja grabado** cada equipo en su log de planta —*«la TCU cada ~10 s, las estaciones cada ~5 s, la propia NCU cada segundo»* (`scada/tools/descarga-logs`)—, y no puede grabar más a menudo de lo que lee. Va marcado `sim`, no `canon`, y **cualquier número que salga del simulador con el 5 s puesto vale lo que valga ese 5**.
 
 **Las marcas de tiempo ya estaban en el mapa** y ahora significan algo: `lastComm` de cada HSU (`29440+2·j`) y de cada TCU (`29500+2·i`) — *«Unix Epoch formatted timestamp of the last successful read»* — y `lastValidWind` (`29380`). Antes se renovaban en cada paso de simulación, o sea que no decían nada. Ahora las pone **quien sondea, cuando sondea**: un equipo que deja de contestar congela su `lastComm` y se ve envejecer.
 

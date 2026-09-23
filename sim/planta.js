@@ -102,17 +102,24 @@ var K = {
   SLEW_DPS: F.e.SLEW_DPS,       /* velocidad real de giro (°/s) */
   HYST_DEG: F.e.HYST_DEG,       /* deadband del lazo */
   /* LA RED NO ES INSTANTÁNEA. La NCU es el maestro: sondea sus HSU y sus TCU por
-     Zigbee, de uno en uno, y cada equipo solo sabe lo que le tocó en SU vuelta.
-     Estos dos ritmos son la cadencia con la que la NCU DEJA GRABADO cada equipo en su
-     log de planta (`scada/tools/descarga-logs`: «la TCU cada ~10 s, las estaciones
-     cada ~5 s, la propia NCU cada segundo»), que es lo más cercano a un periodo de
-     poleo que hay documentado en casa: no puede grabar más a menudo de lo que lee.
-     Es una cota, no una medida del bus — y por eso son parámetros, no constantes. */
-  /* UNA SOLA VUELTA PARA TODOS. Esto estuvo un rato como dos ritmos —uno para las
-     HSU y otro para los TCU— y no es así: la NCU da UNA vuelta a su red y en ella
-     entran las estaciones y los seguidores por igual. Y el número DEPENDE DE CADA
-     PLANTA, así que es un parámetro y se puede fijar por emplazamiento
-     (`cfg.poleoS`), no una constante de la casa. */
+     Zigbee, de uno en uno, y cada equipo solo sabe lo que le tocó en SU vuelta. Es
+     UNA sola vuelta para todos —estuvo un rato aquí como dos ritmos, uno por tipo de
+     equipo, y no es así—, y en ella entran estaciones y seguidores por igual.
+
+     NO HAY UN NÚMERO, Y NO LO VA A HABER. El poleo «varía según posición de los
+     seguidores» (mantenedor, 23-09-2026): lo que tarda la vuelta depende de a qué
+     distancia de radio queda cada equipo, de cuántos saltos y repetidores hay por
+     medio — o sea de la TOPOLOGÍA de esa planta, no de un ajuste que alguien eligió.
+     Por eso esto es un parámetro y no una constante, y por eso no hay que ir a
+     buscar «el de verdad»: se pone el de la planta que se esté mirando, aquí o en
+     `cfg.poleoS` (la ficha del emplazamiento, que manda sobre este).
+
+     LOS 5 s SON UN MARCADOR DE POSICIÓN, no una medida. No hay periodo de poleo en
+     el mapa; lo único que lo acota es la cadencia con la que la NCU DEJA GRABADO
+     cada equipo en su log de planta (`scada/tools/descarga-logs`: «la TCU cada
+     ~10 s, las estaciones cada ~5 s, la propia NCU cada segundo»), y no puede grabar
+     más a menudo de lo que lee. Cualquier número que salga del simulador con este 5
+     puesto vale lo que valga ese 5. */
   POLEO_S: 5,                   /* s · la vuelta entera de la NCU a su red */
   POLEO_CADUCA: 3,              /* vueltas sin contestar antes de dar el dato por viejo */
   WIND_T1: F.e.WIND_T1,         /* 40 km/h → abanderamiento parcial */
