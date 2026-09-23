@@ -421,22 +421,23 @@ const r = await pg.evaluate(async () => {
      alcanza al TCU en la suya: dos esperas. Con una rafaga entrando, la teja de arriba
      y la de «lo sabe el TCU» NO coinciden durante unos segundos, y eso es el modelo
      funcionando, no un fallo de pintado. */
-  P.meteo.viento = 2;
-  for (let i = 0; i < 40; i++) P.paso(1);                 /* todos al dia, en calma */
-  pintaTodo();
+  /* CON POCOS PASOS A PROPOSITO: esta planta es Ayora, 754 equipos, y cada `P.paso()`
+     cuesta unos 4 s aqui (el backtracking por lineas, que es caro y es de antes). Un
+     bucle de setenta pasos se lleva cinco minutos de banco. Dos pasos bastan: uno corto
+     para ver que NO se ha enterado nadie, y uno de 30 s -- una vuelta entera-- para ver
+     que ya se han enterado todos. */
+  P.meteo.viento = 2; P.paso(30); pintaTodo();            /* todos al dia, en calma */
   o.poleo = { calma: celda('lo sabe el tcu') };
   P.meteo.viento = 20;                                    /* 72 km/h de golpe */
   P.paso(1); pintaTodo();
-  o.poleo.reciennacido = celda('lo sabe el tcu');
-  o.poleo.ncuJusto = (P.ncu.vientoMax * 3.6).toFixed(1);
   o.poleo.saben1s = P.tcus.filter((t) => t.deNcu.nivelViento > 0).length;
-  for (let i = 0; i < 30; i++) P.paso(1);
+  P.paso(30);                                             /* una vuelta de poleo */
   o.poleo.saben30s = P.tcus.filter((t) => t.deNcu.nivelViento > 0).length;
   o.poleo.total = P.tcus.length;
 
   /* y se deja como estaba: los bloques de abajo dan por bueno el viento de antes */
   P.meteo.viento = 12;
-  for (let i = 0; i < 20; i++) P.paso(20);
+  P.paso(30); P.paso(30);
   P.t.hora = 12; P.paso(0.001); pintaTodo();
 
   /* ELEGIR PLANTA CONFIGURA LA PLANTA. Antes el emplazamiento solo movia la latitud:
