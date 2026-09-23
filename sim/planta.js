@@ -602,12 +602,28 @@ function TCU(id, planta, opts) {
     evalMotorS: K.EVAL_MOTOR_S,                     /* 41039 */
     iMotorMax: (planta.cfg && planta.cfg.iMotorMax) || 7000,  /* 41040 */
     nightPos: K.NIGHT_POS,                          /* 41042 */
-    /* Los DOS márgenes direccionales, uno por registro, como los declara el
-       catálogo de escritura: 41060 `deadband_west` y 41061 `deadband_east`.
-       Estaban fundidos en UN escalar (`dbPulsos`), así que escribir 41060
-       cambiaba también el margen del ESTE y el `regsTCU` republicaba el mismo
-       número en los dos: la asimetría que el operador acababa de escribir era
-       invisible desde el SCADA. Ver TRACKER-BUG-01. */
+    /* LOS CUATRO MÁRGENES, Y NO SON DIRECCIONALES. Esto decía «41060 deadband_west
+       y 41061 deadband_east», y era un INVENTO mío: el este/oeste no sale de ningún
+       documento. La fuente canónica (`cobertura-zigbee/tools/modbus_src/tcu_v6.json`,
+       de donde se genera el mapa) los declara en una matriz 2×2 de BACKTRACKING ×
+       ALARMA DE BAJA CAPACIDAD:
+
+           41060  (sin BT, sin alarma)                                   45 pulsos
+           41061  «Deadband when backtracking is active and no low
+                   capacity alarm active»                               45 pulsos
+           41062  (sin BT, con alarma)                                   90 pulsos
+           41063  «Deadband when backtracking is active and low
+                   capacity alarm active»                               90 pulsos
+
+       Los de las filas pares vienen con la descripción vacía —la transcripción
+       perdió el «when backtracking is NOT active»— pero el emparejamiento y los
+       valores por defecto no dejan lugar a dudas. Que el firmware tenga un margen
+       APARTE para el backtracking es justo la señal de que ahí el lazo se comporta
+       distinto, que es lo que se ve en campo.
+
+       El VALOR arranca en la banda muerta que el lazo tiene en vigor (`HYST_DEG`,
+       1° canónico del core), no en los 45 pulsos del documento: son 1,008° contra
+       1,296°, y esa discrepancia sigue abierta. Lo que manda es el registro. */
     /* El VALOR arranca en la banda muerta que el lazo tiene en vigor, no en
        `K.DB_PULSOS`. Motivo: hasta ahora estos registros eran CÓDIGO MUERTO
        —`p.cfg.deadband` nunca es null, así que la rama de pulsos de `mueve`
@@ -620,15 +636,17 @@ function TCU(id, planta, opts) {
        La discrepancia 2,5° / 1,296° / 1,0° (lazo / firmware / core) queda
        ABIERTA y bajo test: ver `tools/carea_fisica.mjs` y el bloque
        TRACKER-BUG-01 de `sim/prueba.mjs`. */
-    dbPulsosOeste: Math.round(dbGrados * pulsosGrado),   /* 41060 deadband_west */
-    dbPulsosEste: Math.round(dbGrados * pulsosGrado),    /* 41061 deadband_east */
+    dbPulsos: Math.round(dbGrados * pulsosGrado),        /* 41060 · sin BT, sin alarma */
+    dbPulsosBT: Math.round(dbGrados * pulsosGrado),      /* 41061 · CON BT, sin alarma */
     /* El equipo ENGORDA el lazo con la alarma de baja capacidad: el firmware
        lo documenta como 90 pulsos frente a 45, o sea el DOBLE. Se conserva la
        razón, no la cifra absoluta, para que el margen normal siga siendo el
        que ya estaba en vigor. Con la rama muerta anterior este engorde
        tampoco ocurría nunca. */
     dbPulsosBaja: Math.round(dbGrados * pulsosGrado
-                             * (K.DB_PULSOS_BAJA / K.DB_PULSOS)),  /* 41062 / 41063 */
+                             * (K.DB_PULSOS_BAJA / K.DB_PULSOS)),      /* 41062 · sin BT */
+    dbPulsosBTBaja: Math.round(dbGrados * pulsosGrado
+                               * (K.DB_PULSOS_BAJA / K.DB_PULSOS)),    /* 41063 · CON BT */
     reintentos: K.REINTENTOS_MOTOR,                 /* 41065 */
     velSinCarga: K.VEL_SIN_CARGA,                   /* 41067 */
     spTilt: ((planta.cfg && planta.cfg.spTilt) || []).slice(),   /* 41044…41056 */
@@ -979,25 +997,20 @@ TCU.prototype.mueve = function (dt, inhibido) {
      baja capacidad (41063) — el propio equipo engorda el lazo cuando va justo de
      batería, que es la versión de fábrica del winter mode */
   var C = this.cfgTcu;
-  /* El margen es DIRECCIONAL y sale de SUS registros: 41060 manda hacia el
-     OESTE (θ creciente) y 41061 hacia el ESTE. Con la alarma de baja capacidad
-     manda 41063 para los dos, que es lo que hace el equipo.
-     Antes esto era `this.p.cfg.deadband != null ? … : pulsos/…`, y como
+  /* EL MARGEN SALE DE UNA MATRIZ 2×2: backtracking × alarma de baja capacidad, que es
+     como lo declara la ficha canónica (41060/41061/41062/41063). No es direccional:
+     el «41060 oeste, 41061 este» que había aquí me lo inventé yo, y el documento dice
+     otra cosa — el segundo registro de cada par es el del BACKTRACKING.
+     Antes de eso, esto era `this.p.cfg.deadband != null ? … : pulsos/…`, y como
      `p.cfg.deadband` NUNCA es null (cae a `K.HYST_DEG`), la rama de pulsos era
-     inalcanzable: escribir 41060/41061/41063 no hacía nada pese al
-     `efecto: true` del catálogo. Los registros son ahora la fuente, y nacen
-     en el valor que el lazo ya tenía. */
+     inalcanzable: escribir 41060/41061/41063 no hacía nada pese al `efecto: true` del
+     catálogo. Los registros son ahora la fuente, y nacen en el valor que el lazo tenía. */
   var dirPedida = signo(err);
-  /* EL MARGEN ES DE UN SENTIDO, así que hay que poder pedirlo POR SENTIDO: con el
-     adelanto, el eje CRUZA la consigna y entonces el sentido del error deja de ser
-     el de la marcha. Usar el margen del error mientras se vuela hacia el otro lado
-     mezcla los dos registros, y con 41060 y 41061 distintos —que es el caso que el
-     propio banco ejercita: 1,296° al oeste y 14,398° al este— eso no es un detalle
-     de estilo, es otro destino. La autoridad pide el margen con el sentido
-     RECORDADO (`target_park(tgt, mem)`), y aquí igual. */
-  var margenDe = (d) => (this.bajaCapacidad > 0 ? C.dbPulsosBaja
-                         : (d >= 0 ? C.dbPulsosOeste : C.dbPulsosEste)) / this.sensor.pulsosGrado;
-  var dead = margenDe(dirPedida);
+  var margen = (this.bajaCapacidad > 0
+                ? (this.bt ? C.dbPulsosBTBaja : C.dbPulsosBaja)
+                : (this.bt ? C.dbPulsosBT : C.dbPulsos)) / this.sensor.pulsosGrado;
+  var margenDe = () => margen;
+  var dead = margen;
   /* en seguimiento solo corrige si el error supera el deadband; en posición de
      seguridad va sin histéresis (la orden es de seguridad, no de precisión) */
   var urgente = (this.sp !== SP.NINGUNA) || this.criterio === CRIT.BATERIA;
@@ -1056,6 +1069,17 @@ TCU.prototype.mueve = function (dt, inhibido) {
      contrato deja `arrival_floor_deg` como hueco para quien sí lo tiene. */
   var invMargen = dead + 3 * this.sensor.ruidoRms;
 
+  /* ── EN BACKTRACKING NO SE ADELANTA ───────────────────────────────────────────
+     «El tracker adelanta al sol 1º y luego permite que el sol le adelante 1º. MENOS
+     EN BT» (dato de campo). Y tiene toda la lógica: el adelanto existe para hacer la
+     mitad de arranques, y se paga cruzando la consigna un grado. En seguimiento ese
+     grado no le cuesta nada a nadie. En BACKTRACKING sí: el ángulo de backtracking es
+     exactamente el que deja de dar sombra a la fila de al lado, así que pasarse un
+     grado es sombrear — justo lo que el backtracking existe para evitar.
+     Por eso el firmware lleva un margen APARTE para el BT (41061 / 41063): ahí el eje
+     va A la consigna, no más allá, y el paso es de un margen en vez de dos. */
+  var adelanto = this.bt ? 0 : dead;
+
   var destino = null, paraYRecuerda = false;
 
   /* SIN MOTOR NO HAY MOVIMIENTO, y esto va PRIMERO: seta pulsada, alarma
@@ -1095,7 +1119,7 @@ TCU.prototype.mueve = function (dt, inhibido) {
     /* el margen del sentido de la MARCHA, no el del error: ver `margenDe` arriba */
     var deadM = margenDe(sgn);
     var invierte = (err * sgn < 0 && Math.abs(err) > deadM + 3 * this.sensor.ruidoRms);
-    var vivo = this.objetivo + deadM * sgn;
+    var vivo = this.objetivo + (this.bt ? 0 : deadM) * sgn;
     if (invierte) destino = null;                               /* vuelve a decidir */
     else if ((this.park - vivo) * sgn > llegada) paraYRecuerda = true;   /* orden cambiada */
     else if ((this.park - this.angulo) * sgn <= tolLlegada) paraYRecuerda = true;  /* llegó */
@@ -1107,7 +1131,7 @@ TCU.prototype.mueve = function (dt, inhibido) {
     var inv = (mem !== 0 && dirPedida !== 0 && dirPedida !== mem);
     var arranca = inv ? Math.abs(err) > invMargen : Math.abs(err) >= dead;
     if (!arranca || dirPedida === 0) paraYRecuerda = true;
-    else destino = this.objetivo + dead * dirPedida;            /* EL ADELANTO */
+    else destino = this.objetivo + adelanto * dirPedida;        /* EL ADELANTO, salvo en BT */
   }
 
   if (!paraYRecuerda) {
@@ -1879,8 +1903,8 @@ Planta.prototype.regsTCU = function (t) {
   pon32(41042, f32(C.nightPos * D2R, wo));                /* posición nocturna */
   /* cada margen direccional se republica en SU registro: antes los dos salían
      con el mismo número y una asimetría escrita no se podía leer de vuelta */
-  pon(41060, u16(C.dbPulsosOeste)); pon(41061, u16(C.dbPulsosEste));
-  pon(41062, u16(C.dbPulsosBaja)); pon(41063, u16(C.dbPulsosBaja));
+  pon(41060, u16(C.dbPulsos));     pon(41061, u16(C.dbPulsosBT));
+  pon(41062, u16(C.dbPulsosBaja)); pon(41063, u16(C.dbPulsosBTBaja));
   pon(41065, u16(C.reintentos));
   pon(41067, u16(C.velSinCarga * 1000));                  /* velocidad en vacío (m°/s) */
   for (var jj = 0; jj < 4; jj++) pon(40008 + jj, u16(C.jeita[jj] * 10));
@@ -2168,9 +2192,14 @@ var ESCRITURA = {
     41052: { n: 'safe_position_5_tilt', efecto: true, f32: true, sp: 5 },
     41056: { n: 'safe_position_7_tilt', efecto: true, f32: true, sp: 7 },
     41058: { n: 'inclinometer_offset', efecto: true, f32: true, ay: 'compensa el desajuste de montaje (ensayo D.1.1)' },
-    41060: { n: 'deadband_west', efecto: true, min: 1, max: 500 },
-    41061: { n: 'deadband_east', efecto: true, min: 1, max: 500 },
-    41063: { n: 'deadband_low_capacity', efecto: true, min: 1, max: 999 },
+    /* la matriz 2×2 de la ficha canónica: backtracking × alarma de baja capacidad.
+       Los nombres `deadband_west`/`deadband_east` que había aquí eran míos, no del
+       documento; 41062 ni siquiera estaba en el catálogo, así que escribirlo se
+       rechazaba pese a existir en el mapa. */
+    41060: { n: 'deadband', efecto: true, min: 1, max: 500 },
+    41061: { n: 'deadband_backtracking', efecto: true, min: 1, max: 500 },
+    41062: { n: 'deadband_low_capacity', efecto: true, min: 1, max: 999 },
+    41063: { n: 'deadband_backtracking_low_capacity', efecto: true, min: 1, max: 999 },
     41065: { n: 'motor_retries', efecto: true, min: 0, max: 20 },
     41067: { n: 'no_load_speed', efecto: true, ms: true }
   },
@@ -2262,9 +2291,10 @@ Planta.prototype.escribe = function (dev, id, dir, vals) {
   } else if (dir === 41042) { C.nightPos = v * R2;
   } else if (def.sp) { C.spTilt[def.sp] = v * R2;
   } else if (dir === 41058) { t.sensor.offsetCfg = v * R2;
-  } else if (dir === 41060) { C.dbPulsosOeste = v;   /* deadband_west */
-  } else if (dir === 41061) { C.dbPulsosEste = v;    /* deadband_east */
-  } else if (dir === 41063) { C.dbPulsosBaja = v;
+  } else if (dir === 41060) { C.dbPulsos = v;        /* sin BT, sin alarma */
+  } else if (dir === 41061) { C.dbPulsosBT = v;      /* CON BT, sin alarma */
+  } else if (dir === 41062) { C.dbPulsosBaja = v;    /* sin BT, con alarma */
+  } else if (dir === 41063) { C.dbPulsosBTBaja = v;
   } else if (dir === 41065) { C.reintentos = v;
   } else if (dir === 41067) { C.velSinCarga = v / 1000;
   } else ok = false;

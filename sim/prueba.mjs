@@ -1248,9 +1248,11 @@ ok(serieCanon([7], [42]).en(13).theta === 42,
      1. `mueve` invertía el sentido con una orden POR DEBAJO de la banda
         muerta, solo porque venía en marcha: la regla de continuidad —puesta
         para no parar a media maniobra— saltaba el margen también al INVERTIR.
-     2. 41060 `deadband_west` y 41061 `deadband_east` son DOS registros
-        direccionales y estaban fundidos en un escalar, así que escribir uno
-        cambiaba el otro y `regsTCU` republicaba el mismo número en los dos.
+     2. los cuatro registros de banda muerta estaban fundidos en un escalar, así
+        que escribir uno cambiaba el otro y `regsTCU` republicaba el mismo número
+        en los dos. (Lo que NO son es direccionales: eso me lo inventé al
+        arreglar esto, y la ficha canónica dice que la matriz es
+        backtracking × alarma de baja capacidad. Corregido más abajo.)
    ═══════════════════════════════════════════════════════════════════════ */
 console.log('\n── histéresis direccional: invertir cuesta el margen entero ──');
 
@@ -1267,9 +1269,11 @@ function bancoDir(opts) {
 }
 /* un paso de motor SIN pasar por el planificador: se fija el objetivo y se
    llama al lazo, que es justo la unidad bajo prueba */
-function mueveA(t, objetivo, dt) {
+function mueveA(t, objetivo, dt, bt) {
   t.objetivo = objetivo;
-  t.sp = SIM.SP.NINGUNA; t.criterio = SIM.CRIT.SEGUIMIENTO;
+  t.sp = SIM.SP.NINGUNA;
+  t.bt = !!bt;
+  t.criterio = bt ? SIM.CRIT.BACKTRACKING : SIM.CRIT.SEGUIMIENTO;
   const r = t.mueve(dt == null ? 60 : dt, false);
   /* el lazo mueve `anguloReal` y el inclinómetro se lee en el paso de planta;
      aquí se ejercita el LAZO aislado, así que se le refresca la medida a mano
@@ -1277,14 +1281,15 @@ function mueveA(t, objetivo, dt) {
   t.angulo = t.anguloReal;
   return r;
 }
-/* margen en GRADOS que el lazo aplica ahora mismo en cada sentido */
-function margenOeste(t) { return t.cfgTcu.dbPulsosOeste / t.sensor.pulsosGrado; }
-function margenEste(t) { return t.cfgTcu.dbPulsosEste / t.sensor.pulsosGrado; }
+/* margen en GRADOS, en sus dos versiones: la de seguimiento (41060) y la de
+   backtracking (41061), que es otro registro porque el equipo se porta distinto */
+function margen(t) { return t.cfgTcu.dbPulsos / t.sensor.pulsosGrado; }
+function margenBT(t) { return t.cfgTcu.dbPulsosBT / t.sensor.pulsosGrado; }
 /* coloca el eje en `a` sin pasar por el lazo */
 function coloca(t, a) { t.anguloReal = a; t.angulo = a; t.moviendo = 0; }
 
 {
-  const t = bancoDir().t, m = margenEste(t);
+  const t = bancoDir().t, m = margen(t);
   coloca(t, 10);
   mueveA(t, 10 + 3 * m, 5);                        /* arranca hacia el OESTE */
   ok(t.moviendo === 1, 'arranca hacia el oeste con una orden por encima del margen',
@@ -1312,7 +1317,7 @@ function coloca(t, a) { t.anguloReal = a; t.angulo = a; t.moviendo = 0; }
      conceder. Se re-deriva en vez de borrarse, porque la PROPIEDAD que vigilaba
      —que la corrección no rompa la continuidad— sigue siendo la buena; lo que
      cambia es qué la produce. */
-  const t = bancoDir().t, m = margenOeste(t);
+  const t = bancoDir().t, m = margen(t);
   coloca(t, 0);
   mueveA(t, 3 * m, 5);
   const antes = t.anguloReal, enVuelo = t.moviendo, parkAntes = t.park;
@@ -1329,7 +1334,7 @@ function coloca(t, a) { t.anguloReal = a; t.angulo = a; t.moviendo = 0; }
          error el arranque en frío no la vuelve a lanzar. Es la ley, no un
          residuo: con la ley vieja el eje habría seguido, y el destino rancio es
          justo lo que el caso 06 del contrato refutó. */
-  const t2 = bancoDir().t, m2 = margenOeste(t2);
+  const t2 = bancoDir().t, m2 = margen(t2);
   coloca(t2, 0);
   mueveA(t2, 3 * m2, 5);
   const antes2 = t2.anguloReal;
@@ -1344,7 +1349,7 @@ console.log('\n── el eje ADELANTA al sol (contrato direccional 2.0.0) ──
   /* EL PASO SON DOS MÁRGENES, que es la ley entera en una frase: la TCU no para
      en la consigna, aparca un margen más allá. Se mide con la consigna QUIETA
      para que no haya nada más en juego: un solo movimiento, de punta a punta. */
-  const t = bancoDir().t, m = margenOeste(t);
+  const t = bancoDir().t, m = margen(t);
   coloca(t, 0);
   let pasos = 0;
   for (let i = 0; i < 40 && (i === 0 || t.moviendo !== 0); i++) { mueveA(t, 3 * m, 1); pasos++; }
@@ -1363,7 +1368,7 @@ console.log('\n── el eje ADELANTA al sol (contrato direccional 2.0.0) ──
      un solo paso no dice si el siguiente también mide dos márgenes, y poner la
      consigna exactamente a un margen deja el test en el FILO de la puerta de
      arranque (`>=`), donde el resultado lo decide el último bit. */
-  const t2 = bancoDir().t, m2 = margenOeste(t2);
+  const t2 = bancoDir().t, m2 = margen(t2);
   coloca(t2, 0);
   const largos = [];
   let abierto = null;
@@ -1391,7 +1396,7 @@ console.log('\n── el eje ADELANTA al sol (contrato direccional 2.0.0) ──
      en esa puerta el eje oscila para siempre. Medido antes de ponerlo: 199
      arranques y 858° de recorrido en un día de cielo cerrado con el seguidor
      tumbado al plano, contra los 85 y 192° de no tocarlo. */
-  const b = bancoDir(), t = b.t, m = margenOeste(t);
+  const b = bancoDir(), t = b.t, m = margen(t);
   /* la cadena del sensor, neutralizada MENOS el ruido: lo que se mide aquí es el
      ruido y nada más. (Con el desajuste de montaje puesto, este test medía un
      SESGO constante de la medida y no el ruido — mi primera versión daba 204
@@ -1421,7 +1426,7 @@ console.log('\n── el eje ADELANTA al sol (contrato direccional 2.0.0) ──
   /* EL ERROR BARRE LOS DOS SIGNOS: es lo que se ve en pantalla y lo que delató
      que las cuatro cabezas paraban en la consigna —la columna de desalineo no
      cambiaba de signo nunca—. Con la consigna derivando como el sol. */
-  const t = bancoDir().t, m = margenOeste(t);
+  const t = bancoDir().t, m = margen(t);
   coloca(t, 0);
   let delante = 0, detras = 0;
   for (let k = 0; k < 900; k++) {
@@ -1440,7 +1445,7 @@ console.log('\n── el eje ADELANTA al sol (contrato direccional 2.0.0) ──
      allá. Es la distinción que la autoridad hace con `_step_override`, y aquí
      importa el doble: un stow que se pasa de largo se apoya en el final de
      carrera cada vez que sopla el viento. */
-  const t = bancoDir().t, m = margenOeste(t);
+  const t = bancoDir().t, m = margen(t);
   coloca(t, 0);
   t.sp = SIM.SP.VIENTO; t.criterio = SIM.CRIT.VIENTO;
   for (let i = 0; i < 400; i++) {
@@ -1453,40 +1458,62 @@ console.log('\n── el eje ADELANTA al sol (contrato direccional 2.0.0) ──
      'θ ' + t.anguloReal.toFixed(4) + '° para una orden de 20°');
 }
 
+console.log('\n── EN BACKTRACKING NO SE ADELANTA ──');
 {
-  /* CON LOS DOS MÁRGENES DISTINTOS, EL ADELANTO USA EL DEL SENTIDO DE LA MARCHA.
-     Es lo que obliga a pedir el margen POR SENTIDO en vez de tomar el del error:
-     con adelanto el eje CRUZA la consigna, y a partir de ahí el signo del error
-     ya no es el de la marcha. Con 41060 y 41061 iguales esto no se nota; con
-     ellos distintos —el caso que el propio firmware permite— sería otro destino.
-     La autoridad pide el margen con el sentido RECORDADO (`target_park(tgt, mem)`)
-     y aquí se comprueba que este gemelo hace lo mismo. */
-  const b = bancoDir(), t = b.t;
-  /* márgenes bien distintos, escritos como los escribe la toolbox */
-  t.cfgTcu.dbPulsosOeste = Math.round(1.0 * t.sensor.pulsosGrado);
-  t.cfgTcu.dbPulsosEste = Math.round(4.0 * t.sensor.pulsosGrado);
-  const mO = margenOeste(t), mE = margenEste(t);
-  ok(Math.abs(mE - 4 * mO) < 0.05, 'el banco de verdad tiene los dos márgenes distintos',
-     'oeste ' + mO.toFixed(3) + '° · este ' + mE.toFixed(3) + '°');
+  /* «El tracker adelanta al sol 1º y luego permite que el sol le adelante 1º.
+     MENOS EN BT» (dato de campo). El adelanto existe para hacer la mitad de
+     arranques y se paga cruzando la consigna un grado; en seguimiento ese grado no
+     le cuesta nada a nadie, pero el ángulo de BACKTRACKING es exactamente el que
+     deja de sombrear a la fila de al lado, así que pasarse un grado es sombrear.
+     Por eso el firmware lleva un margen APARTE para el BT (41061 / 41063). */
+  const t = bancoDir().t, m = margen(t);
 
-  /* al OESTE: aparca un margen OESTE más allá */
+  /* en SEGUIMIENTO: arranca a 3 márgenes y aparca a 4 — el cuarto es el adelanto */
   coloca(t, 0);
-  for (let i = 0; i < 200 && (i === 0 || t.moviendo !== 0); i++) mueveA(t, 3 * mO, 1);
-  ok(Math.abs(t.anguloReal - (3 * mO + mO)) < 0.17 + 1e-9,
-     'yendo al OESTE, el adelanto es el margen del oeste',
-     'θ ' + t.anguloReal.toFixed(3) + '° · esperado ' + (4 * mO).toFixed(3) + '°');
+  for (let i = 0; i < 200 && (i === 0 || t.moviendo !== 0); i++) mueveA(t, 3 * m, 1, false);
+  const finSig = t.anguloReal;
+  casi(finSig, 4 * m, 0.17 + 1e-9, 'en seguimiento aparca UN MARGEN más allá de la consigna');
 
-  /* y al ESTE: un margen ESTE más allá, que aquí es cuatro veces mayor */
+  /* en BACKTRACKING: la MISMA orden, y aparca EN la consigna */
   coloca(t, 0);
-  for (let i = 0; i < 400 && (i === 0 || t.moviendo !== 0); i++) mueveA(t, -3 * mE, 1);
-  ok(Math.abs(t.anguloReal - (-3 * mE - mE)) < 0.17 + 1e-9,
-     'y yendo al ESTE, el margen del este',
-     'θ ' + t.anguloReal.toFixed(3) + '° · esperado ' + (-4 * mE).toFixed(3) + '°');
+  for (let i = 0; i < 200 && (i === 0 || t.moviendo !== 0); i++) mueveA(t, 3 * m, 1, true);
+  casi(t.anguloReal, 3 * m, 0.17 + 1e-9, 'y en backtracking va A la consigna, sin pasarse');
+  ok(t.anguloReal < finSig - 0.5 * m,
+     'o sea que el BT NO se come el grado que sombrearía a la fila de al lado',
+     'seguimiento ' + finSig.toFixed(3) + '° · BT ' + t.anguloReal.toFixed(3) + '°');
+}
+
+{
+  /* Y EL PASO ES LA MITAD: dos márgenes en seguimiento, uno en BT. Con la consigna
+     derivando, que es como se mide algo que va con el sol. */
+  const pasos = (bt) => {
+    const t = bancoDir().t, m = margen(t);
+    t.sensor.ruidoRms = 0;
+    coloca(t, 0);
+    const largos = []; let abierto = null;
+    for (let k = 0; k < 1200; k++) {
+      const antes = t.anguloReal, movAntes = t.moviendo;
+      mueveA(t, 0.01 * k, 1, bt);
+      if (t.moviendo !== 0 && movAntes === 0) abierto = antes;
+      if (t.moviendo === 0 && movAntes !== 0 && abierto != null) {
+        largos.push(Math.abs(t.anguloReal - abierto)); abierto = null;
+      }
+    }
+    return { largos: largos, m: m };
+  };
+  const sg = pasos(false), bt = pasos(true);
+  const med = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+  ok(sg.largos.length >= 3 && bt.largos.length >= 3, 'las dos series dan pasos completos',
+     sg.largos.length + ' en seguimiento · ' + bt.largos.length + ' en BT');
+  ok(Math.abs(med(sg.largos) - 2 * sg.m) < 0.17,
+     'el paso en seguimiento vale DOS márgenes', med(sg.largos).toFixed(3) + '°');
+  ok(Math.abs(med(bt.largos) - bt.m) < 0.17,
+     'y el paso en backtracking, UNO', med(bt.largos).toFixed(3) + '°');
 }
 
 {
   /* una orden de SEGURIDAD manda sobre los márgenes, en los dos sentidos */
-  const t = bancoDir().t, m = margenEste(t);
+  const t = bancoDir().t, m = margen(t);
   /* 0,9·margen: por debajo del umbral de arranque y por ENCIMA de la banda de
      llegada. En seguimiento no se movería; con posición segura activa, sí. */
   coloca(t, 10);
@@ -1502,52 +1529,64 @@ console.log('\n── el eje ADELANTA al sol (contrato direccional 2.0.0) ──
      'θ ' + t.anguloReal.toFixed(4) + '°');
 }
 
-console.log('\n── 41060 y 41061 son DOS márgenes, uno por sentido ──');
+console.log('\n── 41060…41063 son una matriz 2×2: backtracking × baja capacidad ──');
 {
+  /* LA FICHA CANÓNICA (cobertura-zigbee/tools/modbus_src/tcu_v6.json) los declara así:
+       41060  (sin BT, sin alarma)  45 pulsos   ·  41061  «…backtracking is active
+       and no low capacity alarm»   45 pulsos
+       41062  (sin BT, con alarma)  90 pulsos   ·  41063  «…backtracking is active
+       and low capacity alarm»      90 pulsos
+     Los pares se leían aquí como oeste/este, y eso era un invento: el este/oeste no
+     sale de ningún documento. Este bloque comprobaba el invento. */
   const b = bancoDir();
   const p = b.p, t = b.t;
   const r1 = p.escribe('tcu', 1, 41060, 200);
-  ok(r1.ok, 'se puede escribir deadband_west', r1.aplicados.join(' · '));
-  const esteAntes = t.cfgTcu.dbPulsosEste;
-  ok(t.cfgTcu.dbPulsosOeste === 200 && t.cfgTcu.dbPulsosEste === esteAntes
-     && esteAntes !== 200,
-     'escribir 41060 NO toca el margen del ESTE (era el bug)',
-     'oeste ' + t.cfgTcu.dbPulsosOeste + ' · este ' + t.cfgTcu.dbPulsosEste);
+  ok(r1.ok, 'se puede escribir la banda muerta de seguimiento (41060)',
+     r1.aplicados.join(' · '));
+  const btAntes = t.cfgTcu.dbPulsosBT;
+  ok(t.cfgTcu.dbPulsos === 200 && t.cfgTcu.dbPulsosBT === btAntes && btAntes !== 200,
+     'escribir 41060 NO toca el margen del BACKTRACKING (era el bug)',
+     'seguimiento ' + t.cfgTcu.dbPulsos + ' · BT ' + t.cfgTcu.dbPulsosBT);
   p.escribe('tcu', 1, 41061, 90);
-  ok(t.cfgTcu.dbPulsosOeste === 200 && t.cfgTcu.dbPulsosEste === 90,
-     'y escribir 41061 tampoco toca el del OESTE');
+  ok(t.cfgTcu.dbPulsos === 200 && t.cfgTcu.dbPulsosBT === 90,
+     'y escribir 41061 tampoco toca el de seguimiento');
+  p.escribe('tcu', 1, 41062, 150);
+  p.escribe('tcu', 1, 41063, 300);
+  ok(t.cfgTcu.dbPulsosBaja === 150 && t.cfgTcu.dbPulsosBTBaja === 300,
+     'y los dos de baja capacidad son los suyos, no un eco del normal',
+     '41062=' + t.cfgTcu.dbPulsosBaja + ' · 41063=' + t.cfgTcu.dbPulsosBTBaja);
 
   const regs = p.regsTCU(t);
-  ok(regs[41060] === 200 && regs[41061] === 90,
-     'y cada uno se republica en SU registro: la asimetría se puede LEER',
-     '41060=' + regs[41060] + ' · 41061=' + regs[41061]);
-  ok(p.regsTCU(t)[41060] === t.cfgTcu.dbPulsosOeste,
+  ok(regs[41060] === 200 && regs[41061] === 90 && regs[41062] === 150 && regs[41063] === 300,
+     'y cada uno se republica en SU registro: los cuatro se pueden LEER',
+     [41060, 41061, 41062, 41063].map((d) => d + '=' + regs[d]).join(' · '));
+  ok(p.regsTCU(t)[41060] === t.cfgTcu.dbPulsos,
      'lo que se LEE es lo que el lazo USA: el registro dejó de ser decorativo');
 }
 {
-  /* la asimetría tiene que producir COMPORTAMIENTO distinto, o es cosmética */
+  /* la matriz tiene que producir COMPORTAMIENTO distinto, o es cosmética. 500 es el
+     TOPE del registro en el catálogo; con 900 la escritura se RECHAZA y el test
+     pasaría por el motivo equivocado (comprobado: pasaba). */
   const b = bancoDir(); const p = b.p, t = b.t;
-  /* 500 es el TOPE del registro en el catálogo; con 900 la escritura se
-     RECHAZA y el test pasaría por el motivo equivocado (comprobado: pasaba). */
-  const w1 = p.escribe('tcu', 1, 41060, 45);       /* oeste: 45 pulsos */
-  const w2 = p.escribe('tcu', 1, 41061, 500);      /* este: 500 pulsos (11×) */
+  const w1 = p.escribe('tcu', 1, 41060, 45);       /* seguimiento: 45 pulsos */
+  const w2 = p.escribe('tcu', 1, 41061, 500);      /* BT: 500 pulsos (11×) */
   ok(w1.ok && w2.ok, 'las dos escrituras se ACEPTAN antes de medir nada',
      w1.avisos.concat(w2.avisos).join(' · ') || 'sin avisos');
-  const gOeste = margenOeste(t), gEste = margenEste(t);
-  ok(gEste > gOeste * 5, 'y dejan los dos márgenes claramente distintos',
-     'oeste ' + gOeste.toFixed(3) + '° · este ' + gEste.toFixed(3) + '°');
+  const gSig = margen(t), gBT = margenBT(t);
+  ok(gBT > gSig * 5, 'y dejan los dos márgenes claramente distintos',
+     'seguimiento ' + gSig.toFixed(3) + '° · BT ' + gBT.toFixed(3) + '°');
   coloca(t, 0);
-  mueveA(t, gOeste * 1.2, 5);
-  ok(t.moviendo === 1, 'con margen oeste pequeño, una orden pequeña al oeste arranca',
-     (gOeste * 1.2).toFixed(3) + '° > ' + gOeste.toFixed(3) + '°');
+  mueveA(t, gSig * 1.2, 5, false);
+  ok(t.moviendo === 1, 'con el margen de seguimiento, una orden pequeña arranca',
+     (gSig * 1.2).toFixed(3) + '° > ' + gSig.toFixed(3) + '°');
   coloca(t, 0);
-  mueveA(t, -gOeste * 1.2, 5);
+  mueveA(t, gSig * 1.2, 5, true);
   ok(t.moviendo === 0 && Math.abs(t.anguloReal) < 1e-12,
-     'y esa MISMA orden hacia el este no arranca: su margen es 11 veces mayor',
-     'hace falta ' + gEste.toFixed(3) + '°');
+     'y esa MISMA orden en BACKTRACKING no arranca: su margen es 11 veces mayor',
+     'hace falta ' + gBT.toFixed(3) + '°');
   coloca(t, 0);
-  mueveA(t, -gEste * 1.2, 5);
-  ok(t.moviendo === -1, 'pero superando el margen del este, sí');
+  mueveA(t, gBT * 1.2, 5, true);
+  ok(t.moviendo === 1, 'pero superando el margen del BT, sí');
 }
 
 {
@@ -1584,7 +1623,7 @@ console.log('\n── 41060 y 41061 son DOS márgenes, uno por sentido ──');
      El bloque anterior exigía justamente lo contrario —que discreparan— y
      decía que al coincidir había que sustituirlo. Esto es esa sustitución. */
   const t = bancoDir().t;
-  const lazo = margenOeste(t);
+  const lazo = margen(t);
   const firmware = SIM.K.DB_PULSOS / t.sensor.pulsosGrado;
   const pulsosDe1 = Math.round(1.0 * t.sensor.pulsosGrado);
   ok(Math.abs(lazo - 1.0) < 0.01,

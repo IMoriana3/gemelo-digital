@@ -76,7 +76,7 @@ Un seguidor no tiene «un ángulo»: tiene cuatro, y todo lo que este simulador 
 | | | el salto hasta la siguiente lo explica |
 |---|---|---|
 | **objetivo solar** | adónde iría sin protecciones: seguimiento con su backtracking, o la posición nocturna | la **protección** que la pisa: bandera, nieve, limpieza, un forzado, la defensa por batería |
-| **objetivo** | lo que el TCU ha decidido de verdad. `30110` es su diferencia con la medida | la **banda muerta** del lazo (45 pulsos ≈ 1,3°) — o un motor que no puede moverse: seta pulsada, eje calado |
+| **objetivo** | lo que el TCU ha decidido de verdad. `30110` es su diferencia con la medida | la **banda muerta** del lazo (35 pulsos ≈ 1,0°) y el **adelanto** — o un motor que no puede moverse: seta pulsada, eje calado |
 | **real** | dónde está la mesa. **Solo lo sabe el simulador**: en planta hace falta un instrumento externo | el **inclinómetro**: desajuste de montaje, deriva térmica, ruido, cuantización |
 | **mide el TCU** | lo que publica en `30111`, y **lo único que ve el SCADA** | — |
 
@@ -161,6 +161,31 @@ kt > 0,80        kd = 0,165                                         → cielo li
 ```
 
 Con el cielo cerrado (kt ≈ 0,15) sale **kd ≈ 0,99**. Esa es la diferencia entre una política que no se activa jamás y una que se activa cuando toca.
+
+## El eje adelanta al sol un grado — menos en backtracking
+
+> *«El tracker adelanta al sol 1º y luego permite que el sol le adelante 1º. Menos en BT.»*
+
+El eje **no para en la consigna**: arranca cuando se ha quedado un margen atrás y aparca un margen **más allá**, así que el paso son **dos márgenes** y hay la mitad de arranques. El error barre de +1° a −1° con media cero. Medido: pasos de **2,02°** con la consigna derivando como el sol.
+
+**En backtracking, no.** El ángulo de backtracking es exactamente el que deja de dar sombra a la fila de al lado, así que pasarse un grado **es sombrear** — justo lo que el backtracking existe para evitar. Ahí el eje va **a** la consigna y el paso es de **un** margen: medido, **1,01°**.
+
+Y no es una regla inventada para la ocasión: el firmware lleva un **registro de banda muerta aparte para el BT**, que es la señal de que ahí el lazo se comporta distinto.
+
+### Los cuatro registros son una matriz 2×2, no dos sentidos
+
+Esto estuvo leído como `41060 deadband_west` / `41061 deadband_east`, y **era un invento mío**: el este/oeste no sale de ningún documento. La ficha canónica (`cobertura-zigbee/tools/modbus_src/tcu_v6.json`, de donde se genera el mapa) los declara cruzando **backtracking × alarma de baja capacidad**:
+
+| | sin alarma de baja capacidad | con alarma |
+|---|---|---|
+| **seguimiento** | `41060` · 45 pulsos | `41062` · 90 pulsos |
+| **backtracking** | `41061` — *«Deadband when backtracking is active and no low capacity alarm active»* · 45 | `41063` — *«…and low capacity alarm active»* · 90 |
+
+Los de la columna izquierda vienen con la descripción vacía —la transcripción perdió el *«when backtracking is NOT active»*— pero el emparejamiento y los valores por defecto no dejan lugar a dudas. `41062` ni siquiera estaba en el catálogo de escritura, así que escribirlo se rechazaba pese a existir en el mapa.
+
+El **valor** arranca en la banda muerta en vigor (1,0°, el canónico del core, que es también el que usa `cobertura-zigbee/backtracking.html`), no en los 45 pulsos del documento: son 1,008° contra 1,296°. Esa discrepancia sigue abierta y declarada; lo que manda es el registro.
+
+Efecto lateral medido y bienvenido: quitar el adelanto en BT **baja los arranques de 269 a 43** en una mañana. El adelanto peleaba con una consigna que en backtracking se mueve deprisa y cambia de sentido.
 
 ## El viento no lo detecta el TCU
 
