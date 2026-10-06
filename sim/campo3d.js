@@ -552,6 +552,10 @@ Campo3D.prototype.construye = function (P) {
    Barato y con cero reservas: se llama tantas veces como avance la simulación, pero
    solo hace trabajo si algo se ha movido de verdad. */
 var COL_SALUD = { ok: 0x37b87c, aviso: 0xe0a52b, alarma: 0xe2574c, offline: 0x5e7388 };
+var COL_HAIL = {
+  PENDIENTE_ACK:0xe0a52b, ACK:0x7b91a5, MOVIENDO:0x5aa9df, PROTEGIDO:0x37b87c,
+  SIN_COMMS:0x5e7388, FALLO:0xe2574c, NO_MODELADO:0xe2574c, SIN_ORDEN:0x7b91a5
+};
 
 Campo3D.prototype.actualiza = function (P) {
   if (!P || !P.tcus.length) return;
@@ -599,14 +603,27 @@ Campo3D.prototype.actualiza = function (P) {
     }
   }
 
-  /* testigos: el mismo criterio de salud que el SCADA. Solo el color, y solo el que
-     cambia — la posición ya está puesta desde `construye`. */
+  /* Durante hail stow el testigo deja de contestar "salud general" y pasa a
+     contestar "¿qué ha hecho ESTA TCU con la orden?". Así se ve la ola de
+     distribución en el campo: ámbar esperando, azul moviendo, verde protegida,
+     gris sin ruta y rojo si falla. Fuera de granizo vuelve al criterio SCADA. */
   var tocaColor = false;
+  var hg = P.granizo && P.granizo.snapshot ? P.granizo.snapshot() : null;
+  var hailVista = hg && hg.phase !== 'SIN_SEÑAL' && hg.phase !== 'LIBERADO';
   for (j = 0; j < this.n; j++) {
-    var sa = tcus[j].salud ? tcus[j].salud() : 'ok';
+    var sa, col;
+    if (hailVista && tcus[j].hailEjecucion && !tcus[j].repetidor) {
+      var he = tcus[j].hailEjecucion();
+      sa = 'hail:' + he.estado;
+      col = COL_HAIL[he.estado] || COL_HAIL.SIN_ORDEN;
+    } else {
+      var hs = tcus[j].salud ? tcus[j].salud() : 'ok';
+      sa = 'health:' + hs;
+      col = COL_SALUD[hs] || COL_SALUD.ok;
+    }
     if (this._salud[j] === sa) continue;
     this._salud[j] = sa;
-    this._colTmp.setHex(COL_SALUD[sa] || COL_SALUD.ok);
+    this._colTmp.setHex(col);
     this.testigos.setColorAt(j, this._colTmp);
     tocaColor = true;
   }
