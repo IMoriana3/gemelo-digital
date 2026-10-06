@@ -162,6 +162,59 @@
   .ok .pip{background:var(--ok)} .aviso .pip{background:var(--warn)}
   .alarma .pip{background:var(--danger)} .offline .pip{background:#4a5b6d}
   .mesa.alarma{border-color:#5a2420} .mesa.aviso{border-color:#4a3a10} .mesa.offline{opacity:.55}
+  .mesa .hailtag{font:600 8.5px var(--mono);margin-top:3px;padding:2px 4px;border-radius:4px;
+    border:1px solid var(--line2);display:inline-block;color:var(--tx3)}
+  .mesa.hail-protegido{border-color:#215f49}.mesa.hail-moviendo{border-color:#295b7a}
+  .mesa.hail-pendiente_ack{border-color:#665018}.mesa.hail-ack{border-color:#51616f}
+  .mesa.hail-sin_comms{border-color:#4a5b6d;opacity:.62}.mesa.hail-fallo,.mesa.hail-no_modelado{border-color:#6d2924}
+  .grupoF.hailok .pip{background:var(--ok)} .grupoF.hailmove .pip{background:var(--blue)}
+  .grupoF.hailwait .pip{background:var(--warn)} .grupoF.hailbad .pip{background:var(--danger)}
+
+  .hail3d{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:4}
+  .hail3d .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(7,15,25,.56),rgba(7,15,25,.06) 64%);
+    opacity:0;transition:opacity .35s}
+  .hail3d.on .shade{opacity:1}
+  .stormcloud{position:absolute;left:2%;top:1%;width:59%;height:26%;opacity:0;transform:translateY(-8px);
+    transition:opacity .35s,transform .35s;filter:drop-shadow(0 12px 24px rgba(0,0,0,.3))}
+  .hail3d.on .stormcloud{opacity:.94;transform:translateY(0)}
+  .stormcloud i{position:absolute;border-radius:50%;background:#354253}
+  .stormcloud i:nth-child(1){width:30%;height:60%;left:8%;top:26%}
+  .stormcloud i:nth-child(2){width:34%;height:76%;left:26%;top:8%}
+  .stormcloud i:nth-child(3){width:38%;height:68%;left:49%;top:18%}
+  .stormcloud i:nth-child(4){width:28%;height:52%;left:70%;top:34%}
+  .hailrain{position:absolute;left:4%;right:31%;top:18%;bottom:12%;opacity:0;transition:opacity .2s}
+  .hail3d.impact .hailrain{opacity:1}
+  .hailrain i{position:absolute;top:-8%;width:4px;height:8px;border-radius:50%;background:#edf4fa;
+    box-shadow:0 0 4px rgba(255,255,255,.35);animation:hailfall 1.05s linear infinite}
+  @keyframes hailfall{to{transform:translate3d(-22px,620px,0)}}
+  .hailwind{position:absolute;left:4%;top:31%;font:600 11px var(--mono);letter-spacing:.12em;color:#c7d6e4;opacity:0;transition:opacity .2s}
+  .hail3d.on .hailwind{opacity:.9}
+  .hailpanel3d{position:absolute;right:12px;top:12px;width:min(325px,38%);z-index:6;pointer-events:none;
+    background:rgba(12,22,33,.93);backdrop-filter:blur(7px);border:1px solid rgba(97,129,153,.34);border-radius:12px;
+    padding:10px 11px;color:var(--tx)}
+  .hailpanel3d .eyebrow{font:700 9px var(--mono);letter-spacing:.13em;color:var(--warn);text-transform:uppercase}
+  .hailpanel3d .hst{font:700 14px var(--display);margin:3px 0 7px}
+  .hailpanel3d .hst.ok{color:var(--ok)}.hailpanel3d .hst.warn{color:var(--warn)}.hailpanel3d .hst.bad{color:var(--danger)}
+  .hailmetric{display:grid;grid-template-columns:1fr auto;gap:4px;font:11px var(--mono);margin:6px 0}
+  .hailmetric span:first-child{color:var(--tx3)}
+  .hailbar{grid-column:1/-1;height:4px;background:#243343;border-radius:3px;position:relative;overflow:visible}
+  .hailbar b{display:block;height:100%;border-radius:3px;background:var(--accent);max-width:100%}
+  .hailbar.bad b{background:var(--danger)} .hailbar.warn b{background:var(--warn)}
+  .hailbar em{position:absolute;top:-2px;width:1px;height:8px;background:#f0b84a;opacity:.9}
+  .hailselected{border-top:1px solid var(--line2);margin-top:8px;padding-top:7px;display:grid;grid-template-columns:1fr auto;gap:2px 8px;
+    font:10.5px var(--mono)}
+  .hailselected b{font-size:16px}.hailselected span{color:var(--tx3)}
+  .hailflow{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:9px}
+  .hailflow .step{border:1px solid var(--line2);border-radius:8px;padding:7px 8px;min-width:0}
+  .hailflow .step b{display:block;font:700 17px var(--mono)}
+  .hailflow .step span{font-size:10px;color:var(--tx3)}
+  .hailflow .step.ok{border-color:#245c47}.hailflow .step.warn{border-color:#665018}.hailflow .step.bad{border-color:#6d2924}
+  .hailissues{font:11px var(--mono);color:var(--tx3);margin-top:8px}
+  @media(max-width:720px){
+    .hailpanel3d{left:8px;right:8px;top:8px;width:auto}
+    .stormcloud{width:86%;top:18%;opacity:.55}.hailrain{right:8%;top:25%}
+    .hailflow{grid-template-columns:repeat(2,1fr)}
+  }
 
   table.t{width:100%;border-collapse:collapse;font-size:12.5px}
   table.t th,table.t td{padding:4px 7px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -502,8 +555,20 @@
           <div id="escGuion"></div>
           <div class="note" id="escAdd"></div>
         </div>
-        <div class="card" style="padding:0;overflow:hidden">
-          <div id="campo3d" style="width:100%;height:min(52vh,560px);position:relative;background:#0b1119"></div>
+        <div class="card" style="padding:0;overflow:hidden;position:relative">
+          <div id="campo3d" style="width:100%;height:min(58vh,640px);position:relative;background:#0b1119"></div>
+          <div class="hail3d" id="hailFx3d">
+            <div class="shade"></div>
+            <div class="stormcloud"><i></i><i></i><i></i><i></i></div>
+            <div class="hailrain" id="hailRain3d"></div>
+            <div class="hailwind" id="hailWind3d">→ VIENTO</div>
+          </div>
+          <div class="hailpanel3d" id="hailPanel3d">
+            <div class="eyebrow">HIGH ANGLE STOW · GEMELO DE PLANTA</div>
+            <div class="hst ok" id="hail3dStatus">Operación normal</div>
+            <div id="hail3dMetrics"></div>
+            <div class="hailselected" id="hail3dSelected"></div>
+          </div>
         </div>
         <div class="card" style="padding-top:10px">
           <div class="timerow">
@@ -548,6 +613,12 @@
       <!-- ═══ vista PLANTA ═══ -->
       <div id="vplanta">
         <div class="chips" id="chipsPlanta"></div>
+        <div class="card" id="hailFleetCard">
+          <h2>Granizo · ejecución de flota <span class="badge" id="hailFleetBadge">sin señal</span></h2>
+          <div class="sub" id="hailFleetSub">Ordenado, recibido y protegido son estados distintos. El porcentaje válido es el confirmado por telemetría.</div>
+          <div class="hailflow" id="hailFleetFlow"></div>
+          <div class="hailissues" id="hailFleetIssues"></div>
+        </div>
         <div class="card">
           <h2>Flota</h2>
           <div class="sub" id="subFlota">Un recuadro por equipo. La barra es su inclinación real; el color, su salud (el mismo criterio del SCADA).</div>
