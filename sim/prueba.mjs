@@ -1797,6 +1797,9 @@ console.log('\n── GRANIZO · forecast → red → TCU → posición confirma
   const p = new SIM.Planta({ nTcu:6, nHsu:1, nRep:2, nGw:2, grupos:2, dia:172, hora:10,
     poleoS:6, granizo:{leadMin:60,afterMin:15,holdMin:2} });
   const seg = p.seguidores();
+  /* El test tiene que medir TRANSPORTE Y MOVIMIENTO, no aprobar porque a esta hora
+     casualmente el seguimiento ya esté cerca de ±55°. Los coloca a 0° antes del aviso. */
+  seg.forEach(t => { t.anguloReal=0; t.angulo=0; t.sensor.crudo=0; t.sensor.filtrado=0; });
   ok(p.gateways.length === 2 && seg.every(t => t.gateway === 1 || t.gateway === 2),
      'la planta tiene gateways explícitos y cada TCU tiene ruta', p.topologiaFuente);
 
@@ -1842,7 +1845,9 @@ console.log('\n── GRANIZO · forecast → red → TCU → posición confirma
 {
   /* El fallo mecánico aparece DESPUÉS del ACK: la cadena distingue transporte de ejecución. */
   const p = new SIM.Planta({ nTcu:3, nHsu:1, nRep:0, nGw:1, dia:172, hora:10, poleoS:2 });
-  const t = p.tcu(1); t.ejeAtascado = true;
+  const t = p.tcu(1);
+  t.anguloReal=0; t.angulo=0; t.sensor.crudo=0; t.sensor.filtrado=0;
+  t.ejeAtascado = true;
   p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:270 });
   for (let i=0;i<30;i++) p.paso(1);
   const e = t.hailEjecucion();
@@ -1853,7 +1858,11 @@ console.log('\n── GRANIZO · forecast → red → TCU → posición confirma
 {
   /* La telemetría del propio TCU puede mentir sobre la posición física. */
   const p = new SIM.Planta({ nTcu:1, nHsu:1, nRep:0, nGw:1, dia:172, hora:10, poleoS:1 });
-  const t = p.tcu(1); t.sensor.desajuste = 3; t.sensor.offsetCfg = 0;
+  const t = p.tcu(1);
+  t.anguloReal=0; t.angulo=0; t.sensor.crudo=0; t.sensor.filtrado=0;
+  /* target +55° desde 0°. Con +3° de sesgo, el lazo se cree en 55° cuando la
+     mesa está ~52°: exactamente el falso positivo que el SCADA no puede ver. */
+  t.sensor.desajuste = 3; t.sensor.offsetCfg = 0;
   p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:270 });
   for (let i=0;i<900;i++) p.paso(1);
   const e = t.hailEjecucion();
