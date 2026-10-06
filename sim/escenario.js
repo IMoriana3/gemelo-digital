@@ -261,19 +261,6 @@ var EJEMPLOS = [
       { h: 13, t: 'meteo', k: 'viento', v: 10 },
       { h: 15, t: 'meteo', k: 'viento', v: 0 }
     ] },
-  { n: 'Granizo: reforecast + fallo de flota', dia: 172, hora: 9,
-    desc: 'Forecast severo que entra en lead, un reforecast adelanta el impacto, una TCU pierde radio durante la maniobra y otra se queda con el eje duro. Después se retira el aviso y se ve la retención equipo a equipo.',
-    eventos: [
-      { h: 9.5, t: 'hail', k: 'update', eta: 90, mm: 22, prob: 70, dir: 270 },
-      { h: 10.0, t: 'hail', k: 'update', eta: 20, mm: 25, prob: 85, dir: 270 },
-      { h: 10.02, t: 'av', k: 'off', id: 2, on: true },
-      { h: 10.02, t: 'av', k: 'duro', id: 3, on: true },
-      { h: 10.3, t: 'hail', k: 'missing' },
-      { h: 10.5, t: 'hail', k: 'update', eta: 5, mm: 25, prob: 85, dir: 270 },
-      { h: 10.8, t: 'hail', k: 'withdraw' },
-      { h: 11.0, t: 'av', k: 'off', id: 2, on: false },
-      { h: 11.0, t: 'av', k: 'duro', id: 3, on: false }
-    ] },
   { n: 'Seta pulsada y rearme', dia: 172, hora: 10,
     desc: 'Alguien pulsa la seta del TCU. El motor se corta —solo el de ese equipo, que es donde está la seta—, el algoritmo sigue calculando por debajo y 30110 se va abriendo. Soltarla no rearma: va enclavada y hay que limpiar con 40007.13.',
     eventos: [
@@ -287,6 +274,19 @@ var EJEMPLOS = [
       { h: 10, t: 'av', k: 'duro', id: 1, on: true },
       { h: 14, t: 'av', k: 'duro', id: 1, on: false },
       { h: 14.2, t: 'w', dev: 'tcu', id: 1, dir: 40007, vals: [8192] }
+    ] },
+  { n: 'Granizo: reforecast + fallo de flota', dia: 172, hora: 9,
+    desc: 'Forecast severo que entra en lead, un reforecast adelanta el impacto, una TCU pierde radio durante la maniobra y otra se queda con el eje duro. Después se retira el aviso y se ve la retención equipo a equipo.',
+    eventos: [
+      { h: 9.5, t: 'hail', k: 'update', eta: 90, mm: 22, prob: 70, dir: 270 },
+      { h: 10.0, t: 'hail', k: 'update', eta: 20, mm: 25, prob: 85, dir: 270 },
+      { h: 10.02, t: 'av', k: 'off', id: 2, on: true },
+      { h: 10.02, t: 'av', k: 'duro', id: 3, on: true },
+      { h: 10.3, t: 'hail', k: 'missing' },
+      { h: 10.5, t: 'hail', k: 'update', eta: 5, mm: 25, prob: 85, dir: 270 },
+      { h: 10.8, t: 'hail', k: 'withdraw' },
+      { h: 11.0, t: 'av', k: 'off', id: 2, on: false },
+      { h: 11.0, t: 'av', k: 'duro', id: 3, on: false }
     ] }
 ];
 
