@@ -946,6 +946,7 @@ TCU.prototype.limpiaAlarmas = function () {
 TCU.prototype.decide = function (dt, ang) {
   var e = this.entradas(), cfg = this.p.cfg, obj, sp = SP.NINGUNA,
       fuente = FUENTE_SP.NINGUNA, crit, inhibido = false;
+  var hail = this.actualizaGranizo();
 
   /* abanderamiento: lo resuelve el módulo compartido con el viento REAL que ve la
      NCU (la HSU de más viento) y el azimut del sol, no con el nivel ya digerido */
@@ -1013,24 +1014,44 @@ TCU.prototype.decide = function (dt, ang) {
       : rAb.objetivo;
     crit = CRIT.SEGURIDAD;
 
-  /* 2 — SP3 NIEVE */
+  /* 2 — GRANIZO. No se codifica como una SP inexistente: el mapa disponible no
+     documenta una safe position de granizo. La decisión vive en CRIT.GRANIZO y
+     su ejecución se expone por el contrato del gemelo. */
+  } else if (hail.activa && (e.nieve || e.forzado === SP.NIEVE)) {
+    var snowObj = sSol * Math.abs(cfg.spTilt[3]);
+    if ((hail.target < 0) === (snowObj < 0)) {
+      /* Misma dirección: una sola maniobra satisface ambas. SP3 sigue reflejando
+         que la nieve está activa; hail.multi dice por qué el target es el de granizo. */
+      sp = SP.NIEVE; fuente = FUENTE_SP.NCU; obj = hail.target;
+      crit = CRIT.GRANIZO; hail.multi = 'NIEVE';
+    } else {
+      /* Lados opuestos: el contrato existente no define prioridad. Quedarse quieto
+         y declararlo es mejor que inventar un cruce de 110°. */
+      obj = this.angulo; crit = CRIT.CONFLICTO; inhibido = true;
+      hail.conflict = true; hail.motivo = 'granizo y nieve piden lados opuestos';
+    }
+
+  } else if (hail.activa) {
+    obj = hail.target; crit = CRIT.GRANIZO; fuente = FUENTE_SP.NCU;
+
+  /* 3 — SP3 NIEVE */
   } else if (e.nieve || e.forzado === SP.NIEVE) {
     sp = SP.NIEVE; fuente = e.forzado === SP.NIEVE ? FUENTE_SP.NCU : FUENTE_SP.HSU;
     obj = sSol * Math.abs(cfg.spTilt[3]); crit = CRIT.SEGURIDAD;
 
-  /* 3 — SP4 LIMPIEZA */
+  /* 4 — SP4 LIMPIEZA */
   } else if (e.limpieza || e.forzado === SP.LIMPIEZA) {
     /* el interruptor de limpieza es una entrada física del armario de la NCU, así
        que su origen es el mismo que el de un forzado por Modbus */
     sp = SP.LIMPIEZA; fuente = FUENTE_SP.NCU;
     obj = cfg.spTilt[4]; crit = CRIT.SEGURIDAD;
 
-  /* 4 — forzados genéricos (SP2/5/6/7) */
+  /* 5 — forzados genéricos (SP2/5/6/7) */
   } else if (e.forzado) {
     sp = e.forzado; fuente = FUENTE_SP.NCU;
     obj = cfg.spTilt[e.forzado]; crit = CRIT.SEGURIDAD;
 
-  /* 5 — BATERÍA. Dos cosas distintas que caen en el mismo escalón:
+  /* 6 — BATERÍA. Dos cosas distintas que caen en el mismo escalón:
      · la ESTRATEGIA (SOC < crítico) manda el seguidor a defensa y lo cuenta como
        no disponible — es el CASO 3 del estudio de disponibilidad;
      · los modos de baja capacidad del FIRMWARE (L1/L2/L3, umbrales configurables
@@ -1041,7 +1062,7 @@ TCU.prototype.decide = function (dt, ang) {
   } else if (this.bajaCapacidad === 2) {
     obj = this.angulo; crit = CRIT.BATERIA;
 
-  /* 6 — MANUAL. Con 40017 escrito, el operador está dando al motor a mano: la
+  /* 7 — MANUAL. Con 40017 escrito, el operador está dando al motor a mano: la
      consigna se arrastra en esa dirección mientras el registro siga puesto, que es
      como se mueve un seguidor desde la toolbox. */
   } else if (this.modo === MODO.MANUAL) {
@@ -1049,7 +1070,7 @@ TCU.prototype.decide = function (dt, ang) {
                                       this.cfgTcu.topeEste, this.cfgTcu.topeOeste);
     obj = this.manual; crit = CRIT.MANUAL;
 
-  /* 7 — AUTO (o parado en OFF) */
+  /* 8 — AUTO (o parado en OFF) */
   } else if (this.modo === MODO.OFF) {
     obj = this.angulo; crit = CRIT.INHIBIDO; inhibido = true;
   } else if (!ang.dia) {
@@ -1550,9 +1571,9 @@ TCU.prototype.alarmas = function () {
     socCritica: conBat && this.soc < 10,
     ejeBloqueado: this.ejeBloqueado,
     sobrecorriente: this.sobrecorriente,
-    comNcu: !this.online,
+    comNcu: !this.comDisponible(),
     velocidadBaja: this.velocidadBaja,
-    zigbee: !this.online
+    zigbee: !this.comDisponible()
   };
 };
 TCU.prototype.desviacion = function () { return Math.abs(this.objetivo - this.angulo); };
@@ -1562,7 +1583,7 @@ TCU.prototype.systemOk = function () {
   return true;
 };
 TCU.prototype.salud = function () {
-  if (!this.online || this.sinAlimentacion) return 'offline';
+  if (!this.comDisponible() || this.sinAlimentacion) return 'offline';
   var a = this.alarmas();
   if (a.ejeBloqueado || a.sobrecorriente || a.socCritica || a.socL3 || a.seta || a.fueraRango ||
       a.motorEnclavado || a.inclinometro) return 'alarma';
@@ -1572,10 +1593,12 @@ TCU.prototype.salud = function () {
 TCU.prototype.modoTxt = function () { return MODO_TXT[this.modo]; };
 TCU.prototype.estadoTxt = function () {
   if (this.sinAlimentacion) return 'sin alimentación';
-  if (!this.online) return 'sin comunicación';
+  if (!this.comDisponible()) return 'sin comunicación';
   if (this.seta) return 'SETA pulsada';
   if (this.alarmaMotorEnclavada) return 'motor enclavado';
-  if (this.sp) return SP_TXT[this.sp];
+  if (this.hail.conflict) return 'NO MODELADO · granizo + nieve';
+  if (this.sp) return SP_TXT[this.sp] + (this.hail.multi ? ' + granizo' : '');
+  if (this.hail.activa) return 'hail stow · ' + this.hail.phase;
   if (this.parked) return 'defensa por batería';
   return CRIT_TXT[this.criterio];
 };
@@ -2031,7 +2054,7 @@ Planta.prototype.regsTCU = function (t) {
   pon32(30015, u32(t.energiaMotorTotal, wo));
   pon(30020, t.moviendo === 0 ? 0 : (t.moviendo > 0 ? 0x0001 : 0x0002));
   pon(30030, u16(t.zbAddr));
-  pon(30031, u16((t.online ? 0 : 0x0100) | t.zbCanal));
+  pon(30031, u16((t.comDisponible() ? 0 : 0x0100) | t.zbCanal));
 
   /* reloj en BCD: [mes|año] [hora|día] [seg|min] */
   var f = this.fechaSim();
