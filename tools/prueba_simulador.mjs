@@ -846,6 +846,77 @@ ok(E.trasQuitar === E.filas - 1 && E.trasAnadir === E.filas,
    `quitar y añadir eventos: ${E.filas} → ${E.trasQuitar} → ${E.trasAnadir}`);
 ok(E.tipos.includes('av'), `y el añadido es del tipo pedido (${E.tipos.join(', ')})`);
 
+
+/* ── GRANIZO EN LA UI: la planta cuenta una historia, no solo cambia números ─────── */
+{
+  const H = await pg.evaluate(() => {
+    construye();
+    vePestaña('campo');
+    preparaHailFx();
+    hailMm.value='25'; hailProb.value='85'; hailEta.value='20'; hailDir.value='270';
+    hailSend.click();
+    for(let i=0;i<10;i++) P.paso(1);
+    pintaTodo();
+    if(CAMPO) CAMPO.actualiza(P);
+    const r=P.resumenGranizo(), t=tcuSel(), e=t.hailEjecucion();
+    const antes={
+      phase:P.granizo.snapshot().phase,
+      status:hail3dStatus.textContent,
+      overlay:hailFx3d.classList.contains('on'),
+      lluvia:hailRain3d.children.length,
+      flow:[...hailFleetFlow.querySelectorAll('.step span')].map(x=>x.textContent.trim()),
+      metrics:hail3dMetrics.querySelectorAll('.hailmetric').length,
+      selected:hail3dSelected.textContent.replace(/\s+/g,' ').trim(),
+      colores:CAMPO ? CAMPO._salud.slice(0,Math.min(CAMPO.n,12)) : [],
+      ack:r.ack,ordenados:r.ordenados,
+      ruta:rutaNota.textContent.replace(/\s+/g,' ').trim(),
+      card:document.querySelector('.mesa .hailtag') ? document.querySelector('.mesa .hailtag').textContent : ''
+    };
+
+    sincronizaAverias();
+    const gw=P.gateway(t.gateway);
+    avGw.checked=true; avGw.dispatchEvent(new Event('change',{bubbles:true}));
+    const rutaCaida=!gw.online && !t.comDisponible();
+    avGw.checked=false; avGw.dispatchEvent(new Event('change',{bubbles:true}));
+
+    P.granizo.actualiza({eta_min:0,mm:25,prob_pct:85,dir_deg:270});
+    P.paso(0.1); pintaTodo();
+    const impacto=hailFx3d.classList.contains('impact') && /Impacto/.test(hail3dStatus.textContent);
+
+    hailMissing.click(); pintaTodo();
+    const sinDato=/Sin dato/.test(hail3dStatus.textContent) && P.granizo.snapshot().defensa;
+
+    return {antes,rutaCaida,impacto,sinDato,alto:campo3d.style.height,
+            controls:['hailSend','hailWithdraw','hailMissing','avGw','avRutaRep'].every(id=>!!document.getElementById(id)),
+            five:hailFleetFlow.querySelectorAll('.step').length};
+  });
+
+  ok(H.controls && H.five===5,
+     'la UI de hail expone controles y los CINCO escalones de ejecución');
+  ok(H.antes.overlay && /High Angle Stow/.test(H.antes.status) && H.antes.lluvia>=30,
+     'la amenaza oscurece el campo y activa la narrativa visual con nube/granizo',
+     H.antes.status+' · '+H.antes.lluvia+' partículas');
+  ok(H.antes.flow.join('|').toLowerCase().includes('ordenados') &&
+     H.antes.flow.join('|').toLowerCase().includes('ack') &&
+     H.antes.flow.join('|').toLowerCase().includes('moviendo') &&
+     H.antes.flow.join('|').toLowerCase().includes('protegidos'),
+     'la pantalla separa ordenado / ACK / moviendo / protegido',
+     H.antes.flow.join(' · '));
+  ok(H.antes.metrics===3 && /target hail/.test(H.antes.selected) && /área proyectada/.test(H.antes.selected),
+     'el panel del tracker seleccionado enseña umbrales, target y área expuesta',
+     H.antes.selected);
+  ok(H.antes.colores.some(x=>/^hail:/.test(x)),
+     'el Campo 3D cambia de salud genérica a estado HAIL equipo a equipo',
+     H.antes.colores.join(' · '));
+  ok(/NCU.*GW/.test(H.antes.ruta) && H.rutaCaida,
+     'la ruta NCU→GW→repetidor/TCU se ve y se puede romper desde la UI',
+     H.antes.ruta);
+  ok(H.impacto && H.sinDato,
+     'IMPACTO y SIN DATO PROTEGIDO tienen estados visuales explícitos');
+  ok(/58vh/.test(H.alto) && /640px/.test(H.alto),
+     'el Campo 3D aprovecha más altura para que el episodio se lea de un vistazo',H.alto);
+}
+
 /* ── EL BACKTRACKING ES EL DEL HERMANO, Y SE ELIGE EN LA PÁGINA ──────────────
    No basta con que el algoritmo esté compartido: la queja era «las mismas
    políticas en los dos lados», así que se comprueba que el selector ofrece las
