@@ -13,9 +13,10 @@
      · y los ensayos del Anexo 4 dejan de ser un PDF y pasan a ser algo que se
        ejecuta.
 
-   Los eventos son de tres clases y no más, a propósito:
+   Los eventos son de cuatro clases:
 
      meteo  lo que hace el tiempo — viento, rachas, dirección, nubes, nieve, Tª
+     hail   el forecast de granizo — reforecast, retirada o dato ausente
      w      una ESCRITURA Modbus, que es como se manda de verdad a un equipo
      av     una avería física: eje calado, eje duro, radio caída, seta, cable roto
 
@@ -79,6 +80,14 @@ function aplica(P, e) {
     else return { ok: false, avisos: ['meteo desconocida: ' + e.k] };
     return { ok: true, aplicados: [e.k + ' = ' + e.v] };
   }
+  if (e.t === 'hail') {
+    var k = e.k || 'update';
+    if (k === 'withdraw') { P.granizo.retira(); return { ok:true, aplicados:['retirada de aviso de granizo'] }; }
+    if (k === 'missing') { P.granizo.sinDato(); return { ok:true, aplicados:['dato de granizo ausente'] }; }
+    P.granizo.actualiza({ eta_min:+e.eta || 0, mm:+e.mm || 0, prob_pct:+e.prob || 0,
+                          dir_deg:e.dir == null ? 270 : +e.dir });
+    return { ok:true, aplicados:['reforecast granizo ETA '+(+e.eta||0)+' min · '+(+e.mm||0)+' mm · '+(+e.prob||0)+' %'] };
+  }
   if (e.t === 'w') return P.escribe(e.dev || 'tcu', e.id || 1, e.dir, e.vals || [e.v || 0]);
   if (e.t === 'av') {
     var tc = P.tcu(e.id || 1);
@@ -111,6 +120,11 @@ var TIPOS = {
           { k: 'nieve',  n: 'nieve', u: 'cm', min: 0, max: 60 },
           { k: 'temp',   n: 'temperatura', u: '°C', min: -25, max: 45 } ]
   },
+  hail: {
+    n: 'Granizo', campo: 'k',
+    ks: [ { k:'update', n:'reforecast' }, { k:'withdraw', n:'retira aviso' },
+          { k:'missing', n:'sin dato' } ]
+  },
   w: {
     n: 'Escritura Modbus', campo: 'dir',
     ay: 'lo que se manda de verdad a un equipo: dirección y valor'
@@ -132,6 +146,7 @@ Escenario.TIPOS = TIPOS;
 Escenario.nuevo = function (t, h) {
   h = h == null ? 12 : h;
   if (t === 'meteo') return { h: h, t: 'meteo', k: 'viento', v: 45 };
+  if (t === 'hail')  return { h: h, t: 'hail', k: 'update', eta: 60, mm: 22, prob: 70, dir: 270 };
   if (t === 'av')    return { h: h, t: 'av', k: 'duro', id: 1, on: true };
   return { h: h, t: 'w', dev: 'tcu', id: 1, dir: 40007, vals: [8192] };
 };
@@ -166,6 +181,11 @@ function textoDe(e) {
   if (e.t === 'meteo') {
     var uni = { viento: ' km/h', rachas: ' %', dir: '°', nubes: ' %', nieve: ' cm', temp: ' °C' }[e.k] || '';
     return hh + ' · ' + e.k + ' ' + e.v + uni;
+  }
+  if (e.t === 'hail') {
+    if (e.k === 'withdraw') return hh + ' · retira aviso de granizo';
+    if (e.k === 'missing') return hh + ' · granizo SIN DATO';
+    return hh + ' · granizo ' + e.mm + ' mm · ' + e.prob + ' % · ETA ' + e.eta + ' min · dir ' + e.dir + '°';
   }
   if (e.t === 'w') return hh + ' · escribe ' + (e.dev || 'tcu').toUpperCase() +
     (e.dev === 'ncu' ? '' : ' ' + (e.id || 1)) + ' ' + e.dir + ' = ' + (e.vals ? e.vals.join(',') : e.v);
@@ -223,6 +243,19 @@ var EJEMPLOS = [
       { h: 11.5, t: 'meteo', k: 'viento', v: 70 },
       { h: 13, t: 'meteo', k: 'viento', v: 10 },
       { h: 15, t: 'meteo', k: 'viento', v: 0 }
+    ] },
+  { n: 'Granizo: reforecast + fallo de flota', dia: 172, hora: 9,
+    desc: 'Forecast severo que entra en lead, un reforecast adelanta el impacto, una TCU pierde radio durante la maniobra y otra se queda con el eje duro. Después se retira el aviso y se ve la retención equipo a equipo.',
+    eventos: [
+      { h: 9.5, t: 'hail', k: 'update', eta: 90, mm: 22, prob: 70, dir: 270 },
+      { h: 10.0, t: 'hail', k: 'update', eta: 20, mm: 25, prob: 85, dir: 270 },
+      { h: 10.02, t: 'av', k: 'off', id: 2, on: true },
+      { h: 10.02, t: 'av', k: 'duro', id: 3, on: true },
+      { h: 10.3, t: 'hail', k: 'missing' },
+      { h: 10.5, t: 'hail', k: 'update', eta: 5, mm: 25, prob: 85, dir: 270 },
+      { h: 10.8, t: 'hail', k: 'withdraw' },
+      { h: 11.0, t: 'av', k: 'off', id: 2, on: false },
+      { h: 11.0, t: 'av', k: 'duro', id: 3, on: false }
     ] },
   { n: 'Seta pulsada y rearme', dia: 172, hora: 10,
     desc: 'Alguien pulsa la seta del TCU. El motor se corta —solo el de ese equipo, que es donde está la seta—, el algoritmo sigue calculando por debajo y 30110 se va abriendo. Soltarla no rearma: va enclavada y hay que limpiar con 40007.13.',
