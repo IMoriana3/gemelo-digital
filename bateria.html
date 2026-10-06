@@ -150,11 +150,14 @@
       </select></div>
     <div class="fld"><label>Fuente</label>
       <select id="src">
-        <option value="archive">Open-Meteo · año histórico completo</option>
-        <option value="openmeteo">Open-Meteo · previsión (3–16 días)</option>
+        <option value="contract" selected>WeatherContract · compartido (histórico)</option>
+        <option value="contractfc">WeatherContract · forecast</option>
+        <option value="archive">Open-Meteo histórico · fallback legacy</option>
+        <option value="openmeteo">Open-Meteo forecast · fallback legacy</option>
         <option value="pvsyst">CSV horario PVSyst (fichero local)</option>
         <option value="synth">Sintético (cielo claro + nubes)</option>
-      </select></div>
+      </select>
+      <div class="note">Batería y Winter mode usan primero el WeatherContract activo. Open-Meteo directo queda como fallback declarado; la lógica de seguridad por viento sigue siendo del control/HSU.</div></div>
     <div class="fld" id="yearFld"><label>Año histórico</label><select id="year"></select></div>
     <div class="fld" id="sweepFld" style="display:none"><label>Barrido desde el año</label>
       <input type="number" id="sweepFrom" value="2013" min="1940" step="1">
@@ -1066,15 +1069,16 @@ $('socCrit').addEventListener('input',function(){
   if(+$('socTgt').value<=+this.value){$('socTgt').value=Math.min(100,+this.value+10);$('socTgtV').textContent=$('socTgt').value+'%'}});
 $('src').onchange=function(){
   var v=this.value;
-  $('yearFld').style.display=v==='archive'?'':'none';
-  $('sweepFld').style.display=(v==='archive'&&$('year').value==='worst')?'':'none';
-  $('daysFld').style.display=v==='openmeteo'?'':'none';
+  $('yearFld').style.display=(v==='archive'||v==='contract')?'':'none';
+  $('sweepFld').style.display=((v==='archive'||v==='contract')&&$('year').value==='worst')?'':'none';
+  $('daysFld').style.display=(v==='openmeteo'||v==='contractfc')?'':'none';
   $('fileFld').style.display=v==='pvsyst'?'':'none';
   $('cloudsFld').style.display=v==='synth'?'':'none';
   $('doyFld').style.display=v==='synth'?'':'none';
   $('sdaysFld').style.display=v==='synth'?'':'none';
 };
-$('winter').addEventListener('change',function(){
+
+$('src').onchange();$('winter').addEventListener('change',function(){
   $('socTgt').value=this.checked?90:80; $('socTgtV').textContent=$('socTgt').value+'%';
   $('fc').value=this.checked?3:5;       $('fcV').textContent=$('fc').value;
 });
@@ -1085,8 +1089,30 @@ function chip(lab,val,cls,sub){
 }
 function socCls(v,crit){return v<=0.001?'bad':(v<crit?'warn':'ok')}
 
+async function loadWeatherContract(kind,year){
+  const mod=await import('./sim/weather-contract-adapter.js');
+  const z=await mod.loadBatteryContract({kind:kind,year:year});
+  const s=z.meteo.contract;
+  $('srcTag').textContent='WeatherContract '+kind+' · '+s.contract_id+' · hash '+s.dataset_hash;
+  return z.meteo;
+}
+async function contractOrFallback(loc,kind,year){
+  try{return await loadWeatherContract(kind,year);}
+  catch(e){
+    var reason=String(e&&e.message||e),m;
+    if(kind==='forecast')m=await fetchOpenMeteo(loc,+$('days').value);
+    else m=await fetchOpenMeteoYear(loc,+year);
+    m.contractFallback=reason;m.source='open_meteo_fallback';
+    $('srcTag').textContent='⚠ WeatherContract → Open-Meteo fallback · '+reason;
+    return m;
+  }
+}
 function getMeteo(loc){
   var v=$('src').value;
+  if(v==='contract')
+    return contractOrFallback(loc,'historical',$('year').value);
+  if(v==='contractfc')
+    return contractOrFallback(loc,'forecast',null);
   if(v==='openmeteo')
     return fetchOpenMeteo(loc,+$('days').value).then(function(m){$('srcTag').textContent='Open-Meteo previsión · '+loc.n;return m})
       .catch(function(){$('srcTag').textContent='⚠ sin red → sintético';
@@ -1207,13 +1233,39 @@ $('run').onclick=function(){
             mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
   var soc0=+$('soc0').value/100;
   var job;
-  if($('src').value==='archive' && $('year').value==='worst'){
+  if(($('src').value==='archive'||$('src').value==='contract') && $('year').value==='worst'){
     /* Barrido multi-año como el Battery Availability Study: simula cada año,
        elige el peor por % tiempo no disponible (desempate: % prod. perdida, SOC mín) */
     var yEnd=new Date().getFullYear()-1;
     var yIni=Math.max(1940,Math.min(+$('sweepFrom').value||2013,yEnd-1));
     var years=[]; for(var y=yIni;y<=yEnd;y++)years.push(y);
     var fetchBatched=function(){
+      if($('src').value==='contract'){
+        return import('./sim/weather-contract-adapter.js').then(async function(mod){
+          try{
+            var pkg=await mod.loadActiveContract('historical');
+            if(!pkg)throw new Error('sin WeatherContract historical activo');
+            var ys=new Set(mod.contractYears(pkg));
+            var out=years.map(function(y){
+              if(!ys.has(y))return null;
+              var m=mod.contractToBattery(pkg,{year:y});
+              return m;
+            });
+            $('srcTag').textContent='WeatherContract histórico · barrido '+yIni+'–'+yEnd+' · '+pkg.contract_id;
+            return out;
+          }catch(e){
+            $('srcTag').textContent='⚠ WeatherContract insuficiente → Open-Meteo barrido · '+String(e&&e.message||e);
+            var out=[],i=0;
+            async function next(){
+              if(i>=years.length)return out;
+              var batch=years.slice(i,i+8);i+=8;
+              var r=await Promise.all(batch.map(function(y){return fetchYearOrNull(loc,y)}));out.push.apply(out,r);
+              return next();
+            }
+            return next();
+          }
+        });
+      }
       var out=[],i=0;
       function next(){
         if(i>=years.length)return Promise.resolve(out);
@@ -1240,7 +1292,8 @@ $('run').onclick=function(){
       var ref=simulate(wMeteo,prof,loc,soc0,refOpts);
       var ctrlW=$('cmp').checked?runControls(wMeteo,prof,loc,soc0,opts):null;
       $('srcTag').textContent='Peor año '+worst.year+' · '+loc.n+STEP_NOTE;
-      LAST={meteo:wMeteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:{list:res,worst:worst.year},controls:ctrlW};
+      LAST={meteo:wMeteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:{list:res,worst:worst.year},controls:ctrlW,
+        weatherContract:wMeteo.contract||null,weatherFallback:wMeteo.contractFallback||null};
       render(wMeteo,mng,ref,prof,loc,opts,LAST.sweep,null,ctrlW);
     });
   }else{
@@ -1250,7 +1303,8 @@ $('run').onclick=function(){
       var mng=simulate(meteo,prof,loc,soc0,opts);
       var ref=simulate(meteo,prof,loc,soc0,refOpts);
       var ctrl=$('cmp').checked?runControls(meteo,prof,loc,soc0,opts):null;
-      LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:null,controls:ctrl};
+      LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:null,controls:ctrl,
+        weatherContract:meteo.contract||null,weatherFallback:meteo.contractFallback||null};
       render(meteo,mng,ref,prof,loc,opts,null,null,ctrl);
       /* y, si hay motor, el balance de referencia lo firma él */
       balanceDelMotor(loc,prof,opts,meteo).then(function(j){ if(j) pintaBalanceMotor(j); });
