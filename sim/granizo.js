@@ -169,24 +169,35 @@ Granizo.prototype._evalua = function (dt) {
 Granizo.prototype.paso = function (dt) {
   dt = Math.max(0, n(dt, 0));
 
+  /* El hold solo puede contar el TROZO del paso que sucede después del all-clear.
+     Con pasos de 60 s, sumar el minuto entero cuando la señal terminó en el segundo
+     59 adelantaría el release 59 s. La física del gemelo admite dt variable: la
+     máquina de estados tiene que ser independiente del tamaño de paso. */
+  var holdDt = (this.known && !this.on) ? dt : 0;
+
   if (this.known && this.on) {
     var queda = dt;
+    holdDt = 0;
     if (this.etaS !== null && this.etaS > 0) {
       var a = Math.min(queda, this.etaS);
       this.etaS -= a; queda -= a;
     }
-    if (this.etaS !== null && this.etaS <= 0 && queda > 0) {
-      this.postS += queda;
-      if (this.postS >= this.cfg.afterMin * 60) {
+    if (this.etaS !== null && this.etaS <= 0 && queda >= 0) {
+      var afterS = this.cfg.afterMin * 60;
+      var falta = Math.max(0, afterS - this.postS);
+      if (queda >= falta) {
+        this.postS = afterS;
         this.on = false;
-        this.postS = this.cfg.afterMin * 60;
+        holdDt = queda - falta;
         this.revision++;
         this.ultimaCausa = 'fin automático de señal tras impacto';
+      } else {
+        this.postS += queda;
       }
     }
   }
 
-  this._evalua(dt);
+  this._evalua(holdDt);
   return this.snapshot();
 };
 
