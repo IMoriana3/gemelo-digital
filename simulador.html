@@ -1894,10 +1894,96 @@ function apunta() {
   }
 }
 
+/* ═══════════════════ GRANIZO · lectura operativa ══════════════════════════ */
+function hailNombre(ph) {
+  return {
+    'SIN_SEÑAL':'Operación normal','BAJO_UMBRAL':'Aviso bajo umbral','VIGILANCIA':'Weather alert · hail risk',
+    'DEFENSA':'High Angle Stow activo','IMPACTO':'Impacto de granizo','RETENCION':'Retención post all-clear',
+    'LIBERADO':'Liberado','SIN_DATO':'Granizo · sin dato','SIN_DATO_PROTEGIDO':'Sin dato · defensa mantenida'
+  }[ph] || ph || '—';
+}
+function hailClase(ph) {
+  return /IMPACTO|SIN_DATO_PROTEGIDO/.test(ph) ? 'bad' :
+         /VIGILANCIA|DEFENSA|RETENCION|BAJO_UMBRAL|SIN_DATO/.test(ph) ? 'warn' : 'ok';
+}
+function hailPaso(n,txt,cl) {
+  return '<div class="step '+(cl||'')+'"><b>'+n+'</b><span>'+txt+'</span></div>';
+}
+function pintaGranizoUI() {
+  if (!P) return;
+  var G=P.granizo.snapshot(), R=P.resumenGranizo(), t=tcuSel(), ex=t&&!t.repetidor?t.hailEjecucion():null;
+  var pct=function(a,b){return b?Math.max(0,Math.min(100,100*a/b)):0;};
+  var hm=Math.max(0,+$('hailMm').value||0), hp=Math.max(0,+$('hailProb').value||0),
+      he=Math.max(0,+$('hailEta').value||0), hd=((+$('hailDir').value%360)+360)%360;
+  $('hailMmV').textContent=hm+' mm'; $('hailProbV').textContent=hp+' %';
+  $('hailEtaV').textContent=he+' min'; $('hailDirV').textContent=hd+'° '+rumbo(hd);
+  $('hailLeadV').textContent=$('hailLead').value+' min';
+  $('hailAfterV').textContent=$('hailAfter').value+' min';
+  $('hailHoldV').textContent=$('hailHold').value+' min';
+  $('hailEstado').innerHTML='<b>'+hailNombre(G.phase)+'</b> · '+G.gate_reason+
+    (G.eta_min!=null?' · ETA '+num(G.eta_min,1)+' min':'')+
+    (G.phase==='RETENCION'?' · quedan '+num(G.hold_remaining_min,1)+' min':'')+
+    '<br>Contrato del gemelo: 19 mm · 30 % · lead '+G.lead_min+' min · hold '+G.hold_min+' min. Sin binding Modbus de hail inventado.';
+
+  $('hailFleetBadge').textContent=hailNombre(G.phase);
+  $('hailFleetBadge').className='badge '+(hailClase(G.phase)==='bad'?'alarm':(hailClase(G.phase)==='warn'?'stop':'run'));
+  $('hailFleetSub').innerHTML=G.defensa
+    ? '<b>'+num(R.pct,1)+' % protegido por telemetría</b> · '+num(R.pct_fisico,1)+' % físicamente en posición en el gemelo.'
+    : 'Sin orden de protección activa · '+hailNombre(G.phase)+'.';
+  $('hailFleetFlow').innerHTML=
+    hailPaso(R.ordenados,'ordenados',R.ordenados?'warn':'')+
+    hailPaso(R.ack,'ACK',R.ack===R.ordenados&&R.ordenados?'ok':(R.ordenados?'warn':''))+
+    hailPaso(R.moviendo,'moviendo',R.moviendo?'warn':'')+
+    hailPaso(R.protegido,'protegidos',R.protegido===R.total&&R.total?'ok':(R.defensa?'warn':''))+
+    hailPaso(R.sin_comms+R.fallo+R.no_modelado,'incidencias',(R.sin_comms+R.fallo+R.no_modelado)?'bad':'ok');
+  var issues=[];
+  if(R.pendiente_ack)issues.push(R.pendiente_ack+' esperando ACK');
+  if(R.sin_comms)issues.push(R.sin_comms+' sin comunicaciones');
+  if(R.fallo)issues.push(R.fallo+' con fallo de ejecución');
+  if(R.no_modelado)issues.push(R.no_modelado+' NO MODELADO');
+  if(R.protegido!==R.fisico)issues.push(Math.abs(R.protegido-R.fisico)+' discrepan telemetría/física');
+  $('hailFleetIssues').textContent=issues.length?issues.join(' · '):
+    (G.defensa?'Sin incidencias de ejecución detectadas.':'La protección no está activa.');
+
+  if($('hailFx3d')) {
+    var active=G.phase!=='SIN_SEÑAL'&&G.phase!=='LIBERADO'&&G.phase!=='BAJO_UMBRAL';
+    $('hailFx3d').className='hail3d'+(active?' on':'')+(G.phase==='IMPACTO'?' impact':'');
+    $('hailWind3d').textContent='→ VIENTO PREVISTO · DE '+rumbo(G.dir_deg)+' '+num(G.dir_deg,0)+'°';
+    $('hail3dStatus').textContent=hailNombre(G.phase);
+    $('hail3dStatus').className='hst '+hailClase(G.phase);
+    var mmMax=35, etaMax=Math.max(1,G.lead_min*1.5);
+    var bar=function(lab,val,um,max,inv){
+      var w=Math.max(0,Math.min(100,100*val/max)), th=Math.max(0,Math.min(100,100*um/max));
+      var bad=inv?(val<=um):(val>=um);
+      return '<div class="hailmetric"><span>'+lab+'</span><b>'+num(val,lab==='ETA'?1:0)+(lab==='ETA'?' min':lab==='Tamaño'?' mm':' %')+'</b>'+
+        '<div class="hailbar '+(bad?'bad':'')+'"><b style="width:'+w+'%"></b><em style="left:'+th+'%"></em></div></div>';
+    };
+    $('hail3dMetrics').innerHTML=
+      bar('Tamaño',G.mm,G.known===false?19:19,mmMax,false)+
+      bar('Probabilidad',G.prob_pct,30,100,false)+
+      (G.eta_min!=null?bar('ETA',G.eta_min,G.lead_min,etaMax,true):'');
+    var proy=t&&!t.repetidor?Math.max(0,100*Math.cos(Math.abs(t.anguloReal)*Math.PI/180)):null;
+    $('hail3dSelected').innerHTML=t&&!t.repetidor&&ex
+      ? '<span>TCU '+t.id+' · '+ex.estado+'</span><b>'+num(t.anguloReal,1)+'°</b>'+
+        '<span>target hail</span><b>'+(ex.target==null?'—':num(ex.target,0)+'°')+'</b>'+
+        '<span>área proyectada vertical</span><b>'+num(proy,0)+' %</b>'+
+        '<span>ruta</span><b>GW'+t.gateway+(t.viaRepetidor!=null?' → R'+t.viaRepetidor:'')+'</b>'
+      : '<span>Sin tracker seleccionado</span><b>—</b>';
+  }
+}
+function preparaHailFx() {
+  var c=$('hailRain3d'); if(!c||c.dataset.hecho)return;
+  var h=''; for(var i=0;i<44;i++){
+    var left=(3+(i*37)%96), delay=-((i*17)%100)/100, dur=(75+(i*13)%65)/100;
+    h+='<i style="left:'+left+'%;animation-delay:'+delay+'s;animation-duration:'+dur+'s"></i>';
+  }
+  c.innerHTML=h;c.dataset.hecho='1';
+}
+
 /* ═══════════════════ pintado ═══════════════════ */
 function pintaTodo() {
   if (!P) return;
-  cabecera();
+  cabecera(); pintaGranizoUI();
   if (vista === 'planta') { pintaChips(); pintaFlota(); pintaNcu(); pintaHsu(); }
   else if (vista === 'campo') {
     if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); }
@@ -1963,6 +2049,8 @@ function pintaChips() {
     chip('Equipos', r.total, '', P.seguidores().length + ' seguidores + ' + (r.total - P.seguidores().length) + ' repetidores') +
     chip('Salud', r.ok + '/' + r.total, r.alarma ? 'bad' : (r.aviso ? 'warn' : 'ok'), r.alarma + ' alarma · ' + r.offline + ' offline') +
     chip('Moviendo', r.moviendo, r.moviendo ? 'blue' : '', 'motores en marcha') +
+    chip('Granizo', hailNombre(r.granizo.fase), hailClase(r.granizo.fase)==='bad'?'bad':(hailClase(r.granizo.fase)==='warn'?'warn':'ok'),
+      r.granizo.defensa ? num(r.granizo.pct,1)+' % protegido · '+r.granizo.ack+'/'+r.granizo.total+' ACK' : 'sin hail stow activo') +
     (ve('soc')
       ? chip('SoC medio', num(r.socMedio, 0) + ' %', r.socMin < P.cfg.estrategia.socCrit ? 'bad' : (r.socMin < 50 ? 'warn' : 'ok'),
           'mínimo ' + num(r.socMin, 0) + ' % · techo ' + num(P.tcus[0].techoSoc, 0) + ' %') +
@@ -2005,12 +2093,14 @@ var ESTADO_ETI = {
 };
 
 function tarjeta(t) {
-  var s = t.salud();
-  return '<div class="mesa ' + s + (t.id === sel ? ' sel' : '') + '" data-id="' + t.id + '">' +
+  var s = t.salud(), hx=t.repetidor?null:t.hailEjecucion();
+  var hc=hx&&hx.estado!=='SIN_ORDEN'?' hail-'+hx.estado.toLowerCase():'';
+  var tag=hx&&hx.estado!=='SIN_ORDEN'?'<div class="hailtag">HAIL · '+hx.estado.replace(/_/g,' ')+'</div>':'';
+  return '<div class="mesa ' + s + hc + (t.id === sel ? ' sel' : '') + '" data-id="' + t.id + '">' +
     '<div class="id">' + (t.repetidor ? 'R' : '#') + t.id + '<span class="pip"></span></div>' +
-    '<div class="g">G' + t.grupo + ' · ' + t.modoTxt() + ' · ' + num(t.soc, 0) + '%</div>' +
+    '<div class="g">G' + t.grupo + ' · GW' + t.gateway + (t.viaRepetidor!=null?'→R'+t.viaRepetidor:'') + ' · ' + num(t.soc, 0) + '%</div>' +
     '<div class="ang"><em></em><i style="transform:rotate(' + (-t.anguloReal).toFixed(1) + 'deg)"></i></div>' +
-    '<div class="st">' + t.estadoTxt() + '</div></div>';
+    '<div class="st">' + t.estadoTxt() + '</div>'+tag+'</div>';
 }
 
 function pintaFlota() {
@@ -2082,6 +2172,9 @@ function pintaNcu() {
     kv('SAI', n.upsFallo ? 'fallo de red' : 'normal') +
     kv('Limpieza activa', lim.length ? lim.join(' ') : '—') +
     kv('Forzados', fz.length ? fz.join(' ') : '—') +
+    kv('Topología de radio', P.topologiaFuente) +
+    kv('Gateways', P.gateways.map(function(g){return 'GW'+g.id+' '+(g.online?'OK':'OFF');}).join(' · ')) +
+    kv('Granizo', hailNombre(P.granizo.snapshot().phase)+' · cmd '+P.granizo.snapshot().command_id) +
     kv('HSU en línea', P.hsus.filter(function (x) { return x.online; }).length + '/' + P.hsus.length);
 }
 function kv(a, b) { return '<div><span>' + a + '</span><span>' + b + '</span></div>'; }
