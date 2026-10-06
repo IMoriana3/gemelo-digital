@@ -770,8 +770,9 @@ TCU.prototype.poleaNcu = function () {
   if (this.tPoleo == null) this.tPoleo = ahora - Tp + this.p.ranura(H + turno, enVuelta) * Tp;
   if (ahora - this.tPoleo < Tp) return;
   this.tPoleo = ahora;
-  if (!this.online) return;                /* sin radio no le llega nada */
+  if (!this.comDisponible()) return;       /* cualquier eslabón roto congela la última copia */
   this.ultimoContacto = Math.floor(ahora);
+  var hg = n.hail ? Object.assign({}, n.hail) : null;
   this.deNcu = {
     nivelViento: n.nivelVientoGlobal,
     viento: n.vientoMax,                   /* con esto decide su abanderamiento */
@@ -780,8 +781,89 @@ TCU.prototype.poleaNcu = function () {
     nieve: n.alarmaNieve,
     limpieza: n.limpieza[this.grupo - 1],
     forzado: n.forzadoDe(this.grupo),
+    hail: hg,
     t: ahora
   };
+  /* Recibir command_id es el ACK de transporte del gemelo: demuestra que la
+     orden llegó a ESTA TCU. No afirma todavía ni movimiento ni posición. */
+  if (hg && this.hail.ackCommand !== hg.command_id) {
+    this.hail.ackCommand = hg.command_id;
+    this.hail.ackAt = ahora;
+  }
+  if (hg) this.hail.lastRevision = hg.revision;
+};
+
+/* La ruta completa del equipo. online es solo la radio propia; gateway y repetidor
+   pueden dejarlo aislado aunque su TCU esté sano. */
+TCU.prototype.comDisponible = function () {
+  if (!this.online || this.sinAlimentacion) return false;
+  var g = this.p.gateway ? this.p.gateway(this.gateway) : null;
+  if (g && !g.online) return false;
+  if (this.viaRepetidor != null) {
+    var r = this.p.tcu(this.viaRepetidor);
+    if (!r || !r.online || r.sinAlimentacion) return false;
+  }
+  return true;
+};
+
+/* Traduce la última orden de granizo que ALCANZÓ a esta TCU a un target local.
+   El target se fija al entrar y no cambia con reforecasts del mismo episodio.
+   Eso evita viajes de 110° por un cambio de dirección mientras ya protege. */
+TCU.prototype.actualizaGranizo = function () {
+  var h = this.deNcu && this.deNcu.hail, H = this.hail;
+  if (!h) { H.phase = 'SIN_DATO'; return H; }
+
+  H.phase = h.phase || 'SIN_SEÑAL';
+  H.conflict = false; H.multi = null;
+
+  if (h.defensa) {
+    if (!H.activa || H.episode !== h.episode) {
+      var q = Granizo.objetivo(this.angulo, h, {
+        defensaDeg: this.p.cfg.granizo.defensaDeg,
+        preMin: this.p.cfg.granizo.preMin,
+        leadMin: this.p.cfg.granizo.leadMin,
+        windPreKmh: K.WIND_T1 * 3.6,
+        windStowKmh: K.WIND_T2 * 3.6,
+        windKmh: Math.max(0, (this.deNcu.viento || 0) * 3.6)
+      });
+      /* Si en el instante de entrada manda viento, guardamos como target de hail
+         el MISMO LADO pero a defensa completa. Cuando amaina, solo sale hacia fuera:
+         no cruza por cero y nunca queda sin consigna por perder después el forecast. */
+      var target = q.target;
+      if (q.manda === 'viento') target = (target < 0 ? -1 : 1) * Math.abs(this.p.cfg.granizo.defensaDeg);
+      H.activa = true; H.target = target; H.caso = q.caso; H.manda = q.manda;
+      H.episode = h.episode; H.ordenAt = this.p.ahora(); H.posicionAt = null;
+      H.motivo = q.motivo;
+    }
+  } else if (H.activa) {
+    H.activa = false; H.target = null; H.caso = 0; H.manda = null;
+    H.liberadoAt = this.p.ahora(); H.posicionAt = null; H.motivo = 'orden de salida recibida';
+  }
+  return H;
+};
+
+/* Estado que usaría un SCADA de ejecución. Mantiene separadas cinco preguntas:
+   orden emitida, ACK, movimiento, posición por TELEMETRÍA y posición FÍSICA
+   (esta última solo la sabe el gemelo; en una planta real requiere instrumento). */
+TCU.prototype.hailEjecucion = function () {
+  if (this.repetidor) return { estado:'NO_APLICA', ack:false, telemetria:false, fisica:false };
+  var G = this.p.granizo.snapshot(), H = this.hail;
+  if (G.defensa && !H.activa) return { estado:'PENDIENTE_ACK', ack:false, telemetria:false, fisica:false };
+  if (!H.activa) return { estado:G.defensa?'PENDIENTE_ACK':'SIN_ORDEN', ack:false, telemetria:false, fisica:false };
+  var ack = true, target = H.target;
+  var tol = Math.max(1.5, this.p.cfg.deadband + 0.5);
+  var telem = target != null && Math.abs(this.angulo - target) <= tol;
+  var fis = target != null && Math.abs(this.anguloReal - target) <= tol;
+  if (H.conflict) return { estado:'NO_MODELADO', ack:ack, telemetria:false, fisica:false, target:target };
+  if (!this.comDisponible()) return { estado:'SIN_COMMS', ack:ack, telemetria:telem, fisica:fis, target:target };
+  if (this.ejeBloqueado || this.sobrecorriente || this.alarmaMotorEnclavada || this.sinAlimentacion)
+    return { estado:'FALLO', ack:ack, telemetria:telem, fisica:fis, target:target };
+  if (telem) {
+    if (H.posicionAt == null) H.posicionAt = this.p.ahora();
+    return { estado:'PROTEGIDO', ack:ack, telemetria:true, fisica:fis, target:target };
+  }
+  if (this.moviendo) return { estado:'MOVIENDO', ack:ack, telemetria:false, fisica:fis, target:target };
+  return { estado:'ACK', ack:ack, telemetria:false, fisica:fis, target:target };
 };
 
 /* Entradas que llegan de fuera del TCU en este instante. Las de la RED son la copia
@@ -796,10 +878,11 @@ TCU.prototype.entradas = function () {
     vientoInvertido: d.vientoInvertido,
     nieve: d.nieve,
     limpieza: d.limpieza,
+    hail: d.hail || null,
     /* el forzado puede venir de la NCU (a todo el grupo) o del propio equipo, si
        alguien le ha escrito 40000 con 11..17. Gana el local, que es el más cercano. */
     forzado: this.forzadoLocal || d.forzado,
-    comNcu: this.online
+    comNcu: this.comDisponible()
   };
 };
 
