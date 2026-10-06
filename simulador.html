@@ -1117,7 +1117,7 @@ function pintaGuion(evs, falta) {
     var hecho = ESC.i > i, prox = falta && falta.ev === e;
     var T = Escenario.TIPOS[e.t] || {};
     var campos = '';
-    if (e.t === 'meteo' || e.t === 'av') {
+    if (e.t === 'meteo' || e.t === 'av' || e.t === 'hail') {
       campos = '<select data-i="' + i + '" data-c="k">' + (T.ks || []).map(function (o) {
         return '<option value="' + o.k + '"' + (o.k === e.k ? ' selected' : '') + '>' + o.n + '</option>';
       }).join('') + '</select>';
@@ -1131,6 +1131,13 @@ function pintaGuion(evs, falta) {
                 '<option value="1"' + (e.on ? ' selected' : '') + '>aparece</option>' +
                 '<option value="0"' + (e.on ? '' : ' selected') + '>se repara</option></select>' +
                 '<span class="u">TCU</span><input type="text" inputmode="numeric" size="3" data-i="' + i + '" data-c="id" value="' + (e.id || 1) + '">';
+    } else if (e.t === 'hail') {
+      if ((e.k || 'update') === 'update') {
+        campos += '<span class="u">ETA</span><input type="text" inputmode="decimal" size="3" data-i="' + i + '" data-c="eta" value="' + (e.eta == null ? 60 : e.eta) + '">' +
+          '<span class="u">min ·</span><input type="text" inputmode="decimal" size="3" data-i="' + i + '" data-c="mm" value="' + (e.mm == null ? 22 : e.mm) + '">' +
+          '<span class="u">mm ·</span><input type="text" inputmode="decimal" size="3" data-i="' + i + '" data-c="prob" value="' + (e.prob == null ? 70 : e.prob) + '">' +
+          '<span class="u">% · dir</span><input type="text" inputmode="numeric" size="3" data-i="' + i + '" data-c="dir" value="' + (e.dir == null ? 270 : e.dir) + '"><span class="u">°</span>';
+      }
     } else {
       campos = '<select data-i="' + i + '" data-c="dev">' + ['ncu', 'tcu', 'hsu'].map(function (d) {
         return '<option value="' + d + '"' + (d === (e.dev || 'tcu') ? ' selected' : '') + '>' + d.toUpperCase() + '</option>';
@@ -1202,6 +1209,7 @@ function ataGuion() {
       else if (campo === 'on') cambio.on = v === '1';
       else if (campo === 'id') cambio.id = parseInt(v, 10) || 1;
       else if (campo === 'dir') cambio.dir = parseInt(v, 10) || 0;
+      else if (campo === 'eta' || campo === 'mm' || campo === 'prob') cambio[campo] = parseFloat(v) || 0;
       else if (campo === 'vals') cambio.vals = v.split(/[,\s]+/).map(Number).filter(function (x) { return isFinite(x); });
       else cambio[campo] = v;
       E.cambia(i, cambio, P ? P.t.hora : null);
