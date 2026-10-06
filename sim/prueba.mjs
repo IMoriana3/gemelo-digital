@@ -1779,6 +1779,18 @@ console.log('\n── GRANIZO · forecast → red → TCU → posición confirma
      !G({known:true,on:true,mm:25,prob_pct:29.9},SIM.Granizo.CANON).activa &&
       G({known:true,on:true,mm:19,prob_pct:30},SIM.Granizo.CANON).activa,
      '19 mm y 30 % son fronteras inclusivas; 18,9 / 29,9 no activan');
+
+  const uno = new SIM.Granizo({leadMin:60,afterMin:0.5,holdMin:1});
+  const ses = new SIM.Granizo({leadMin:60,afterMin:0.5,holdMin:1});
+  uno.actualiza({eta_min:0.5,mm:25,prob_pct:85,dir_deg:270});
+  ses.actualiza({eta_min:0.5,mm:25,prob_pct:85,dir_deg:270});
+  for(let i=0;i<120;i++) uno.paso(1);
+  ses.paso(60); ses.paso(60);
+  ok(uno.snapshot().phase===ses.snapshot().phase &&
+     uno.snapshot().defensa===ses.snapshot().defensa &&
+     Math.abs((uno.snapshot().hold_remaining_min||0)-(ses.snapshot().hold_remaining_min||0))<1e-9,
+     'el lifecycle de granizo es invariante al paso: 1 s y 60 s llegan al mismo estado',
+     uno.snapshot().phase+' / '+ses.snapshot().phase);
 }
 
 {
