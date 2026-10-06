@@ -506,7 +506,7 @@
         <label class="sw"><input type="checkbox" id="avSeta"><span>Seta local pulsada</span></label>
         <label class="sw"><input type="checkbox" id="avCable"><span>Cable de la seta cortado (lazo NC)</span></label>
         <button class="btn sec" id="btnLimpiar">🔓 Limpiar alarmas · 40007.13</button>
-        <div class="note">La seta va <b>enclavada</b>: soltarla no rearma el motor. Y como la del armario alcanza a toda la planta, esto limpia <b>la flota entera</b>, igual que la toolbox por rango.</div>
+        <div class="note">La seta es <b>local de cada TCU</b> y va enclavada: soltarla no rearma el motor. Este botón limpia alarmas en toda la flota simulada para poder ensayar el recovery masivo; no representa una seta de armario de NCU.</div>
         <div class="fld"><label>SoC forzado <span class="rv" id="socV">—</span></label>
           <input type="range" id="socSet" min="0" max="100" value="80"></div>
         <div class="fld"><label>Consigna manual <span class="rv" id="manV">0°</span></label>
@@ -2432,10 +2432,14 @@ function exportaCsv() {
 /* ═══════════════════ detalle del equipo ═══════════════════ */
 function pintaDetalle() {
   var t = tcuSel(), a = t.alarmas(), e = t.entradas();
+  var hx=t.repetidor?null:t.hailEjecucion(), hg=P.granizo.snapshot();
   $('chipsTcu').innerHTML =
     chip((t.repetidor ? 'Repetidor ' : 'TCU ') + t.id, t.salud().toUpperCase(),
       t.salud() === 'ok' ? 'ok' : (t.salud() === 'alarma' ? 'bad' : 'warn'), 'grupo ' + t.grupo) +
     chip('Modo', t.modoTxt(), '', 'criterio: ' + SIM.CRIT_TXT[t.criterio]) +
+    (!t.repetidor ? chip('Hail stow', hx.estado.replace(/_/g,' '),
+      /FALLO|NO_MODELADO/.test(hx.estado)?'bad':(/MOVIENDO|PENDIENTE_ACK|ACK|SIN_COMMS/.test(hx.estado)?'warn':(hx.estado==='PROTEGIDO'?'ok':'')),
+      'cmd '+hg.command_id+' · episodio '+hg.episode+(hx.target!=null?' · target '+num(hx.target,0)+'°':'')) : '') +
     /* las cuatro posiciones, en orden: lo que pide el sol, lo que decide el TCU, dónde
        está la mesa y lo que publica. Cada salto tiene un culpable distinto. */
     chip('Pide el sol', num(t.objetivoSolar, 1) + '°',
@@ -2480,14 +2484,17 @@ function pintaDetalle() {
                (t.stowRearma ? ' · ⚠ viento ≥ ' + Math.round(SIM.K.WIND_T1 * 3.6) + ' km/h'
                              : (t.stowHisteresis ? ' · suelta en ' + msS(t.stowCuenta) : ' · sin histéresis'))
              : (e.forzado === 1 ? 'forzado' : '—')],
-    ['2 · SP3 nieve', e.nieve || e.forzado === 3, t.sp === 3, e.nieve ? 'alarma de nieve' : (e.forzado === 3 ? 'forzado' : '—')],
-    ['3 · SP4 limpieza', e.limpieza || e.forzado === 4, t.sp === 4, e.limpieza ? 'interruptor del grupo ' + t.grupo : (e.forzado === 4 ? 'forzado' : '—')],
-    ['4 · SP2/5/6/7 forzadas', !!e.forzado && [2, 5, 6, 7].indexOf(e.forzado) >= 0, [2, 5, 6, 7].indexOf(t.sp) >= 0, e.forzado ? 'SP' + e.forzado : '—'],
-    ['5 · Restricción de batería', t.bajaCapacidad > 0 || t.parked, t.criterio === SIM.CRIT.BATERIA,
+    ['2 · Granizo', !!(t.hail&&t.hail.activa), t.criterio===SIM.CRIT.GRANIZO||t.criterio===SIM.CRIT.CONFLICTO,
+      t.hail&&t.hail.conflict?'NO MODELADO: '+t.hail.motivo:
+      (hx?hx.estado.replace(/_/g,' ')+' · '+(hx.target==null?'sin target':'target '+num(hx.target,0)+'°'):'—')],
+    ['3 · SP3 nieve', e.nieve || e.forzado === 3, t.sp === 3, e.nieve ? 'alarma de nieve' : (e.forzado === 3 ? 'forzado' : '—')],
+    ['4 · SP4 limpieza', e.limpieza || e.forzado === 4, t.sp === 4, e.limpieza ? 'interruptor del grupo ' + t.grupo : (e.forzado === 4 ? 'forzado' : '—')],
+    ['5 · SP2/5/6/7 forzadas', !!e.forzado && [2, 5, 6, 7].indexOf(e.forzado) >= 0, [2, 5, 6, 7].indexOf(t.sp) >= 0, e.forzado ? 'SP' + e.forzado : '—'],
+    ['6 · Restricción de batería', t.bajaCapacidad > 0 || t.parked, t.criterio === SIM.CRIT.BATERIA,
       t.parked ? ('defensa: SoC < ' + P.cfg.estrategia.socCrit + ' % crítico')
                : ['normal', 'baja (L1)', 'muy baja (L2)', 'crítica (L3)'][t.bajaCapacidad]],
-    ['6 · Manual', t.modo === SIM.MODO.MANUAL, t.criterio === SIM.CRIT.MANUAL, 'consigna ' + num(t.manual, 1) + '°'],
-    ['7 · Auto (solar)', t.modo === SIM.MODO.AUTO, t.criterio === SIM.CRIT.SEGUIMIENTO || t.criterio === SIM.CRIT.BACKTRACKING || t.criterio === SIM.CRIT.NOCHE,
+    ['7 · Manual', t.modo === SIM.MODO.MANUAL, t.criterio === SIM.CRIT.MANUAL, 'consigna ' + num(t.manual, 1) + '°'],
+    ['8 · Auto (solar)', t.modo === SIM.MODO.AUTO, t.criterio === SIM.CRIT.SEGUIMIENTO || t.criterio === SIM.CRIT.BACKTRACKING || t.criterio === SIM.CRIT.NOCHE,
       t.solar.dia ? (t.bt ? 'backtracking ' + num(t.solar.bt, 1) + '°' : 'seguimiento ' + num(t.solar.real, 1) + '°') : 'noche → ' + SIM.K.NIGHT_POS + '°']
   ];
   $('jer').innerHTML = reglas.map(function (r) {
@@ -2498,6 +2505,11 @@ function pintaDetalle() {
   for (var k in a) if (a[k]) al.push(k);
   $('kvTcu').innerHTML =
     kv('Estado', t.estadoTxt()) +
+    (!t.repetidor ? kv('Hail · ejecución', hx.estado.replace(/_/g,' ')+(hx.target!=null?' · target '+num(hx.target,1)+'°':'')) : '') +
+    (!t.repetidor ? kv('Hail · ACK', t.hail.ackAt==null?'pendiente':'recibido · '+num(P.ahora()-t.hail.ackAt,1)+' s atrás') : '') +
+    (!t.repetidor ? kv('Hail · posición', t.hail.posicionAt==null?'no confirmada':'confirmada por telemetría') : '') +
+    kv('Ruta de radio', 'NCU → GW'+t.gateway+(t.viaRepetidor!=null?' → R'+t.viaRepetidor:'')+' → '+(t.repetidor?'R':'TCU')+t.id+
+       (t.rutaInferida?' · inferida':'') ) +
     kv('Posición de seguridad', SIM.SP_TXT[t.sp] + (t.sp ? ' · ' + SIM.FUENTE_TXT[t.fuenteSp] : '')) +
     kv('Backtracking', t.bt ? 'activo' : 'no') +
     kv('Sol', t.solar.dia ? ('elev. ' + num(90 - t.solar.zen, 1) + '° · az. ' + num(t.solar.az, 1) + '°') : 'bajo el horizonte') +
@@ -2522,7 +2534,7 @@ function pintaDetalle() {
     kv('Energía del motor hoy', num(t.energiaMotorHoy / 3600, 2) + ' Wh') +
     kv('Ciclos de carga', t.ciclos) +
     kv('Último contacto', (P.t.epoch - t.ultimoContacto) + ' s') +
-    kv('Zigbee', t.online ? ('canal ' + t.zbCanal + ' · 0x' + t.zbAddr.toString(16)) : 'sin enlace') +
+    kv('Zigbee', t.comDisponible() ? ('canal ' + t.zbCanal + ' · 0x' + t.zbAddr.toString(16)) : 'ruta sin comunicación') +
     kv('Nº de serie', t.serie) +
     kv('Firmware', 'v' + t.fwMayor + '.' + t.fwMenor + '.' + t.fwParche) +
     kv('Alarmas', al.length ? al.join(', ') : 'ninguna');
