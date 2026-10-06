@@ -60,19 +60,22 @@ export function contractYears(pkg){
   if(!pkg?.rows)return [];
   return [...new Set(pkg.rows.map(r=>new Date(r.t).getUTCFullYear()).filter(Number.isFinite))].sort((a,b)=>a-b);
 }
-export function twinWeatherSnapshot(pkg,at){
+export function twinWeatherSnapshot(pkg,at,{maxGapMin=180}={}){
   if(!pkg?.rows?.length)return null;
   const t=Date.parse(at||new Date());
   let best=pkg.rows[0],d=Math.abs(Date.parse(best.t)-t);
   for(const r of pkg.rows){
     const x=Math.abs(Date.parse(r.t)-t);if(x<d){best=r;d=x;}
   }
+  if(Number.isFinite(maxGapMin)&&d>maxGapMin*60000)return null;
   return {
-    t:best.t,ghi_wm2:finite(best.ghi_wm2,null),dni_wm2:finite(best.dni_wm2,null),
+    t:best.t,gap_min:d/60000,
+    ghi_wm2:finite(best.ghi_wm2,null),dni_wm2:finite(best.dni_wm2,null),
     dhi_wm2:finite(best.dhi_wm2,null),temp_c:finite(best.temp_c,null),
     wind_ms:finite(best.wind_ms,null),wind_dir_deg:finite(best.wind_dir_deg,null),
     gust_ms:finite(best.gust_ms,null),precip_mm:finite(best.precip_mm,null),
-    snowfall_cm:finite(best.snowfall_cm,null),cape_jkg:finite(best.cape_jkg,null),
+    snowfall_cm:finite(best.snowfall_cm,null),snow_depth_m:finite(best.snow_depth_m,null),
+    cloud_total:finite(best.cloud_total,null),cape_jkg:finite(best.cape_jkg,null),
     contract:stamp(pkg,"digital_twin")
   };
 }
