@@ -298,6 +298,16 @@
 
       <div class="grp">
         <h3>Meteorología</h3>
+        <div class="fld">
+          <label>Fuente de la simulación</label>
+          <select id="meteoTwinMode">
+            <option value="manual">Manual · sliders / escenarios</option>
+            <option value="forecast">WeatherContract forecast · compartido</option>
+            <option value="historical">WeatherContract historical · compartido</option>
+          </select>
+          <div class="btns" style="margin-top:6px"><button class="btn sec" id="btnMeteoContrato">Cargar y sincronizar tiempo</button></div>
+          <div class="note" id="wcTwinStatus">Manual. El WeatherContract alimenta el mundo simulado, pero <b>las alarmas reales de seguridad siguen siendo HSU/entradas de hardware</b>.</div>
+        </div>
         <div class="fld"><label>Viento medio <span class="rv" id="vientoV">3 m/s · 11 km/h</span></label>
           <input type="range" id="viento" min="0" max="30" step="0.1" value="3"></div>
         <div class="fld"><label>Rachas <span class="rv" id="rachaV">20 %</span></label>
@@ -918,6 +928,55 @@ function aplicaEstrategiaViento() {
       : 'Un umbral: por encima de ' + Math.round(C.t1 * 3.6) + ' km/h, bandera completa a ±' +
         C.total + '°. Sin sector parcial ni histéresis.') +
     (e.canon ? ' <b>Es la de la casa</b> (decisión EPC).' : '');
+}
+var TWIN_WC=null,TWIN_WC_MOD=null,TWIN_WC_LAST=null;
+async function cargaMeteoContrato(){
+  var kind=$('meteoTwinMode').value;
+  if(kind==='manual'){TWIN_WC=null;TWIN_WC_LAST=null;$('wcTwinStatus').textContent='Manual · sliders / escenarios.';return;}
+  try{
+    TWIN_WC_MOD=TWIN_WC_MOD||await import('./sim/weather-contract-adapter.js');
+    TWIN_WC=await TWIN_WC_MOD.loadActiveContract(kind);
+    if(!TWIN_WC)throw new Error('sin WeatherContract '+kind+' activo');
+    var first=TWIN_WC.rows[0],near=TWIN_WC_MOD.twinWeatherSnapshot(TWIN_WC,new Date(),{maxGapMin:1e9})||TWIN_WC_MOD.twinWeatherSnapshot(TWIN_WC,first.t,{maxGapMin:1e9});
+    if(!near)throw new Error('contrato sin filas utilizables');
+    /* Alinea el reloj del gemelo al timestamp escogido. La física sigue usando el
+       día/hora del gemelo; el epoch queda además coherente para telemetría/Modbus. */
+    var t=Date.parse(near.t),loc=PLANTAS[+$('loc').value]||{tz:0};
+    var dl=new Date(t+(+loc.tz||0)*3600000),d0=Date.UTC(dl.getUTCFullYear(),0,1);
+    P.t.dia=Math.floor((Date.UTC(dl.getUTCFullYear(),dl.getUTCMonth(),dl.getUTCDate())-d0)/86400000)+1;
+    P.t.hora=dl.getUTCHours()+dl.getUTCMinutes()/60+dl.getUTCSeconds()/3600;
+    P.t.epoch=Math.floor(t/1000);P.tResto=0;
+    $('dia').value=P.t.dia;$('hora').value=P.t.hora;
+    aplicaSnapshotContrato(true);
+    $('wcTwinStatus').innerHTML='WeatherContract <b>'+TWIN_WC.contract_id+'</b> · hash '+(TWIN_WC.qa?.dataset_hash||'—')+' · '+kind+'. WEATHER alimenta la simulación; CONTROL/HSU decide.';
+  }catch(e){
+    TWIN_WC=null;TWIN_WC_LAST=null;
+    $('wcTwinStatus').textContent='⚠ '+String(e&&e.message||e)+' · se mantiene meteorología manual.';
+    $('meteoTwinMode').value='manual';
+  }
+}
+function aplicaSnapshotContrato(force){
+  if(!TWIN_WC||!TWIN_WC_MOD||!P)return false;
+  var s=TWIN_WC_MOD.twinWeatherSnapshot(TWIN_WC,new Date(P.ahora()*1000),{maxGapMin:90});
+  if(!s){
+    if(force||TWIN_WC_LAST){$('wcTwinStatus').textContent='⚠ Fuera de cobertura del WeatherContract · meteorología queda en el último valor válido/manual.';}
+    TWIN_WC_LAST=null;return false;
+  }
+  /* No se tocan entradas de armario ni forzados: solo el entorno meteorológico. */
+  if(Number.isFinite(s.wind_ms))$('viento').value=Math.max(0,Math.min(30,s.wind_ms));
+  if(Number.isFinite(s.wind_dir_deg))$('dirViento').value=((s.wind_dir_deg%360)+360)%360;
+  if(Number.isFinite(s.gust_ms)&&Number.isFinite(s.wind_ms)&&s.wind_ms>0)
+    $('racha').value=Math.max(0,Math.min(100,100*(s.gust_ms/s.wind_ms-1)/.45));
+  if(Number.isFinite(s.cloud_total))$('nubes').value=Math.max(0,Math.min(100,100*s.cloud_total));
+  if(Number.isFinite(s.snow_depth_m))$('nieve').value=Math.max(0,Math.min(40,100*s.snow_depth_m));
+  else if(Number.isFinite(s.snowfall_cm))$('nieve').value=Math.max(0,Math.min(40,s.snowfall_cm));
+  if(Number.isFinite(s.temp_c))$('temp').value=Math.max(-20,Math.min(40,s.temp_c));
+  aplicaMeteo();
+  $('vientoV').textContent=num(+$('viento').value,1)+' m/s · '+num(+$('viento').value*3.6,0)+' km/h';
+  $('rachaV').textContent=num(+$('racha').value,0)+' %';
+  $('dirV').textContent=num(+$('dirViento').value,0)+'°';
+  $('nubesV').textContent=num(+$('nubes').value,0)+' %';$('nieveV').textContent=num(+$('nieve').value,1)+' cm';$('tempV').textContent=num(+$('temp').value,1)+' °C';
+  TWIN_WC_LAST=s;return true;
 }
 function aplicaMeteo() {
   P.meteo.pideViento(+$('viento').value);   /* el viento tarda en llegar, como en el campo */
@@ -1740,7 +1799,9 @@ function bucle(ahora) {
   if (corriendo && P) {
     var dtSim = dtReal * (+$('vel').value || 1), resto = dtSim;
     while (resto > 0) {
-      var p = Math.min(60, resto); P.paso(p); HIST.paso(P, sel);
+      var p = Math.min(60, resto);
+      if($('meteoTwinMode')&&$('meteoTwinMode').value!=='manual')aplicaSnapshotContrato(false);
+      P.paso(p); HIST.paso(P, sel);
       if (ESC && !GRABANDO) {
         var hechos = ESC.paso(P, P.t.hora);
         for (var q = 0; q < hechos.length; q++) {
@@ -2455,14 +2516,16 @@ $('filas').onchange = function () {
   if (CAMPO) { CAMPO.ponBifila(this.value !== 'monofila', P); CAMPO.selecciona(indiceDe(sel)); }
 };
 $('upsFallo').onchange = function () { P.ncu.upsFallo = this.checked; toca(); };
+$('btnMeteoContrato').onclick=cargaMeteoContrato;
+$('meteoTwinMode').onchange=function(){if(this.value==='manual'){TWIN_WC=null;TWIN_WC_LAST=null;$('wcTwinStatus').textContent='Manual · sliders / escenarios.';}};
 $('btnPlay').onclick = function () {
   corriendo = !corriendo;
   this.textContent = corriendo ? '⏸ Pausa' : '▶ Simular';
   this.className = 'btn' + (corriendo ? ' sec' : '');
   sincroVel();                       /* el reproductor tiene el mismo botón: que no mienta */
 };
-$('btnPaso').onclick = function () { for (var i = 0; i < 60; i++) P.paso(1); apunta(); $('hora').value = P.t.hora; etiquetaTiempo(); pintaTodo(); };
-$('btnRehacer').onclick = function () { construye(); if (CAMPO) CAMPO.construye(P); };
+$('btnPaso').onclick = function () { for (var i = 0; i < 60; i++) { if($('meteoTwinMode').value!=='manual')aplicaSnapshotContrato(false); P.paso(1); } apunta(); $('hora').value = P.t.hora; etiquetaTiempo(); pintaTodo(); };
+$('btnRehacer').onclick = function () { construye(); if (CAMPO) CAMPO.construye(P); if($('meteoTwinMode').value!=='manual')cargaMeteoContrato(); };
 
 ['dia', 'hora'].forEach(function (id) {
   $(id).oninput = function () {
@@ -2476,6 +2539,10 @@ var METEO_EV = { viento: ['viento', 3.6], racha: ['rachas', 1], dirViento: ['dir
                  nubes: ['nubes', 1], nieve: ['nieve', 1], temp: ['temp', 1] };
 ['viento', 'racha', 'dirViento', 'nubes', 'nieve', 'temp'].forEach(function (id) {
   $(id).oninput = function () {
+    if($('meteoTwinMode').value!=='manual'){
+      $('meteoTwinMode').value='manual';TWIN_WC=null;TWIN_WC_LAST=null;
+      $('wcTwinStatus').textContent='Manual · un slider meteorológico ha tomado el control del escenario.';
+    }
     aplicaMeteo();
     /* si se está grabando, el mando queda apuntado con la hora simulada en la que se
        tocó: eso es lo que hace que un escenario grabado a ×600 se reproduzca a ×1 */
