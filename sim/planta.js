@@ -278,6 +278,12 @@ var Cielo = (typeof window !== 'undefined' && window.Cielo) ||
         (typeof require === 'function' ? require('./cielo.js') : null);
 if (!Cielo) throw new Error('falta sim/cielo.js');
 
+/* El granizo también vive fuera del motor de equipo: ciclo de forecast, reforecast,
+   retirada, sin dato y hold. planta.js solo ejecuta la orden equipo a equipo. */
+var Granizo = (typeof window !== 'undefined' && window.Granizo) ||
+        (typeof require === 'function' ? require('./granizo.js') : null);
+if (!Granizo) throw new Error('falta sim/granizo.js');
+
 /* Una bandera nueva con los umbrales que haya AHORA en K (que pueden no ser los del
    canon si se han ajustado). `sincronizaBandera` los refresca en una ya montada, sin
    perderle el estado: es lo que permite mover un umbral con la planta en marcha. */
@@ -344,10 +350,10 @@ var SP_TXT = ['—', 'SP1 viento', 'SP2', 'SP3 nieve', 'SP4 limpieza', 'SP5', 'S
    ⚠ El documento nombra los dos registros pero NO transcribe su enumerado: esta
    codificación es del simulador. Va marcada como tal en el visor. */
 var CRIT = { SEGUIMIENTO: 0, BACKTRACKING: 1, MANUAL: 2, SEGURIDAD: 3, LIMITE: 4,
-             NOCHE: 5, BATERIA: 6, INHIBIDO: 7, DIFUSA: 8 };
+             NOCHE: 5, BATERIA: 6, INHIBIDO: 7, DIFUSA: 8, GRANIZO: 9, CONFLICTO: 10 };
 var CRIT_TXT = ['Seguimiento', 'Backtracking', 'Manual', 'Posición de seguridad',
                 'Límite de tilt', 'Noche', 'Restricción de batería', 'Motor inhibido',
-                'Cielo cubierto'];
+                'Cielo cubierto', 'Hail stow (capa del gemelo)', 'NO MODELADO · conflicto de protecciones'];
 var FUENTE_SP = { NINGUNA: 0, HSU: 1, NCU: 2, LOCAL: 3 };
 var FUENTE_TXT = ['—', 'meteo de la HSU', 'forzado de la NCU', 'decisión local'];
 
@@ -589,7 +595,8 @@ function TCU(id, planta, opts) {
   /* la copia de lo que la NCU le ha dicho. Nace en calma: un equipo recién arrancado
      no sabe nada del viento hasta que le sondean por primera vez. */
   this.deNcu = { nivelViento: 0, viento: 0, dir: 180, vientoInvertido: false,
-                 nieve: false, limpieza: false, forzado: 0, t: -1e9 };
+                 nieve: false, limpieza: false, forzado: 0,
+                 hail: planta.granizo ? planta.granizo.snapshot() : null, t: -1e9 };
   this.tPoleo = null;
 
   this.forzadoLocal = 0;             /* 40000 = 11..17: forzado escrito a ESTE equipo */
@@ -723,6 +730,14 @@ function TCU(id, planta, opts) {
   /* nace hablando: si el último contacto arrancara en 0, el SCADA vería una planta
      entera con 56 años de antigüedad de comunicaciones */
   this.online = true; this.ultimoContacto = planta.t.epoch;
+  /* Ruta de comunicaciones. La asigna Planta.asignaTopologia(); si no hay un
+     registry/as-built se etiqueta como sintética, nunca como topología real. */
+  this.gateway = 1; this.viaRepetidor = null;
+  /* Estado de ejecución del hail stow en ESTE equipo. La NCU ordena a la flota,
+     pero ACK, movimiento y confirmación son por TCU. */
+  this.hail = { activa:false, target:null, caso:0, manda:null, phase:'SIN_SEÑAL',
+    episode:0, ackCommand:-1, ackAt:null, ordenAt:null, posicionAt:null,
+    liberadoAt:null, conflict:false, multi:null, motivo:'', lastRevision:-1 };
   this.ejeBloqueado = false;               /* la ALARMA (30003.8), deducida — no la avería */
   this.sobrecorriente = false;
   this.fueraRango = false; this.limiteOeste = false; this.limiteEste = false;
