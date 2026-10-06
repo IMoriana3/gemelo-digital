@@ -543,6 +543,34 @@ Campo3D.prototype.construye = function (P) {
   this.suelo.geometry.dispose();
   this.suelo.geometry = new T.PlaneGeometry(diag * 24, diag * 24);
 
+  /* GRANIZO VOLUMÉTRICO. El overlay 2D cuenta la historia; estos puntos hacen que
+     al orbitar la cámara el impacto siga teniendo profundidad. Deterministas y
+     baratos: entre 180 y 900 puntos según el tamaño de planta, sin texturas. */
+  var nHail = Math.max(180, Math.min(900, Math.round(this.n * 3.5)));
+  var hp = new Float32Array(nHail * 3), hb = new Float32Array(nHail * 3);
+  var seed = 0x5A17, rnd = function () {
+    seed ^= seed << 13; seed >>>= 0; seed ^= seed >> 17; seed ^= seed << 5; seed >>>= 0;
+    return seed / 4294967296;
+  };
+  var hSpan = Math.max(22, Math.min(150, diag * 0.24));
+  for (var hi = 0; hi < nHail; hi++) {
+    var hx = (rnd() - 0.5) * this._ext.x * 1.12;
+    var hz = (rnd() - 0.5) * this._ext.z * 1.12;
+    var hy = 2 + rnd() * hSpan;
+    hp[hi*3]=hb[hi*3]=hx; hp[hi*3+1]=hb[hi*3+1]=hy; hp[hi*3+2]=hb[hi*3+2]=hz;
+  }
+  var hg = new T.BufferGeometry();
+  hg.setAttribute('position', new T.BufferAttribute(hp, 3));
+  var hm = new T.PointsMaterial({ color:0xeaf2f8, size:Math.max(0.18,Math.min(0.65,diag/700)),
+    transparent:true, opacity:0.88, depthWrite:false, sizeAttenuation:true, fog:true });
+  this.hail3d = new T.Points(hg, hm);
+  this.hail3d.visible = false;
+  this.hail3d.frustumCulled = false;
+  this.hail3d.userData.base = hb;
+  this.hail3d.userData.span = hSpan;
+  this.grupoPlanta.add(this.hail3d);
+  this._hailT = null; this._hailVisible = false;
+
   this._m = new T.Matrix4(); this._rx = new T.Matrix4(); this._acc = new T.Matrix4();
   this.encuadra();
   this._sucio = true;
@@ -552,6 +580,10 @@ Campo3D.prototype.construye = function (P) {
    Barato y con cero reservas: se llama tantas veces como avance la simulación, pero
    solo hace trabajo si algo se ha movido de verdad. */
 var COL_SALUD = { ok: 0x37b87c, aviso: 0xe0a52b, alarma: 0xe2574c, offline: 0x5e7388 };
+var COL_HAIL = {
+  PENDIENTE_ACK:0xe0a52b, ACK:0x7b91a5, MOVIENDO:0x5aa9df, PROTEGIDO:0x37b87c,
+  SIN_COMMS:0x5e7388, FALLO:0xe2574c, NO_MODELADO:0xe2574c, SIN_ORDEN:0x7b91a5
+};
 
 Campo3D.prototype.actualiza = function (P) {
   if (!P || !P.tcus.length) return;
@@ -599,14 +631,27 @@ Campo3D.prototype.actualiza = function (P) {
     }
   }
 
-  /* testigos: el mismo criterio de salud que el SCADA. Solo el color, y solo el que
-     cambia — la posición ya está puesta desde `construye`. */
+  /* Durante hail stow el testigo deja de contestar "salud general" y pasa a
+     contestar "¿qué ha hecho ESTA TCU con la orden?". Así se ve la ola de
+     distribución en el campo: ámbar esperando, azul moviendo, verde protegida,
+     gris sin ruta y rojo si falla. Fuera de granizo vuelve al criterio SCADA. */
   var tocaColor = false;
+  var hg = P.granizo && P.granizo.snapshot ? P.granizo.snapshot() : null;
+  var hailVista = hg && hg.phase !== 'SIN_SEÑAL' && hg.phase !== 'LIBERADO';
   for (j = 0; j < this.n; j++) {
-    var sa = tcus[j].salud ? tcus[j].salud() : 'ok';
+    var sa, col;
+    if (hailVista && tcus[j].hailEjecucion && !tcus[j].repetidor) {
+      var he = tcus[j].hailEjecucion();
+      sa = 'hail:' + he.estado;
+      col = COL_HAIL[he.estado] || COL_HAIL.SIN_ORDEN;
+    } else {
+      var hs = tcus[j].salud ? tcus[j].salud() : 'ok';
+      sa = 'health:' + hs;
+      col = COL_SALUD[hs] || COL_SALUD.ok;
+    }
     if (this._salud[j] === sa) continue;
     this._salud[j] = sa;
-    this._colTmp.setHex(COL_SALUD[sa] || COL_SALUD.ok);
+    this._colTmp.setHex(col);
     this.testigos.setColorAt(j, this._colTmp);
     tocaColor = true;
   }
@@ -687,7 +732,33 @@ Campo3D.prototype.actualiza = function (P) {
     if (this._dv !== dv || this._vv !== v) { this._dv = dv; this._vv = v; this._sucio = true; }
   }
 
-  if (movio || tocaColor || solMovio) {
+  /* Las piedras caen solo durante IMPACTO. Su posición depende del reloj simulado,
+     no del framerate: pausar congela el granizo y ×1800 no cambia su física visual. */
+  var hailMovio = false;
+  if (this.hail3d && hg) {
+    var hv = hg.phase === 'IMPACTO';
+    if (hv !== this._hailVisible) {
+      this._hailVisible = hv; this.hail3d.visible = hv; hailMovio = true;
+    }
+    if (hv) {
+      var ht = P.ahora ? P.ahora() : 0;
+      if (this._hailT !== ht) {
+        this._hailT = ht;
+        var attr = this.hail3d.geometry.getAttribute('position'),
+            arr = attr.array, base = this.hail3d.userData.base,
+            span = this.hail3d.userData.span, speed = Math.max(12, span * 0.55);
+        for (var hh=0; hh<arr.length/3; hh++) {
+          var fase = ((base[hh*3+1]-2 + ht*speed + hh*0.731) % span + span) % span;
+          arr[hh*3] = base[hh*3];
+          arr[hh*3+1] = 2 + span - fase;
+          arr[hh*3+2] = base[hh*3+2];
+        }
+        attr.needsUpdate = true; hailMovio = true;
+      }
+    }
+  }
+
+  if (movio || tocaColor || solMovio || hailMovio) {
     /* solo aquí se rehace el mapa de sombras: es lo que cuesta, y girar la cámara no
        cambia dónde cae una sombra */
     if (movio || solMovio) this.renderer.shadowMap.needsUpdate = true;

@@ -116,6 +116,7 @@
   .fld input[type=range]{width:100%;accent-color:var(--accent);margin:2px 0}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+  .row4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
   .btn{width:100%;padding:9px;background:var(--accent);color:#06281c;border:0;border-radius:9px;font:600 13px var(--sans);cursor:pointer}
   .btn:hover{filter:brightness(1.08)}
   .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line2)}
@@ -161,6 +162,59 @@
   .ok .pip{background:var(--ok)} .aviso .pip{background:var(--warn)}
   .alarma .pip{background:var(--danger)} .offline .pip{background:#4a5b6d}
   .mesa.alarma{border-color:#5a2420} .mesa.aviso{border-color:#4a3a10} .mesa.offline{opacity:.55}
+  .mesa .hailtag{font:600 8.5px var(--mono);margin-top:3px;padding:2px 4px;border-radius:4px;
+    border:1px solid var(--line2);display:inline-block;color:var(--tx3)}
+  .mesa.hail-protegido{border-color:#215f49}.mesa.hail-moviendo{border-color:#295b7a}
+  .mesa.hail-pendiente_ack{border-color:#665018}.mesa.hail-ack{border-color:#51616f}
+  .mesa.hail-sin_comms{border-color:#4a5b6d;opacity:.62}.mesa.hail-fallo,.mesa.hail-no_modelado{border-color:#6d2924}
+  .grupoF.hailok .pip{background:var(--ok)} .grupoF.hailmove .pip{background:var(--blue)}
+  .grupoF.hailwait .pip{background:var(--warn)} .grupoF.hailbad .pip{background:var(--danger)}
+
+  .hail3d{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:4}
+  .hail3d .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(7,15,25,.56),rgba(7,15,25,.06) 64%);
+    opacity:0;transition:opacity .35s}
+  .hail3d.on .shade{opacity:1}
+  .stormcloud{position:absolute;left:2%;top:1%;width:59%;height:26%;opacity:0;transform:translateY(-8px);
+    transition:opacity .35s,transform .35s;filter:drop-shadow(0 12px 24px rgba(0,0,0,.3))}
+  .hail3d.on .stormcloud{opacity:.94;transform:translateY(0)}
+  .stormcloud i{position:absolute;border-radius:50%;background:#354253}
+  .stormcloud i:nth-child(1){width:30%;height:60%;left:8%;top:26%}
+  .stormcloud i:nth-child(2){width:34%;height:76%;left:26%;top:8%}
+  .stormcloud i:nth-child(3){width:38%;height:68%;left:49%;top:18%}
+  .stormcloud i:nth-child(4){width:28%;height:52%;left:70%;top:34%}
+  .hailrain{position:absolute;left:4%;right:31%;top:18%;bottom:12%;opacity:0;transition:opacity .2s}
+  .hail3d.impact .hailrain{opacity:1}
+  .hailrain i{position:absolute;top:-8%;width:4px;height:8px;border-radius:50%;background:#edf4fa;
+    box-shadow:0 0 4px rgba(255,255,255,.35);animation:hailfall 1.05s linear infinite}
+  @keyframes hailfall{to{transform:translate3d(-22px,620px,0)}}
+  .hailwind{position:absolute;left:4%;top:31%;font:600 11px var(--mono);letter-spacing:.12em;color:#c7d6e4;opacity:0;transition:opacity .2s}
+  .hail3d.on .hailwind{opacity:.9}
+  .hailpanel3d{position:absolute;right:12px;top:12px;width:min(325px,38%);z-index:6;pointer-events:none;
+    background:rgba(12,22,33,.93);backdrop-filter:blur(7px);border:1px solid rgba(97,129,153,.34);border-radius:12px;
+    padding:10px 11px;color:var(--tx)}
+  .hailpanel3d .eyebrow{font:700 9px var(--mono);letter-spacing:.13em;color:var(--warn);text-transform:uppercase}
+  .hailpanel3d .hst{font:700 14px var(--display);margin:3px 0 7px}
+  .hailpanel3d .hst.ok{color:var(--ok)}.hailpanel3d .hst.warn{color:var(--warn)}.hailpanel3d .hst.bad{color:var(--danger)}
+  .hailmetric{display:grid;grid-template-columns:1fr auto;gap:4px;font:11px var(--mono);margin:6px 0}
+  .hailmetric span:first-child{color:var(--tx3)}
+  .hailbar{grid-column:1/-1;height:4px;background:#243343;border-radius:3px;position:relative;overflow:visible}
+  .hailbar b{display:block;height:100%;border-radius:3px;background:var(--accent);max-width:100%}
+  .hailbar.bad b{background:var(--danger)} .hailbar.warn b{background:var(--warn)}
+  .hailbar em{position:absolute;top:-2px;width:1px;height:8px;background:#f0b84a;opacity:.9}
+  .hailselected{border-top:1px solid var(--line2);margin-top:8px;padding-top:7px;display:grid;grid-template-columns:1fr auto;gap:2px 8px;
+    font:10.5px var(--mono)}
+  .hailselected b{font-size:16px}.hailselected span{color:var(--tx3)}
+  .hailflow{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:9px}
+  .hailflow .step{border:1px solid var(--line2);border-radius:8px;padding:7px 8px;min-width:0}
+  .hailflow .step b{display:block;font:700 17px var(--mono)}
+  .hailflow .step span{font-size:10px;color:var(--tx3)}
+  .hailflow .step.ok{border-color:#245c47}.hailflow .step.warn{border-color:#665018}.hailflow .step.bad{border-color:#6d2924}
+  .hailissues{font:11px var(--mono);color:var(--tx3);margin-top:8px}
+  @media(max-width:720px){
+    .hailpanel3d{left:8px;right:8px;top:8px;width:auto}
+    .stormcloud{width:86%;top:18%;opacity:.55}.hailrain{right:8%;top:25%}
+    .hailflow{grid-template-columns:repeat(2,1fr)}
+  }
 
   table.t{width:100%;border-collapse:collapse;font-size:12.5px}
   table.t th,table.t td{padding:4px 7px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -234,10 +288,11 @@
           <label>Emplazamiento</label>
           <select id="loc"></select>
         </div>
-        <div class="row3">
+        <div class="row4">
           <div class="fld"><label>TCU</label><input type="number" id="nTcu" value="24" min="1" max="6000"></div>
           <div class="fld"><label>HSU</label><input type="number" id="nHsu" value="2" min="1" max="10"></div>
-          <div class="fld"><label>Repet.</label><input type="number" id="nRep" value="1" min="0" max="10"></div>
+          <div class="fld"><label>GW</label><input type="number" id="nGw" value="2" min="1" max="8"></div>
+          <div class="fld"><label>Repet.</label><input type="number" id="nRep" value="1" min="0" max="20"></div>
         </div>
         <div class="fld"><label>Grupos de limpieza <span class="rv" id="nGrupV">4</span></label>
           <input type="range" id="nGrup" min="1" max="10" step="1" value="4"></div>
@@ -333,6 +388,37 @@
           <input type="range" id="temp" min="-20" max="40" value="14"></div>
       </div>
 
+      <div class="grp" id="hailPanel">
+        <h3>Granizo · forecast → ejecución de flota</h3>
+        <div class="note" id="hailEstado" style="margin-top:0">Sin señal. Esta capa NO inventa un registro Modbus de hail stow: modela decisión, reparto y ejecución hasta que exista un binding de firmware documentado.</div>
+        <div class="row2">
+          <div class="fld"><label>Tamaño <span class="rv" id="hailMmV">22 mm</span></label>
+            <input type="range" id="hailMm" min="0" max="60" step="1" value="22"></div>
+          <div class="fld"><label>Prob. ≥19 mm <span class="rv" id="hailProbV">70 %</span></label>
+            <input type="range" id="hailProb" min="0" max="100" step="1" value="70"></div>
+        </div>
+        <div class="row2">
+          <div class="fld"><label>ETA <span class="rv" id="hailEtaV">90 min</span></label>
+            <input type="range" id="hailEta" min="0" max="180" step="1" value="90"></div>
+          <div class="fld"><label>Viento previsto viene de <span class="rv" id="hailDirV">270° O</span></label>
+            <input type="range" id="hailDir" min="0" max="359" step="1" value="270"></div>
+        </div>
+        <div class="row3">
+          <div class="fld"><label>Lead <span class="rv" id="hailLeadV">60 min</span></label>
+            <input type="number" id="hailLead" min="0" max="180" value="60"></div>
+          <div class="fld"><label>Señal +impacto <span class="rv" id="hailAfterV">15 min</span></label>
+            <input type="number" id="hailAfter" min="0" max="120" value="15"></div>
+          <div class="fld"><label>Hold salida <span class="rv" id="hailHoldV">60 min</span></label>
+            <input type="number" id="hailHold" min="0" max="240" value="60"></div>
+        </div>
+        <div class="btns">
+          <button class="btn" id="hailSend">⚡ Emitir / reforecast</button>
+          <button class="btn sec" id="hailWithdraw">Retirar aviso</button>
+          <button class="btn sec" id="hailMissing">Sin dato</button>
+        </div>
+        <div class="note" style="margin-top:7px"><b>ORDENADO ≠ ACK ≠ MOVIENDO ≠ EN POSICIÓN ≠ PROTEGIDO.</b> La planta y cada TCU los muestran por separado. La confirmación física solo existe en el gemelo; en campo requiere instrumento externo.</div>
+      </div>
+
       <div class="grp">
         <h3>Entradas de hardware de la NCU</h3>
         <div class="note" style="margin-top:0">Esto <b>no se manda</b>: son contactos del armario que la NCU <b>lee</b>. Viven en 30100, que es de solo lectura — escribirla por Modbus se rechaza con excepción 02.<br>La <b>seta de emergencia no está aquí</b>: es del TCU (30002.4), y se pulsa en el bloque de averías del equipo. El bit 30100.13 que el R7 llama <i>Stop button</i> es una entrada libre del módulo digital y en estas plantas <b>no tiene nada cableado</b>, así que se publica a 0.</div>
@@ -413,11 +499,14 @@
         <div class="note" style="margin-top:0">Actúan sobre <b id="selNota">TCU 1</b>.</div>
         <label class="sw"><input type="checkbox" id="avAtasco"><span>Eje calado (rotor bloqueado)</span></label>
         <label class="sw"><input type="checkbox" id="avDuro"><span>Eje duro (fricción alta)</span></label>
-        <label class="sw"><input type="checkbox" id="avOff"><span>Sin comunicación (Zigbee)</span></label>
+        <label class="sw"><input type="checkbox" id="avOff"><span>Radio propia TCU caída</span></label>
+        <label class="sw"><input type="checkbox" id="avGw"><span>Gateway de su ruta caído</span></label>
+        <label class="sw"><input type="checkbox" id="avRutaRep"><span>Repetidor de su ruta caído</span></label>
+        <div class="note" id="rutaNota" style="margin-top:-2px"></div>
         <label class="sw"><input type="checkbox" id="avSeta"><span>Seta local pulsada</span></label>
         <label class="sw"><input type="checkbox" id="avCable"><span>Cable de la seta cortado (lazo NC)</span></label>
         <button class="btn sec" id="btnLimpiar">🔓 Limpiar alarmas · 40007.13</button>
-        <div class="note">La seta va <b>enclavada</b>: soltarla no rearma el motor. Y como la del armario alcanza a toda la planta, esto limpia <b>la flota entera</b>, igual que la toolbox por rango.</div>
+        <div class="note">La seta es <b>local de cada TCU</b> y va enclavada: soltarla no rearma el motor. Este botón limpia alarmas en toda la flota simulada para poder ensayar el recovery masivo; no representa una seta de armario de NCU.</div>
         <div class="fld"><label>SoC forzado <span class="rv" id="socV">—</span></label>
           <input type="range" id="socSet" min="0" max="100" value="80"></div>
         <div class="fld"><label>Consigna manual <span class="rv" id="manV">0°</span></label>
@@ -466,8 +555,20 @@
           <div id="escGuion"></div>
           <div class="note" id="escAdd"></div>
         </div>
-        <div class="card" style="padding:0;overflow:hidden">
-          <div id="campo3d" style="width:100%;height:min(52vh,560px);position:relative;background:#0b1119"></div>
+        <div class="card" style="padding:0;overflow:hidden;position:relative">
+          <div id="campo3d" style="width:100%;height:min(58vh,640px);position:relative;background:#0b1119"></div>
+          <div class="hail3d" id="hailFx3d">
+            <div class="shade"></div>
+            <div class="stormcloud"><i></i><i></i><i></i><i></i></div>
+            <div class="hailrain" id="hailRain3d"></div>
+            <div class="hailwind" id="hailWind3d">→ VIENTO</div>
+          </div>
+          <div class="hailpanel3d" id="hailPanel3d">
+            <div class="eyebrow">HIGH ANGLE STOW · GEMELO DE PLANTA</div>
+            <div class="hst ok" id="hail3dStatus">Operación normal</div>
+            <div id="hail3dMetrics"></div>
+            <div class="hailselected" id="hail3dSelected"></div>
+          </div>
         </div>
         <div class="card" style="padding-top:10px">
           <div class="timerow">
@@ -512,6 +613,12 @@
       <!-- ═══ vista PLANTA ═══ -->
       <div id="vplanta">
         <div class="chips" id="chipsPlanta"></div>
+        <div class="card" id="hailFleetCard">
+          <h2>Granizo · ejecución de flota <span class="badge" id="hailFleetBadge">sin señal</span></h2>
+          <div class="sub" id="hailFleetSub">Ordenado, recibido y protegido son estados distintos. El porcentaje válido es el confirmado por telemetría.</div>
+          <div class="hailflow" id="hailFleetFlow"></div>
+          <div class="hailissues" id="hailFleetIssues"></div>
+        </div>
         <div class="card">
           <h2>Flota</h2>
           <div class="sub" id="subFlota">Un recuadro por equipo. La barra es su inclinación real; el color, su salud (el mismo criterio del SCADA).</div>
@@ -620,6 +727,7 @@
 <script src="sim/viento.js"></script>
 <script src="sim/cielo.js"></script>
 <script src="sim/difusa.js"></script>
+<script src="sim/granizo.js"></script>
 <script src="sim/canon.js"></script>
 <script src="lib/three.min.js"></script><!-- LOCAL, sin CDN: el simulador sigue abriendo sin red -->
 <script src="seguidor.js?v=13"></script><!-- FUENTE ÚNICA del modelo del seguidor -->
@@ -713,8 +821,15 @@ function construye() {
   P = new SIM.Planta({
     nTcu: Math.max(1, +$('nTcu').value || 24),
     nHsu: Math.max(1, +$('nHsu').value || 2),
+    nGw: Math.max(1, +$('nGw').value || 2),
     nRep: Math.max(0, +$('nRep').value || 0),
     grupos: +$('nGrup').value || 4,
+    granizo: {
+      leadMin: Math.max(0, +$('hailLead').value || 0),
+      afterMin: Math.max(0, +$('hailAfter').value || 0),
+      holdMin: Math.max(0, +$('hailHold').value || 0),
+      defensaDeg: 55, preMin: 30
+    },
     perfil: $('perfil').value,
     motorModel: /^(canon|factiun)$/.test($('motorModel').value) ? $('motorModel').value : +$('motorModel').value,
     estrategiaViento: $('estrViento').value,
@@ -1073,7 +1188,7 @@ function pintaGuion(evs, falta) {
     var hecho = ESC.i > i, prox = falta && falta.ev === e;
     var T = Escenario.TIPOS[e.t] || {};
     var campos = '';
-    if (e.t === 'meteo' || e.t === 'av') {
+    if (e.t === 'meteo' || e.t === 'av' || e.t === 'hail') {
       campos = '<select data-i="' + i + '" data-c="k">' + (T.ks || []).map(function (o) {
         return '<option value="' + o.k + '"' + (o.k === e.k ? ' selected' : '') + '>' + o.n + '</option>';
       }).join('') + '</select>';
@@ -1087,6 +1202,13 @@ function pintaGuion(evs, falta) {
                 '<option value="1"' + (e.on ? ' selected' : '') + '>aparece</option>' +
                 '<option value="0"' + (e.on ? '' : ' selected') + '>se repara</option></select>' +
                 '<span class="u">TCU</span><input type="text" inputmode="numeric" size="3" data-i="' + i + '" data-c="id" value="' + (e.id || 1) + '">';
+    } else if (e.t === 'hail') {
+      if ((e.k || 'update') === 'update') {
+        campos += '<span class="u">ETA</span><input type="text" inputmode="decimal" size="3" data-i="' + i + '" data-c="eta" value="' + (e.eta == null ? 60 : e.eta) + '">' +
+          '<span class="u">min ·</span><input type="text" inputmode="decimal" size="3" data-i="' + i + '" data-c="mm" value="' + (e.mm == null ? 22 : e.mm) + '">' +
+          '<span class="u">mm ·</span><input type="text" inputmode="decimal" size="3" data-i="' + i + '" data-c="prob" value="' + (e.prob == null ? 70 : e.prob) + '">' +
+          '<span class="u">% · dir</span><input type="text" inputmode="numeric" size="3" data-i="' + i + '" data-c="dir" value="' + (e.dir == null ? 270 : e.dir) + '"><span class="u">°</span>';
+      }
     } else {
       campos = '<select data-i="' + i + '" data-c="dev">' + ['ncu', 'tcu', 'hsu'].map(function (d) {
         return '<option value="' + d + '"' + (d === (e.dev || 'tcu') ? ' selected' : '') + '>' + d.toUpperCase() + '</option>';
@@ -1158,6 +1280,7 @@ function ataGuion() {
       else if (campo === 'on') cambio.on = v === '1';
       else if (campo === 'id') cambio.id = parseInt(v, 10) || 1;
       else if (campo === 'dir') cambio.dir = parseInt(v, 10) || 0;
+      else if (campo === 'eta' || campo === 'mm' || campo === 'prob') cambio[campo] = parseFloat(v) || 0;
       else if (campo === 'vals') cambio.vals = v.split(/[,\s]+/).map(Number).filter(function (x) { return isFinite(x); });
       else cambio[campo] = v;
       E.cambia(i, cambio, P ? P.t.hora : null);
@@ -1771,10 +1894,96 @@ function apunta() {
   }
 }
 
+/* ═══════════════════ GRANIZO · lectura operativa ══════════════════════════ */
+function hailNombre(ph) {
+  return {
+    'SIN_SEÑAL':'Operación normal','BAJO_UMBRAL':'Aviso bajo umbral','VIGILANCIA':'Weather alert · hail risk',
+    'DEFENSA':'High Angle Stow activo','IMPACTO':'Impacto de granizo','RETENCION':'Retención post all-clear',
+    'LIBERADO':'Liberado','SIN_DATO':'Granizo · sin dato','SIN_DATO_PROTEGIDO':'Sin dato · defensa mantenida'
+  }[ph] || ph || '—';
+}
+function hailClase(ph) {
+  return /IMPACTO|SIN_DATO_PROTEGIDO/.test(ph) ? 'bad' :
+         /VIGILANCIA|DEFENSA|RETENCION|BAJO_UMBRAL|SIN_DATO/.test(ph) ? 'warn' : 'ok';
+}
+function hailPaso(n,txt,cl) {
+  return '<div class="step '+(cl||'')+'"><b>'+n+'</b><span>'+txt+'</span></div>';
+}
+function pintaGranizoUI() {
+  if (!P) return;
+  var G=P.granizo.snapshot(), R=P.resumenGranizo(), t=tcuSel(), ex=t&&!t.repetidor?t.hailEjecucion():null;
+  var pct=function(a,b){return b?Math.max(0,Math.min(100,100*a/b)):0;};
+  var hm=Math.max(0,+$('hailMm').value||0), hp=Math.max(0,+$('hailProb').value||0),
+      he=Math.max(0,+$('hailEta').value||0), hd=((+$('hailDir').value%360)+360)%360;
+  $('hailMmV').textContent=hm+' mm'; $('hailProbV').textContent=hp+' %';
+  $('hailEtaV').textContent=he+' min'; $('hailDirV').textContent=hd+'° '+rumbo(hd);
+  $('hailLeadV').textContent=$('hailLead').value+' min';
+  $('hailAfterV').textContent=$('hailAfter').value+' min';
+  $('hailHoldV').textContent=$('hailHold').value+' min';
+  $('hailEstado').innerHTML='<b>'+hailNombre(G.phase)+'</b> · '+G.gate_reason+
+    (G.eta_min!=null?' · ETA '+num(G.eta_min,1)+' min':'')+
+    (G.phase==='RETENCION'?' · quedan '+num(G.hold_remaining_min,1)+' min':'')+
+    '<br>Contrato del gemelo: 19 mm · 30 % · lead '+G.lead_min+' min · hold '+G.hold_min+' min. Sin binding Modbus de hail inventado.';
+
+  $('hailFleetBadge').textContent=hailNombre(G.phase);
+  $('hailFleetBadge').className='badge '+(hailClase(G.phase)==='bad'?'alarm':(hailClase(G.phase)==='warn'?'stop':'run'));
+  $('hailFleetSub').innerHTML=G.defensa
+    ? '<b>'+num(R.pct,1)+' % protegido por telemetría</b> · '+num(R.pct_fisico,1)+' % físicamente en posición en el gemelo.'
+    : 'Sin orden de protección activa · '+hailNombre(G.phase)+'.';
+  $('hailFleetFlow').innerHTML=
+    hailPaso(R.ordenados,'ordenados',R.ordenados?'warn':'')+
+    hailPaso(R.ack,'ACK',R.ack===R.ordenados&&R.ordenados?'ok':(R.ordenados?'warn':''))+
+    hailPaso(R.moviendo,'moviendo',R.moviendo?'warn':'')+
+    hailPaso(R.protegido,'protegidos',R.protegido===R.total&&R.total?'ok':(R.defensa?'warn':''))+
+    hailPaso(R.sin_comms+R.fallo+R.no_modelado,'incidencias',(R.sin_comms+R.fallo+R.no_modelado)?'bad':'ok');
+  var issues=[];
+  if(R.pendiente_ack)issues.push(R.pendiente_ack+' esperando ACK');
+  if(R.sin_comms)issues.push(R.sin_comms+' sin comunicaciones');
+  if(R.fallo)issues.push(R.fallo+' con fallo de ejecución');
+  if(R.no_modelado)issues.push(R.no_modelado+' NO MODELADO');
+  if(R.protegido!==R.fisico)issues.push(Math.abs(R.protegido-R.fisico)+' discrepan telemetría/física');
+  $('hailFleetIssues').textContent=issues.length?issues.join(' · '):
+    (G.defensa?'Sin incidencias de ejecución detectadas.':'La protección no está activa.');
+
+  if($('hailFx3d')) {
+    var active=G.phase!=='SIN_SEÑAL'&&G.phase!=='LIBERADO'&&G.phase!=='BAJO_UMBRAL';
+    $('hailFx3d').className='hail3d'+(active?' on':'')+(G.phase==='IMPACTO'?' impact':'');
+    $('hailWind3d').textContent='→ VIENTO PREVISTO · DE '+rumbo(G.dir_deg)+' '+num(G.dir_deg,0)+'°';
+    $('hail3dStatus').textContent=hailNombre(G.phase);
+    $('hail3dStatus').className='hst '+hailClase(G.phase);
+    var mmMax=35, etaMax=Math.max(1,G.lead_min*1.5);
+    var bar=function(lab,val,um,max,inv){
+      var w=Math.max(0,Math.min(100,100*val/max)), th=Math.max(0,Math.min(100,100*um/max));
+      var bad=inv?(val<=um):(val>=um);
+      return '<div class="hailmetric"><span>'+lab+'</span><b>'+num(val,lab==='ETA'?1:0)+(lab==='ETA'?' min':lab==='Tamaño'?' mm':' %')+'</b>'+
+        '<div class="hailbar '+(bad?'bad':'')+'"><b style="width:'+w+'%"></b><em style="left:'+th+'%"></em></div></div>';
+    };
+    $('hail3dMetrics').innerHTML=
+      bar('Tamaño',G.mm,G.known===false?19:19,mmMax,false)+
+      bar('Probabilidad',G.prob_pct,30,100,false)+
+      (G.eta_min!=null?bar('ETA',G.eta_min,G.lead_min,etaMax,true):'');
+    var proy=t&&!t.repetidor?Math.max(0,100*Math.cos(Math.abs(t.anguloReal)*Math.PI/180)):null;
+    $('hail3dSelected').innerHTML=t&&!t.repetidor&&ex
+      ? '<span>TCU '+t.id+' · '+ex.estado+'</span><b>'+num(t.anguloReal,1)+'°</b>'+
+        '<span>target hail</span><b>'+(ex.target==null?'—':num(ex.target,0)+'°')+'</b>'+
+        '<span>área proyectada vertical</span><b>'+num(proy,0)+' %</b>'+
+        '<span>ruta</span><b>GW'+t.gateway+(t.viaRepetidor!=null?' → R'+t.viaRepetidor:'')+'</b>'
+      : '<span>Sin tracker seleccionado</span><b>—</b>';
+  }
+}
+function preparaHailFx() {
+  var c=$('hailRain3d'); if(!c||c.dataset.hecho)return;
+  var h=''; for(var i=0;i<44;i++){
+    var left=(3+(i*37)%96), delay=-((i*17)%100)/100, dur=(75+(i*13)%65)/100;
+    h+='<i style="left:'+left+'%;animation-delay:'+delay+'s;animation-duration:'+dur+'s"></i>';
+  }
+  c.innerHTML=h;c.dataset.hecho='1';
+}
+
 /* ═══════════════════ pintado ═══════════════════ */
 function pintaTodo() {
   if (!P) return;
-  cabecera();
+  cabecera(); pintaGranizoUI();
   if (vista === 'planta') { pintaChips(); pintaFlota(); pintaNcu(); pintaHsu(); }
   else if (vista === 'campo') {
     if (CAMPO) { CAMPO.redimensiona(); CAMPO.actualiza(P); CAMPO.selecciona(indiceDe(sel)); }
@@ -1840,6 +2049,8 @@ function pintaChips() {
     chip('Equipos', r.total, '', P.seguidores().length + ' seguidores + ' + (r.total - P.seguidores().length) + ' repetidores') +
     chip('Salud', r.ok + '/' + r.total, r.alarma ? 'bad' : (r.aviso ? 'warn' : 'ok'), r.alarma + ' alarma · ' + r.offline + ' offline') +
     chip('Moviendo', r.moviendo, r.moviendo ? 'blue' : '', 'motores en marcha') +
+    chip('Granizo', hailNombre(r.granizo.fase), hailClase(r.granizo.fase)==='bad'?'bad':(hailClase(r.granizo.fase)==='warn'?'warn':'ok'),
+      r.granizo.defensa ? num(r.granizo.pct,1)+' % protegido · '+r.granizo.ack+'/'+r.granizo.total+' ACK' : 'sin hail stow activo') +
     (ve('soc')
       ? chip('SoC medio', num(r.socMedio, 0) + ' %', r.socMin < P.cfg.estrategia.socCrit ? 'bad' : (r.socMin < 50 ? 'warn' : 'ok'),
           'mínimo ' + num(r.socMin, 0) + ' % · techo ' + num(P.tcus[0].techoSoc, 0) + ' %') +
@@ -1882,12 +2093,14 @@ var ESTADO_ETI = {
 };
 
 function tarjeta(t) {
-  var s = t.salud();
-  return '<div class="mesa ' + s + (t.id === sel ? ' sel' : '') + '" data-id="' + t.id + '">' +
+  var s = t.salud(), hx=t.repetidor?null:t.hailEjecucion();
+  var hc=hx&&hx.estado!=='SIN_ORDEN'?' hail-'+hx.estado.toLowerCase():'';
+  var tag=hx&&hx.estado!=='SIN_ORDEN'?'<div class="hailtag">HAIL · '+hx.estado.replace(/_/g,' ')+'</div>':'';
+  return '<div class="mesa ' + s + hc + (t.id === sel ? ' sel' : '') + '" data-id="' + t.id + '">' +
     '<div class="id">' + (t.repetidor ? 'R' : '#') + t.id + '<span class="pip"></span></div>' +
-    '<div class="g">G' + t.grupo + ' · ' + t.modoTxt() + ' · ' + num(t.soc, 0) + '%</div>' +
+    '<div class="g">G' + t.grupo + ' · GW' + t.gateway + (t.viaRepetidor!=null?'→R'+t.viaRepetidor:'') + ' · ' + num(t.soc, 0) + '%</div>' +
     '<div class="ang"><em></em><i style="transform:rotate(' + (-t.anguloReal).toFixed(1) + 'deg)"></i></div>' +
-    '<div class="st">' + t.estadoTxt() + '</div></div>';
+    '<div class="st">' + t.estadoTxt() + '</div>'+tag+'</div>';
 }
 
 function pintaFlota() {
@@ -1959,6 +2172,9 @@ function pintaNcu() {
     kv('SAI', n.upsFallo ? 'fallo de red' : 'normal') +
     kv('Limpieza activa', lim.length ? lim.join(' ') : '—') +
     kv('Forzados', fz.length ? fz.join(' ') : '—') +
+    kv('Topología de radio', P.topologiaFuente) +
+    kv('Gateways', P.gateways.map(function(g){return 'GW'+g.id+' '+(g.online?'OK':'OFF');}).join(' · ')) +
+    kv('Granizo', hailNombre(P.granizo.snapshot().phase)+' · cmd '+P.granizo.snapshot().command_id) +
     kv('HSU en línea', P.hsus.filter(function (x) { return x.online; }).length + '/' + P.hsus.length);
 }
 function kv(a, b) { return '<div><span>' + a + '</span><span>' + b + '</span></div>'; }
@@ -2216,10 +2432,14 @@ function exportaCsv() {
 /* ═══════════════════ detalle del equipo ═══════════════════ */
 function pintaDetalle() {
   var t = tcuSel(), a = t.alarmas(), e = t.entradas();
+  var hx=t.repetidor?null:t.hailEjecucion(), hg=P.granizo.snapshot();
   $('chipsTcu').innerHTML =
     chip((t.repetidor ? 'Repetidor ' : 'TCU ') + t.id, t.salud().toUpperCase(),
       t.salud() === 'ok' ? 'ok' : (t.salud() === 'alarma' ? 'bad' : 'warn'), 'grupo ' + t.grupo) +
     chip('Modo', t.modoTxt(), '', 'criterio: ' + SIM.CRIT_TXT[t.criterio]) +
+    (!t.repetidor ? chip('Hail stow', hx.estado.replace(/_/g,' '),
+      /FALLO|NO_MODELADO/.test(hx.estado)?'bad':(/MOVIENDO|PENDIENTE_ACK|ACK|SIN_COMMS/.test(hx.estado)?'warn':(hx.estado==='PROTEGIDO'?'ok':'')),
+      'cmd '+hg.command_id+' · episodio '+hg.episode+(hx.target!=null?' · target '+num(hx.target,0)+'°':'')) : '') +
     /* las cuatro posiciones, en orden: lo que pide el sol, lo que decide el TCU, dónde
        está la mesa y lo que publica. Cada salto tiene un culpable distinto. */
     chip('Pide el sol', num(t.objetivoSolar, 1) + '°',
@@ -2264,14 +2484,17 @@ function pintaDetalle() {
                (t.stowRearma ? ' · ⚠ viento ≥ ' + Math.round(SIM.K.WIND_T1 * 3.6) + ' km/h'
                              : (t.stowHisteresis ? ' · suelta en ' + msS(t.stowCuenta) : ' · sin histéresis'))
              : (e.forzado === 1 ? 'forzado' : '—')],
-    ['2 · SP3 nieve', e.nieve || e.forzado === 3, t.sp === 3, e.nieve ? 'alarma de nieve' : (e.forzado === 3 ? 'forzado' : '—')],
-    ['3 · SP4 limpieza', e.limpieza || e.forzado === 4, t.sp === 4, e.limpieza ? 'interruptor del grupo ' + t.grupo : (e.forzado === 4 ? 'forzado' : '—')],
-    ['4 · SP2/5/6/7 forzadas', !!e.forzado && [2, 5, 6, 7].indexOf(e.forzado) >= 0, [2, 5, 6, 7].indexOf(t.sp) >= 0, e.forzado ? 'SP' + e.forzado : '—'],
-    ['5 · Restricción de batería', t.bajaCapacidad > 0 || t.parked, t.criterio === SIM.CRIT.BATERIA,
+    ['2 · Granizo', !!(t.hail&&t.hail.activa), t.criterio===SIM.CRIT.GRANIZO||t.criterio===SIM.CRIT.CONFLICTO,
+      t.hail&&t.hail.conflict?'NO MODELADO: '+t.hail.motivo:
+      (hx?hx.estado.replace(/_/g,' ')+' · '+(hx.target==null?'sin target':'target '+num(hx.target,0)+'°'):'—')],
+    ['3 · SP3 nieve', e.nieve || e.forzado === 3, t.sp === 3, e.nieve ? 'alarma de nieve' : (e.forzado === 3 ? 'forzado' : '—')],
+    ['4 · SP4 limpieza', e.limpieza || e.forzado === 4, t.sp === 4, e.limpieza ? 'interruptor del grupo ' + t.grupo : (e.forzado === 4 ? 'forzado' : '—')],
+    ['5 · SP2/5/6/7 forzadas', !!e.forzado && [2, 5, 6, 7].indexOf(e.forzado) >= 0, [2, 5, 6, 7].indexOf(t.sp) >= 0, e.forzado ? 'SP' + e.forzado : '—'],
+    ['6 · Restricción de batería', t.bajaCapacidad > 0 || t.parked, t.criterio === SIM.CRIT.BATERIA,
       t.parked ? ('defensa: SoC < ' + P.cfg.estrategia.socCrit + ' % crítico')
                : ['normal', 'baja (L1)', 'muy baja (L2)', 'crítica (L3)'][t.bajaCapacidad]],
-    ['6 · Manual', t.modo === SIM.MODO.MANUAL, t.criterio === SIM.CRIT.MANUAL, 'consigna ' + num(t.manual, 1) + '°'],
-    ['7 · Auto (solar)', t.modo === SIM.MODO.AUTO, t.criterio === SIM.CRIT.SEGUIMIENTO || t.criterio === SIM.CRIT.BACKTRACKING || t.criterio === SIM.CRIT.NOCHE,
+    ['7 · Manual', t.modo === SIM.MODO.MANUAL, t.criterio === SIM.CRIT.MANUAL, 'consigna ' + num(t.manual, 1) + '°'],
+    ['8 · Auto (solar)', t.modo === SIM.MODO.AUTO, t.criterio === SIM.CRIT.SEGUIMIENTO || t.criterio === SIM.CRIT.BACKTRACKING || t.criterio === SIM.CRIT.NOCHE,
       t.solar.dia ? (t.bt ? 'backtracking ' + num(t.solar.bt, 1) + '°' : 'seguimiento ' + num(t.solar.real, 1) + '°') : 'noche → ' + SIM.K.NIGHT_POS + '°']
   ];
   $('jer').innerHTML = reglas.map(function (r) {
@@ -2282,6 +2505,11 @@ function pintaDetalle() {
   for (var k in a) if (a[k]) al.push(k);
   $('kvTcu').innerHTML =
     kv('Estado', t.estadoTxt()) +
+    (!t.repetidor ? kv('Hail · ejecución', hx.estado.replace(/_/g,' ')+(hx.target!=null?' · target '+num(hx.target,1)+'°':'')) : '') +
+    (!t.repetidor ? kv('Hail · ACK', t.hail.ackAt==null?'pendiente':'recibido · '+num(P.ahora()-t.hail.ackAt,1)+' s atrás') : '') +
+    (!t.repetidor ? kv('Hail · posición', t.hail.posicionAt==null?'no confirmada':'confirmada por telemetría') : '') +
+    kv('Ruta de radio', 'NCU → GW'+t.gateway+(t.viaRepetidor!=null?' → R'+t.viaRepetidor:'')+' → '+(t.repetidor?'R':'TCU')+t.id+
+       (t.rutaInferida?' · inferida':'') ) +
     kv('Posición de seguridad', SIM.SP_TXT[t.sp] + (t.sp ? ' · ' + SIM.FUENTE_TXT[t.fuenteSp] : '')) +
     kv('Backtracking', t.bt ? 'activo' : 'no') +
     kv('Sol', t.solar.dia ? ('elev. ' + num(90 - t.solar.zen, 1) + '° · az. ' + num(t.solar.az, 1) + '°') : 'bajo el horizonte') +
@@ -2306,7 +2534,7 @@ function pintaDetalle() {
     kv('Energía del motor hoy', num(t.energiaMotorHoy / 3600, 2) + ' Wh') +
     kv('Ciclos de carga', t.ciclos) +
     kv('Último contacto', (P.t.epoch - t.ultimoContacto) + ' s') +
-    kv('Zigbee', t.online ? ('canal ' + t.zbCanal + ' · 0x' + t.zbAddr.toString(16)) : 'sin enlace') +
+    kv('Zigbee', t.comDisponible() ? ('canal ' + t.zbCanal + ' · 0x' + t.zbAddr.toString(16)) : 'ruta sin comunicación') +
     kv('Nº de serie', t.serie) +
     kv('Firmware', 'v' + t.fwMayor + '.' + t.fwMenor + '.' + t.fwParche) +
     kv('Alarmas', al.length ? al.join(', ') : 'ninguna');
@@ -2491,12 +2719,52 @@ var METEO_EV = { viento: ['viento', 3.6], racha: ['rachas', 1], dirViento: ['dir
     toca();
   };
 });
+
+/* Granizo: el forecast NO es una orden Modbus inventada. Actualiza la capa de
+   decisión del gemelo; la NCU lo reparte a cada TCU en su propia ranura de red. */
+function aplicaCfgGranizo() {
+  if (!P) return;
+  var c=P.granizo.cfg;
+  c.leadMin=Math.max(0,+$('hailLead').value||0);
+  c.afterMin=Math.max(0,+$('hailAfter').value||0);
+  c.holdMin=Math.max(0,+$('hailHold').value||0);
+}
+function emiteGranizo() {
+  if (!P) return;
+  aplicaCfgGranizo();
+  var ev={t:'hail',k:'update',eta:+$('hailEta').value||0,mm:+$('hailMm').value||0,
+          prob:+$('hailProb').value||0,dir:+$('hailDir').value||0};
+  P.granizo.actualiza({eta_min:ev.eta,mm:ev.mm,prob_pct:ev.prob,dir_deg:ev.dir});
+  graba(ev);
+  HIST.evento(P.t.epoch,'granizo: reforecast '+ev.mm+' mm · '+ev.prob+' % · ETA '+ev.eta+' min','hail',P.t.hora);
+  toca();
+}
+$('hailSend').onclick=emiteGranizo;
+$('hailWithdraw').onclick=function(){
+  if(!P)return;P.granizo.retira();graba({t:'hail',k:'withdraw'});
+  HIST.evento(P.t.epoch,'granizo: retirada de aviso','hail',P.t.hora);toca();
+};
+$('hailMissing').onclick=function(){
+  if(!P)return;P.granizo.sinDato();graba({t:'hail',k:'missing'});
+  HIST.evento(P.t.epoch,'granizo: dato ausente · no desescala','hail',P.t.hora);toca();
+};
+['hailMm','hailProb','hailEta','hailDir','hailLead','hailAfter','hailHold'].forEach(function(id){
+  $(id).oninput=function(){aplicaCfgGranizo();pintaGranizoUI();};
+});
+
 /* averías: actúan sobre el equipo seleccionado */
 function sincronizaAverias() {
   var t = tcuSel();
   $('selNota').textContent = (t.repetidor ? 'Repetidor ' : 'TCU ') + t.id;
   $('avAtasco').checked = t.ejeAtascado; $('avDuro').checked = t.ejeDuro;
   $('avOff').checked = !t.online; $('avSeta').checked = t.setaLocal;
+  var gw=P.gateway(t.gateway), rep=t.viaRepetidor!=null?P.tcu(t.viaRepetidor):null;
+  $('avGw').checked=!!(gw&&!gw.online);
+  $('avRutaRep').checked=!!(rep&&!rep.online);
+  $('avRutaRep').disabled=!rep;
+  $('rutaNota').innerHTML='Ruta: <b>NCU → GW'+t.gateway+
+    (rep?' → repetidor '+rep.id+(t.rutaInferida?' <span class="aprox">(inferido)</span>':''):'')+
+    ' → '+(t.repetidor?'R':'TCU')+t.id+'</b> · '+P.topologiaFuente+'.';
   $('avCable').checked = t.cableSetaCortado; $('avAccel').checked = !t.sensor.ok;
   $('desaj').value = t.sensor.desajuste; $('desajV').textContent = num(t.sensor.desajuste, 1) + '°';
   $('offset').value = t.sensor.offsetCfg; $('offsetV').textContent = num(t.sensor.offsetCfg, 1) + '°';
@@ -2526,6 +2794,14 @@ $('btnLimpiar').onclick = function () {
   };
 });
 $('avOff').onchange = function () { tcuSel().online = !this.checked; graba({ t: 'av', k: 'off', id: sel, on: this.checked }); toca(); };
+$('avGw').onchange=function(){
+  var t=tcuSel(),g=P.gateway(t.gateway);if(!g)return;g.online=!this.checked;
+  graba({t:'av',k:'gw_off',id:g.id,on:this.checked});toca();
+};
+$('avRutaRep').onchange=function(){
+  var t=tcuSel(),r=t.viaRepetidor!=null?P.tcu(t.viaRepetidor):null;if(!r)return;r.online=!this.checked;
+  graba({t:'av',k:'rep_off',id:r.id,on:this.checked});toca();
+};
 $('avSeta').onchange = function () { tcuSel().setaLocal = this.checked; graba({ t: 'av', k: 'seta', id: sel, on: this.checked }); toca(); };
 $('socSet').oninput = function () { tcuSel().soc = +this.value; $('socV').textContent = this.value + ' %'; toca(); };
 $('manSet').oninput = function () {
@@ -2814,6 +3090,7 @@ function arranca() {
       if (T && PLANTAS[+$('loc').value] === L0) tocaPlanta(); else pintaNotaBT();
     });
   construye();
+preparaHailFx();
 aplicaEstrategia();
 aplicaPoliticaDifusa();
 pintaNotaBT();

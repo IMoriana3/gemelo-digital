@@ -1745,5 +1745,150 @@ console.log('\n── 41060…41063 son una matriz 2×2: backtracking × baja ca
 }
 
 
+console.log('\n── GRANIZO · forecast → red → TCU → posición confirmada ──');
+{
+  const H = new SIM.Granizo({ leadMin:60, afterMin:15, holdMin:60 });
+  H.actualiza({ eta_min:90, mm:22, prob_pct:70, dir_deg:270 });
+  ok(H.snapshot().phase === 'VIGILANCIA' && !H.snapshot().defensa,
+     'un aviso severo fuera del lead se VIGILA y no ordena', H.snapshot().phase);
+  const c0 = H.snapshot().command_id;
+  H.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:270 });
+  ok(H.snapshot().phase === 'DEFENSA' && H.snapshot().defensa &&
+     H.snapshot().command_id === c0 + 1,
+     'un reforecast que adelanta ETA entra en defensa y crea UNA orden nueva',
+     JSON.stringify(H.snapshot()));
+  H.actualiza({ eta_min:90, mm:25, prob_pct:85, dir_deg:90 });
+  ok(H.snapshot().defensa && H.snapshot().phase === 'DEFENSA',
+     'alejar el ETA después de proteger NO desescala', JSON.stringify(H.snapshot()));
+  H.sinDato();
+  ok(H.snapshot().phase === 'SIN_DATO_PROTEGIDO' && H.snapshot().defensa,
+     'sin dato mantiene la defensa: nunca equivale a all-clear');
+  H.actualiza({ eta_min:5, mm:25, prob_pct:85, dir_deg:90 });
+  H.retira();
+  ok(H.snapshot().phase === 'RETENCION' && H.snapshot().defensa,
+     'retirar un aviso con defensa activa entra en retención');
+  H.paso(59 * 60);
+  ok(H.snapshot().defensa && H.snapshot().hold_remaining_min > 0,
+     'un minuto antes del hold sigue protegida', H.snapshot().hold_remaining_min + ' min restantes');
+  H.paso(61);
+  ok(!H.snapshot().defensa && H.snapshot().phase === 'LIBERADO',
+     'cumplido el hold libera la protección', H.snapshot().phase);
+
+  const G = SIM.Granizo.gate;
+  ok(!G({known:true,on:true,mm:18.9,prob_pct:100},SIM.Granizo.CANON).activa &&
+     !G({known:true,on:true,mm:25,prob_pct:29.9},SIM.Granizo.CANON).activa &&
+      G({known:true,on:true,mm:19,prob_pct:30},SIM.Granizo.CANON).activa,
+     '19 mm y 30 % son fronteras inclusivas; 18,9 / 29,9 no activan');
+
+  const uno = new SIM.Granizo({leadMin:60,afterMin:0.5,holdMin:1});
+  const ses = new SIM.Granizo({leadMin:60,afterMin:0.5,holdMin:1});
+  uno.actualiza({eta_min:0.5,mm:25,prob_pct:85,dir_deg:270});
+  ses.actualiza({eta_min:0.5,mm:25,prob_pct:85,dir_deg:270});
+  for(let i=0;i<120;i++) uno.paso(1);
+  ses.paso(60); ses.paso(60);
+  ok(uno.snapshot().phase===ses.snapshot().phase &&
+     uno.snapshot().defensa===ses.snapshot().defensa &&
+     Math.abs((uno.snapshot().hold_remaining_min||0)-(ses.snapshot().hold_remaining_min||0))<1e-9,
+     'el lifecycle de granizo es invariante al paso: 1 s y 60 s llegan al mismo estado',
+     uno.snapshot().phase+' / '+ses.snapshot().phase);
+}
+
+{
+  const p = new SIM.Planta({ nTcu:6, nHsu:1, nRep:2, nGw:2, grupos:2, dia:172, hora:10,
+    poleoS:6, granizo:{leadMin:60,afterMin:15,holdMin:2} });
+  const seg = p.seguidores();
+  /* El test tiene que medir TRANSPORTE Y MOVIMIENTO, no aprobar porque a esta hora
+     casualmente el seguimiento ya esté cerca de ±55°. Los coloca a 0° antes del aviso. */
+  seg.forEach(t => { t.anguloReal=0; t.angulo=0; t.sensor.crudo=0; t.sensor.filtrado=0; });
+  ok(p.gateways.length === 2 && seg.every(t => t.gateway === 1 || t.gateway === 2),
+     'la planta tiene gateways explícitos y cada TCU tiene ruta', p.topologiaFuente);
+
+  /* Una TCU sin radio antes de la orden: la orden global existe, pero esa TCU no ACKea. */
+  const muda = seg[1]; muda.online = false;
+  p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:270 });
+  for (let i=0;i<20;i++) p.paso(1);
+  let r = p.resumenGranizo();
+  ok(r.ordenados === seg.length && r.ack < r.ordenados && r.pendiente_ack >= 1,
+     'ORDENADO ≠ ACK: una TCU sin radio queda pendiente mientras el resto recibe',
+     JSON.stringify(r));
+  muda.online = true;
+  for (let i=0;i<20;i++) p.paso(1);
+  r = p.resumenGranizo();
+  ok(r.ack === seg.length,
+     'al volver la radio la misma TCU recibe la orden en su ranura de poleo',
+     r.ack + '/' + seg.length + ' ACK');
+
+  /* La maniobra tarda: ACK no implica todavía posición. */
+  ok(r.protegido < r.ack,
+     'ACK ≠ PROTEGIDO: recibir la orden no significa haber llegado',
+     r.protegido + ' protegidos de ' + r.ack + ' ACK');
+  for (let i=0;i<900;i++) p.paso(1);
+  r = p.resumenGranizo();
+  ok(r.protegido === seg.length,
+     'con tiempo suficiente todos confirman posición por telemetría',
+     r.protegido + '/' + seg.length);
+}
+
+{
+  /* Un gateway corta una RAMA, no toda la planta. */
+  const p = new SIM.Planta({ nTcu:8, nHsu:1, nRep:0, nGw:2, dia:172, hora:10, poleoS:4 });
+  p.gateway(1).online = false;
+  p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:270 });
+  for (let i=0;i<25;i++) p.paso(1);
+  const g1 = p.seguidores().filter(t => t.gateway===1), g2 = p.seguidores().filter(t => t.gateway===2);
+  ok(g1.every(t => t.hailEjecucion().estado === 'PENDIENTE_ACK') &&
+     g2.some(t => t.hailEjecucion().ack),
+     'caer GW1 aísla su rama y GW2 sigue repartiendo la orden',
+     'GW1 '+g1.length+' TCU · GW2 '+g2.length+' TCU');
+}
+
+{
+  /* El fallo mecánico aparece DESPUÉS del ACK: la cadena distingue transporte de ejecución. */
+  const p = new SIM.Planta({ nTcu:3, nHsu:1, nRep:0, nGw:1, dia:172, hora:10, poleoS:2 });
+  const t = p.tcu(1);
+  t.anguloReal=0; t.angulo=0; t.sensor.crudo=0; t.sensor.filtrado=0;
+  t.ejeAtascado = true;
+  p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:270 });
+  for (let i=0;i<30;i++) p.paso(1);
+  const e = t.hailEjecucion();
+  ok(e.ack && e.estado === 'FALLO',
+     'un eje calado puede tener ACK y aun así FALLAR la protección', JSON.stringify(e));
+}
+
+{
+  /* La telemetría del propio TCU puede mentir sobre la posición física. */
+  const p = new SIM.Planta({ nTcu:1, nHsu:1, nRep:0, nGw:1, dia:172, hora:10, poleoS:1 });
+  const t = p.tcu(1);
+  t.anguloReal=0; t.angulo=0; t.sensor.crudo=0; t.sensor.filtrado=0;
+  /* target +55° desde 0°. Con +3° de sesgo, el lazo se cree en 55° cuando la
+     mesa está ~52°: exactamente el falso positivo que el SCADA no puede ver. */
+  t.sensor.desajuste = 3; t.sensor.offsetCfg = 0;
+  p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:270 });
+  for (let i=0;i<900;i++) p.paso(1);
+  const e = t.hailEjecucion();
+  ok(e.telemetria && !e.fisica,
+     'PROTEGIDO por telemetría puede NO ser físicamente protegido con inclinómetro sesgado',
+     'medido '+t.angulo.toFixed(2)+'° · real '+t.anguloReal.toFixed(2)+'° · target '+e.target);
+}
+
+{
+  /* Segundo episodio: después de LIBERADO se calcula un target NUEVO. */
+  const p = new SIM.Planta({ nTcu:1, nHsu:1, nRep:0, nGw:1, dia:172, hora:10, poleoS:1,
+                              granizo:{leadMin:60,afterMin:0,holdMin:0} });
+  const t = p.tcu(1);
+  t.anguloReal = t.angulo = -20;
+  p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:270 });
+  for (let i=0;i<3;i++) p.paso(1);
+  const primero = t.hail.target, ep1 = t.hail.episode;
+  p.granizo.retira(); for (let i=0;i<3;i++) p.paso(1);
+  t.anguloReal = t.angulo = 20;
+  p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:90 });
+  for (let i=0;i<3;i++) p.paso(1);
+  ok(t.hail.episode > ep1 && primero < 0 && t.hail.target > 0,
+     'un segundo episodio NO hereda el lado del anterior',
+     'episodio '+ep1+' target '+primero+'° → episodio '+t.hail.episode+' target '+t.hail.target+'°');
+}
+
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);

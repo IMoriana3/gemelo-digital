@@ -13,9 +13,10 @@
      · y los ensayos del Anexo 4 dejan de ser un PDF y pasan a ser algo que se
        ejecuta.
 
-   Los eventos son de tres clases y no más, a propósito:
+   Los eventos son de cuatro clases:
 
      meteo  lo que hace el tiempo — viento, rachas, dirección, nubes, nieve, Tª
+     hail   el forecast de granizo — reforecast, retirada o dato ausente
      w      una ESCRITURA Modbus, que es como se manda de verdad a un equipo
      av     una avería física: eje calado, eje duro, radio caída, seta, cable roto
 
@@ -79,11 +80,31 @@ function aplica(P, e) {
     else return { ok: false, avisos: ['meteo desconocida: ' + e.k] };
     return { ok: true, aplicados: [e.k + ' = ' + e.v] };
   }
+  if (e.t === 'hail') {
+    var k = e.k || 'update';
+    if (k === 'withdraw') { P.granizo.retira(); return { ok:true, aplicados:['retirada de aviso de granizo'] }; }
+    if (k === 'missing') { P.granizo.sinDato(); return { ok:true, aplicados:['dato de granizo ausente'] }; }
+    P.granizo.actualiza({ eta_min:+e.eta || 0, mm:+e.mm || 0, prob_pct:+e.prob || 0,
+                          dir_deg:e.dir == null ? 270 : +e.dir });
+    return { ok:true, aplicados:['reforecast granizo ETA '+(+e.eta||0)+' min · '+(+e.mm||0)+' mm · '+(+e.prob||0)+' %'] };
+  }
   if (e.t === 'w') return P.escribe(e.dev || 'tcu', e.id || 1, e.dir, e.vals || [e.v || 0]);
   if (e.t === 'av') {
+    var on = !!e.on;
+    if (e.k === 'gw_off') {
+      var gw = P.gateway(e.id || 1);
+      if (!gw) return { ok:false, avisos:['no hay gateway ' + e.id] };
+      gw.online = !on;
+      return { ok:true, aplicados:['gateway ' + gw.id + (on ? ' OFF' : ' ON')] };
+    }
+    if (e.k === 'rep_off') {
+      var rp = P.tcu(e.id || 1);
+      if (!rp || !rp.repetidor) return { ok:false, avisos:['no hay repetidor ' + e.id] };
+      rp.online = !on;
+      return { ok:true, aplicados:['repetidor ' + rp.id + (on ? ' OFF' : ' ON')] };
+    }
     var tc = P.tcu(e.id || 1);
     if (!tc) return { ok: false, avisos: ['no hay TCU ' + e.id] };
-    var on = !!e.on;
     if (e.k === 'atasco') tc.ejeAtascado = on;
     else if (e.k === 'duro') tc.ejeDuro = on;
     else if (e.k === 'off') tc.online = !on;
@@ -111,6 +132,11 @@ var TIPOS = {
           { k: 'nieve',  n: 'nieve', u: 'cm', min: 0, max: 60 },
           { k: 'temp',   n: 'temperatura', u: '°C', min: -25, max: 45 } ]
   },
+  hail: {
+    n: 'Granizo', campo: 'k',
+    ks: [ { k:'update', n:'reforecast' }, { k:'withdraw', n:'retira aviso' },
+          { k:'missing', n:'sin dato' } ]
+  },
   w: {
     n: 'Escritura Modbus', campo: 'dir',
     ay: 'lo que se manda de verdad a un equipo: dirección y valor'
@@ -119,7 +145,9 @@ var TIPOS = {
     n: 'Avería', campo: 'k',
     ks: [ { k: 'atasco',  n: 'eje calado' },
           { k: 'duro',    n: 'eje duro' },
-          { k: 'off',     n: 'sin comunicación' },
+          { k: 'off',     n: 'radio propia TCU caída' },
+          { k: 'gw_off',  n: 'gateway caído' },
+          { k: 'rep_off', n: 'repetidor caído' },
           { k: 'seta',    n: 'seta local pulsada' },
           { k: 'cable',   n: 'cable de seta cortado' },
           { k: 'accel',   n: 'inclinómetro averiado' } ]
@@ -132,6 +160,7 @@ Escenario.TIPOS = TIPOS;
 Escenario.nuevo = function (t, h) {
   h = h == null ? 12 : h;
   if (t === 'meteo') return { h: h, t: 'meteo', k: 'viento', v: 45 };
+  if (t === 'hail')  return { h: h, t: 'hail', k: 'update', eta: 60, mm: 22, prob: 70, dir: 270 };
   if (t === 'av')    return { h: h, t: 'av', k: 'duro', id: 1, on: true };
   return { h: h, t: 'w', dev: 'tcu', id: 1, dir: 40007, vals: [8192] };
 };
@@ -167,9 +196,17 @@ function textoDe(e) {
     var uni = { viento: ' km/h', rachas: ' %', dir: '°', nubes: ' %', nieve: ' cm', temp: ' °C' }[e.k] || '';
     return hh + ' · ' + e.k + ' ' + e.v + uni;
   }
+  if (e.t === 'hail') {
+    if (e.k === 'withdraw') return hh + ' · retira aviso de granizo';
+    if (e.k === 'missing') return hh + ' · granizo SIN DATO';
+    return hh + ' · granizo ' + e.mm + ' mm · ' + e.prob + ' % · ETA ' + e.eta + ' min · dir ' + e.dir + '°';
+  }
   if (e.t === 'w') return hh + ' · escribe ' + (e.dev || 'tcu').toUpperCase() +
     (e.dev === 'ncu' ? '' : ' ' + (e.id || 1)) + ' ' + e.dir + ' = ' + (e.vals ? e.vals.join(',') : e.v);
-  if (e.t === 'av') return hh + ' · ' + e.k + (e.on ? ' ON' : ' OFF') + ' en TCU ' + (e.id || 1);
+  if (e.t === 'av') {
+    var donde = e.k === 'gw_off' ? 'GW ' : (e.k === 'rep_off' ? 'repetidor ' : 'TCU ');
+    return hh + ' · ' + e.k + (e.on ? ' ON' : ' OFF') + ' en ' + donde + (e.id || 1);
+  }
   return hh + ' · ?';
 }
 
@@ -237,6 +274,19 @@ var EJEMPLOS = [
       { h: 10, t: 'av', k: 'duro', id: 1, on: true },
       { h: 14, t: 'av', k: 'duro', id: 1, on: false },
       { h: 14.2, t: 'w', dev: 'tcu', id: 1, dir: 40007, vals: [8192] }
+    ] },
+  { n: 'Granizo: reforecast + fallo de flota', dia: 172, hora: 9,
+    desc: 'Forecast severo que entra en lead, un reforecast adelanta el impacto, una TCU pierde radio durante la maniobra y otra se queda con el eje duro. Después se retira el aviso y se ve la retención equipo a equipo.',
+    eventos: [
+      { h: 9.5, t: 'hail', k: 'update', eta: 90, mm: 22, prob: 70, dir: 270 },
+      { h: 10.0, t: 'hail', k: 'update', eta: 20, mm: 25, prob: 85, dir: 270 },
+      { h: 10.02, t: 'av', k: 'off', id: 2, on: true },
+      { h: 10.02, t: 'av', k: 'duro', id: 3, on: true },
+      { h: 10.3, t: 'hail', k: 'missing' },
+      { h: 10.5, t: 'hail', k: 'update', eta: 5, mm: 25, prob: 85, dir: 270 },
+      { h: 10.8, t: 'hail', k: 'withdraw' },
+      { h: 11.0, t: 'av', k: 'off', id: 2, on: false },
+      { h: 11.0, t: 'av', k: 'duro', id: 3, on: false }
     ] }
 ];
 

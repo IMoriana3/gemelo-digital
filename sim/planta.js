@@ -278,6 +278,12 @@ var Cielo = (typeof window !== 'undefined' && window.Cielo) ||
         (typeof require === 'function' ? require('./cielo.js') : null);
 if (!Cielo) throw new Error('falta sim/cielo.js');
 
+/* El granizo también vive fuera del motor de equipo: ciclo de forecast, reforecast,
+   retirada, sin dato y hold. planta.js solo ejecuta la orden equipo a equipo. */
+var Granizo = (typeof window !== 'undefined' && window.Granizo) ||
+        (typeof require === 'function' ? require('./granizo.js') : null);
+if (!Granizo) throw new Error('falta sim/granizo.js');
+
 /* Una bandera nueva con los umbrales que haya AHORA en K (que pueden no ser los del
    canon si se han ajustado). `sincronizaBandera` los refresca en una ya montada, sin
    perderle el estado: es lo que permite mover un umbral con la planta en marcha. */
@@ -344,10 +350,10 @@ var SP_TXT = ['—', 'SP1 viento', 'SP2', 'SP3 nieve', 'SP4 limpieza', 'SP5', 'S
    ⚠ El documento nombra los dos registros pero NO transcribe su enumerado: esta
    codificación es del simulador. Va marcada como tal en el visor. */
 var CRIT = { SEGUIMIENTO: 0, BACKTRACKING: 1, MANUAL: 2, SEGURIDAD: 3, LIMITE: 4,
-             NOCHE: 5, BATERIA: 6, INHIBIDO: 7, DIFUSA: 8 };
+             NOCHE: 5, BATERIA: 6, INHIBIDO: 7, DIFUSA: 8, GRANIZO: 9, CONFLICTO: 10 };
 var CRIT_TXT = ['Seguimiento', 'Backtracking', 'Manual', 'Posición de seguridad',
                 'Límite de tilt', 'Noche', 'Restricción de batería', 'Motor inhibido',
-                'Cielo cubierto'];
+                'Cielo cubierto', 'Hail stow (capa del gemelo)', 'NO MODELADO · conflicto de protecciones'];
 var FUENTE_SP = { NINGUNA: 0, HSU: 1, NCU: 2, LOCAL: 3 };
 var FUENTE_TXT = ['—', 'meteo de la HSU', 'forzado de la NCU', 'decisión local'];
 
@@ -589,7 +595,8 @@ function TCU(id, planta, opts) {
   /* la copia de lo que la NCU le ha dicho. Nace en calma: un equipo recién arrancado
      no sabe nada del viento hasta que le sondean por primera vez. */
   this.deNcu = { nivelViento: 0, viento: 0, dir: 180, vientoInvertido: false,
-                 nieve: false, limpieza: false, forzado: 0, t: -1e9 };
+                 nieve: false, limpieza: false, forzado: 0,
+                 hail: planta.granizo ? planta.granizo.snapshot() : null, t: -1e9 };
   this.tPoleo = null;
 
   this.forzadoLocal = 0;             /* 40000 = 11..17: forzado escrito a ESTE equipo */
@@ -723,6 +730,14 @@ function TCU(id, planta, opts) {
   /* nace hablando: si el último contacto arrancara en 0, el SCADA vería una planta
      entera con 56 años de antigüedad de comunicaciones */
   this.online = true; this.ultimoContacto = planta.t.epoch;
+  /* Ruta de comunicaciones. La asigna Planta.asignaTopologia(); si no hay un
+     registry/as-built se etiqueta como sintética, nunca como topología real. */
+  this.gateway = 1; this.viaRepetidor = null;
+  /* Estado de ejecución del hail stow en ESTE equipo. La NCU ordena a la flota,
+     pero ACK, movimiento y confirmación son por TCU. */
+  this.hail = { activa:false, target:null, caso:0, manda:null, phase:'SIN_SEÑAL',
+    episode:0, ackCommand:-1, ackAt:null, ordenAt:null, posicionAt:null,
+    liberadoAt:null, conflict:false, multi:null, motivo:'', lastRevision:-1 };
   this.ejeBloqueado = false;               /* la ALARMA (30003.8), deducida — no la avería */
   this.sobrecorriente = false;
   this.fueraRango = false; this.limiteOeste = false; this.limiteEste = false;
@@ -755,8 +770,9 @@ TCU.prototype.poleaNcu = function () {
   if (this.tPoleo == null) this.tPoleo = ahora - Tp + this.p.ranura(H + turno, enVuelta) * Tp;
   if (ahora - this.tPoleo < Tp) return;
   this.tPoleo = ahora;
-  if (!this.online) return;                /* sin radio no le llega nada */
+  if (!this.comDisponible()) return;       /* cualquier eslabón roto congela la última copia */
   this.ultimoContacto = Math.floor(ahora);
+  var hg = n.hail ? Object.assign({}, n.hail) : null;
   this.deNcu = {
     nivelViento: n.nivelVientoGlobal,
     viento: n.vientoMax,                   /* con esto decide su abanderamiento */
@@ -765,8 +781,89 @@ TCU.prototype.poleaNcu = function () {
     nieve: n.alarmaNieve,
     limpieza: n.limpieza[this.grupo - 1],
     forzado: n.forzadoDe(this.grupo),
+    hail: hg,
     t: ahora
   };
+  /* Recibir command_id es el ACK de transporte del gemelo: demuestra que la
+     orden llegó a ESTA TCU. No afirma todavía ni movimiento ni posición. */
+  if (hg && this.hail.ackCommand !== hg.command_id) {
+    this.hail.ackCommand = hg.command_id;
+    this.hail.ackAt = ahora;
+  }
+  if (hg) this.hail.lastRevision = hg.revision;
+};
+
+/* La ruta completa del equipo. online es solo la radio propia; gateway y repetidor
+   pueden dejarlo aislado aunque su TCU esté sano. */
+TCU.prototype.comDisponible = function () {
+  if (!this.online || this.sinAlimentacion) return false;
+  var g = this.p.gateway ? this.p.gateway(this.gateway) : null;
+  if (g && !g.online) return false;
+  if (this.viaRepetidor != null) {
+    var r = this.p.tcu(this.viaRepetidor);
+    if (!r || !r.comDisponible()) return false;
+  }
+  return true;
+};
+
+/* Traduce la última orden de granizo que ALCANZÓ a esta TCU a un target local.
+   El target se fija al entrar y no cambia con reforecasts del mismo episodio.
+   Eso evita viajes de 110° por un cambio de dirección mientras ya protege. */
+TCU.prototype.actualizaGranizo = function () {
+  var h = this.deNcu && this.deNcu.hail, H = this.hail;
+  if (!h) { H.phase = 'SIN_DATO'; return H; }
+
+  H.phase = h.phase || 'SIN_SEÑAL';
+  H.conflict = false; H.multi = null;
+
+  if (h.defensa) {
+    if (!H.activa || H.episode !== h.episode) {
+      var q = Granizo.objetivo(this.angulo, h, {
+        defensaDeg: this.p.cfg.granizo.defensaDeg,
+        preMin: this.p.cfg.granizo.preMin,
+        leadMin: this.p.cfg.granizo.leadMin,
+        windPreKmh: K.WIND_T1 * 3.6,
+        windStowKmh: K.WIND_T2 * 3.6,
+        windKmh: Math.max(0, (this.deNcu.viento || 0) * 3.6)
+      });
+      /* Si en el instante de entrada manda viento, guardamos como target de hail
+         el MISMO LADO pero a defensa completa. Cuando amaina, solo sale hacia fuera:
+         no cruza por cero y nunca queda sin consigna por perder después el forecast. */
+      var target = q.target;
+      if (q.manda === 'viento') target = (target < 0 ? -1 : 1) * Math.abs(this.p.cfg.granizo.defensaDeg);
+      H.activa = true; H.target = target; H.caso = q.caso; H.manda = q.manda;
+      H.episode = h.episode; H.ordenAt = this.p.ahora(); H.posicionAt = null;
+      H.motivo = q.motivo;
+    }
+  } else if (H.activa) {
+    H.activa = false; H.target = null; H.caso = 0; H.manda = null;
+    H.liberadoAt = this.p.ahora(); H.posicionAt = null; H.motivo = 'orden de salida recibida';
+  }
+  return H;
+};
+
+/* Estado que usaría un SCADA de ejecución. Mantiene separadas cinco preguntas:
+   orden emitida, ACK, movimiento, posición por TELEMETRÍA y posición FÍSICA
+   (esta última solo la sabe el gemelo; en una planta real requiere instrumento). */
+TCU.prototype.hailEjecucion = function () {
+  if (this.repetidor) return { estado:'NO_APLICA', ack:false, telemetria:false, fisica:false };
+  var G = this.p.granizo.snapshot(), H = this.hail;
+  if (G.defensa && !H.activa) return { estado:'PENDIENTE_ACK', ack:false, telemetria:false, fisica:false };
+  if (!H.activa) return { estado:G.defensa?'PENDIENTE_ACK':'SIN_ORDEN', ack:false, telemetria:false, fisica:false };
+  var ack = true, target = H.target;
+  var tol = Math.max(1.5, this.p.cfg.deadband + 0.5);
+  var telem = target != null && Math.abs(this.angulo - target) <= tol;
+  var fis = target != null && Math.abs(this.anguloReal - target) <= tol;
+  if (H.conflict) return { estado:'NO_MODELADO', ack:ack, telemetria:false, fisica:false, target:target };
+  if (!this.comDisponible()) return { estado:'SIN_COMMS', ack:ack, telemetria:telem, fisica:fis, target:target };
+  if (this.ejeBloqueado || this.sobrecorriente || this.alarmaMotorEnclavada || this.sinAlimentacion)
+    return { estado:'FALLO', ack:ack, telemetria:telem, fisica:fis, target:target };
+  if (telem) {
+    if (H.posicionAt == null) H.posicionAt = this.p.ahora();
+    return { estado:'PROTEGIDO', ack:ack, telemetria:true, fisica:fis, target:target };
+  }
+  if (this.moviendo) return { estado:'MOVIENDO', ack:ack, telemetria:false, fisica:fis, target:target };
+  return { estado:'ACK', ack:ack, telemetria:false, fisica:fis, target:target };
 };
 
 /* Entradas que llegan de fuera del TCU en este instante. Las de la RED son la copia
@@ -781,10 +878,11 @@ TCU.prototype.entradas = function () {
     vientoInvertido: d.vientoInvertido,
     nieve: d.nieve,
     limpieza: d.limpieza,
+    hail: d.hail || null,
     /* el forzado puede venir de la NCU (a todo el grupo) o del propio equipo, si
        alguien le ha escrito 40000 con 11..17. Gana el local, que es el más cercano. */
     forzado: this.forzadoLocal || d.forzado,
-    comNcu: this.online
+    comNcu: this.comDisponible()
   };
 };
 
@@ -848,6 +946,7 @@ TCU.prototype.limpiaAlarmas = function () {
 TCU.prototype.decide = function (dt, ang) {
   var e = this.entradas(), cfg = this.p.cfg, obj, sp = SP.NINGUNA,
       fuente = FUENTE_SP.NINGUNA, crit, inhibido = false;
+  var hail = this.actualizaGranizo();
 
   /* abanderamiento: lo resuelve el módulo compartido con el viento REAL que ve la
      NCU (la HSU de más viento) y el azimut del sol, no con el nivel ya digerido */
@@ -915,24 +1014,44 @@ TCU.prototype.decide = function (dt, ang) {
       : rAb.objetivo;
     crit = CRIT.SEGURIDAD;
 
-  /* 2 — SP3 NIEVE */
+  /* 2 — GRANIZO. No se codifica como una SP inexistente: el mapa disponible no
+     documenta una safe position de granizo. La decisión vive en CRIT.GRANIZO y
+     su ejecución se expone por el contrato del gemelo. */
+  } else if (hail.activa && (e.nieve || e.forzado === SP.NIEVE)) {
+    var snowObj = sSol * Math.abs(cfg.spTilt[3]);
+    if ((hail.target < 0) === (snowObj < 0)) {
+      /* Misma dirección: una sola maniobra satisface ambas. SP3 sigue reflejando
+         que la nieve está activa; hail.multi dice por qué el target es el de granizo. */
+      sp = SP.NIEVE; fuente = FUENTE_SP.NCU; obj = hail.target;
+      crit = CRIT.GRANIZO; hail.multi = 'NIEVE';
+    } else {
+      /* Lados opuestos: el contrato existente no define prioridad. Quedarse quieto
+         y declararlo es mejor que inventar un cruce de 110°. */
+      obj = this.angulo; crit = CRIT.CONFLICTO; inhibido = true;
+      hail.conflict = true; hail.motivo = 'granizo y nieve piden lados opuestos';
+    }
+
+  } else if (hail.activa) {
+    obj = hail.target; crit = CRIT.GRANIZO; fuente = FUENTE_SP.NCU;
+
+  /* 3 — SP3 NIEVE */
   } else if (e.nieve || e.forzado === SP.NIEVE) {
     sp = SP.NIEVE; fuente = e.forzado === SP.NIEVE ? FUENTE_SP.NCU : FUENTE_SP.HSU;
     obj = sSol * Math.abs(cfg.spTilt[3]); crit = CRIT.SEGURIDAD;
 
-  /* 3 — SP4 LIMPIEZA */
+  /* 4 — SP4 LIMPIEZA */
   } else if (e.limpieza || e.forzado === SP.LIMPIEZA) {
     /* el interruptor de limpieza es una entrada física del armario de la NCU, así
        que su origen es el mismo que el de un forzado por Modbus */
     sp = SP.LIMPIEZA; fuente = FUENTE_SP.NCU;
     obj = cfg.spTilt[4]; crit = CRIT.SEGURIDAD;
 
-  /* 4 — forzados genéricos (SP2/5/6/7) */
+  /* 5 — forzados genéricos (SP2/5/6/7) */
   } else if (e.forzado) {
     sp = e.forzado; fuente = FUENTE_SP.NCU;
     obj = cfg.spTilt[e.forzado]; crit = CRIT.SEGURIDAD;
 
-  /* 5 — BATERÍA. Dos cosas distintas que caen en el mismo escalón:
+  /* 6 — BATERÍA. Dos cosas distintas que caen en el mismo escalón:
      · la ESTRATEGIA (SOC < crítico) manda el seguidor a defensa y lo cuenta como
        no disponible — es el CASO 3 del estudio de disponibilidad;
      · los modos de baja capacidad del FIRMWARE (L1/L2/L3, umbrales configurables
@@ -943,7 +1062,7 @@ TCU.prototype.decide = function (dt, ang) {
   } else if (this.bajaCapacidad === 2) {
     obj = this.angulo; crit = CRIT.BATERIA;
 
-  /* 6 — MANUAL. Con 40017 escrito, el operador está dando al motor a mano: la
+  /* 7 — MANUAL. Con 40017 escrito, el operador está dando al motor a mano: la
      consigna se arrastra en esa dirección mientras el registro siga puesto, que es
      como se mueve un seguidor desde la toolbox. */
   } else if (this.modo === MODO.MANUAL) {
@@ -951,7 +1070,7 @@ TCU.prototype.decide = function (dt, ang) {
                                       this.cfgTcu.topeEste, this.cfgTcu.topeOeste);
     obj = this.manual; crit = CRIT.MANUAL;
 
-  /* 7 — AUTO (o parado en OFF) */
+  /* 8 — AUTO (o parado en OFF) */
   } else if (this.modo === MODO.OFF) {
     obj = this.angulo; crit = CRIT.INHIBIDO; inhibido = true;
   } else if (!ang.dia) {
@@ -1452,9 +1571,9 @@ TCU.prototype.alarmas = function () {
     socCritica: conBat && this.soc < 10,
     ejeBloqueado: this.ejeBloqueado,
     sobrecorriente: this.sobrecorriente,
-    comNcu: !this.online,
+    comNcu: !this.comDisponible(),
     velocidadBaja: this.velocidadBaja,
-    zigbee: !this.online
+    zigbee: !this.comDisponible()
   };
 };
 TCU.prototype.desviacion = function () { return Math.abs(this.objetivo - this.angulo); };
@@ -1464,7 +1583,7 @@ TCU.prototype.systemOk = function () {
   return true;
 };
 TCU.prototype.salud = function () {
-  if (!this.online || this.sinAlimentacion) return 'offline';
+  if (!this.comDisponible() || this.sinAlimentacion) return 'offline';
   var a = this.alarmas();
   if (a.ejeBloqueado || a.sobrecorriente || a.socCritica || a.socL3 || a.seta || a.fueraRango ||
       a.motorEnclavado || a.inclinometro) return 'alarma';
@@ -1474,13 +1593,25 @@ TCU.prototype.salud = function () {
 TCU.prototype.modoTxt = function () { return MODO_TXT[this.modo]; };
 TCU.prototype.estadoTxt = function () {
   if (this.sinAlimentacion) return 'sin alimentación';
-  if (!this.online) return 'sin comunicación';
+  if (!this.comDisponible()) return 'sin comunicación';
   if (this.seta) return 'SETA pulsada';
   if (this.alarmaMotorEnclavada) return 'motor enclavado';
-  if (this.sp) return SP_TXT[this.sp];
+  if (this.hail.conflict) return 'NO MODELADO · granizo + nieve';
+  if (this.sp) return SP_TXT[this.sp] + (this.hail.multi ? ' + granizo' : '');
+  if (this.hail.activa) return 'hail stow · ' + this.hail.phase;
   if (this.parked) return 'defensa por batería';
   return CRIT_TXT[this.criterio];
 };
+
+/* ═══════════════════ GATEWAY — eslabón real de la ruta de radio ═════════════
+   No inventa RF: solo permite que un fallo de gateway corte de golpe todos los
+   equipos cuya ruta depende de él. El detalle de enlace sigue siendo del modelo
+   de comunicaciones; aquí se simula la CONSECUENCIA operacional. */
+function Gateway(id, planta) {
+  this.id = id; this.p = planta; this.online = true;
+  this.ultimoContacto = planta.t.epoch;
+}
+Gateway.prototype.salud = function () { return this.online ? 'ok' : 'offline'; };
 
 /* ═══════════════════ NCU — controlador de red ═══════════════════ */
 function NCU(planta) {
@@ -1497,6 +1628,7 @@ function NCU(planta) {
   this.alarmaViento = false; this.alarmaNieve = false;
   this.alarmaRacha = false; this.falloWs = false; this.falloSs = false;
   this.vientoInvertido = false;
+  this.hail = planta.granizo ? planta.granizo.snapshot() : null;
   this.timeoutPosicion = 3600;             /* 40080: vuelta a automático (s) */
   /* LO QUE LA NCU HA LEÍDO de cada HSU, que no es lo que la HSU está midiendo: una
      copia por estación, con la marca de cuándo se sacó. Ver `NCU.prototype.paso`. */
@@ -1596,6 +1728,10 @@ Planta.prototype.ranura = function (i, n) { return n > 0 ? i / n : 0; };
 
 NCU.prototype.paso = function () {
   var H = this.p.hsus, ahora = this.p.ahora(), Tp = this.p.poleoS();
+  this.hail = this.p.granizo ? this.p.granizo.snapshot() : null;
+  var G = this.p.gateways || [];
+  this.gw1Alarma = !!(G[0] && !G[0].online);
+  this.gw2Alarma = !!(G[1] && !G[1].online);
   var enVuelta = H.length + this.p.tcus.length;
   for (var k = 0; k < H.length; k++) {
     var hh = H[k];
@@ -1697,7 +1833,10 @@ function Planta(cfg) {
     /* `|| 1` hacía que `nRep: 0` —cero repetidores, que es lo que pide media prueba
        de este repo— cayera al defecto y montara uno igual. Se pregunta por null. */
     nRep: cfg.nRep != null ? cfg.nRep : 1,
+    nGw: cfg.nGw != null ? cfg.nGw : 2,
     grupos: cfg.grupos || 4,
+    topologia: cfg.topologia || null,
+    granizo: Object.assign({}, Granizo.CANON, cfg.granizo || {}),
     deadband: cfg.deadband != null ? cfg.deadband : K.HYST_DEG,
     iMotorMax: cfg.iMotorMax || 7000,        /* 41040: sobrecorriente por software (mA) */
     iCalado: cfg.iCalado || 9000,            /* corriente de calado con el eje atascado (mA) */
@@ -1777,6 +1916,9 @@ function Planta(cfg) {
      desde que arranca la planta, igual que en el simulador de batería */
   this.diaBase = Math.floor(this.t.epoch / 86400);
   this.meteo = new Meteo(); this.meteo.p = this;
+  this.granizo = new Granizo(this.cfg.granizo);
+  this.gateways = [];
+  for (var gg = 1; gg <= this.cfg.nGw; gg++) this.gateways.push(new Gateway(gg, this));
   this.ncu = new NCU(this);
   this.hsus = []; this.tcus = [];
   var i;
@@ -1821,10 +1963,44 @@ function Planta(cfg) {
     }
   }
   this.ordenaVuelta();
+  this.asignaTopologia();
   this.repartaDesajustes(this.cfg.averias && this.cfg.averias.desajusteSig);
   /* y un paso mínimo para que el estado derivado (sol, objetivo, alarmas) exista */
   this.paso(0.001);
 }
+
+/* La identidad exacta de gateway/repetidor puede venir de un registry/as-built.
+   Si no viene, se construye una topología SINTÉTICA y se etiqueta así. Los saltos
+   medidos solo permiten inferir que existe un repetidor, no cuál: esa parte queda
+   marcada como inferida. */
+Planta.prototype.asignaTopologia = function () {
+  var topo = this.cfg.topologia || {}, gmap = topo.gatewayByTcu || {},
+      rmap = topo.repeaterByTcu || {}, reps = this.tcus.filter(function (t) { return t.repetidor; }),
+      seg = this.seguidores(), nGw = Math.max(1, this.gateways.length), i;
+  this.topologiaFuente = this.cfg.topologia ? 'configurada' : 'sintética · no as-built';
+  for (i = 0; i < reps.length; i++) {
+    reps[i].gateway = topo.gatewayByRepeater && topo.gatewayByRepeater[reps[i].id] != null
+      ? +topo.gatewayByRepeater[reps[i].id]
+      : 1 + (i % nGw);
+    reps[i].viaRepetidor = null;
+  }
+  for (i = 0; i < seg.length; i++) {
+    var t = seg[i], expG = gmap[t.id];
+    t.gateway = expG != null ? +expG : Math.min(nGw, 1 + Math.floor(i * nGw / Math.max(1, seg.length)));
+    var expR = rmap[t.id];
+    if (expR != null) t.viaRepetidor = +expR;
+    else if (t.saltos > 0 && reps.length) {
+      var candidatos = reps.filter(function (r) { return r.gateway === t.gateway; });
+      if (!candidatos.length) candidatos = reps;
+      t.viaRepetidor = candidatos[i % candidatos.length].id;
+      t.rutaInferida = true;
+    } else t.viaRepetidor = null;
+  }
+};
+Planta.prototype.gateway = function (id) {
+  for (var i = 0; i < this.gateways.length; i++) if (this.gateways[i].id === +id) return this.gateways[i];
+  return null;
+};
 
 /* Un paso de simulación. dt en segundos SIMULADOS (no de reloj de pared): así el
    acelerador de la interfaz no cambia la física, solo cuánto tiempo pasa por tick. */
@@ -1850,7 +2026,10 @@ Planta.prototype.paso = function (dt) {
   if (ent) { this.t.epoch += ent; this.tResto -= ent; }
   this.averiasPaso(dt);
   this.meteo.paso(dt);          /* el viento va llegando a lo que se le ha pedido */
+  this.granizo.paso(dt);
   var i;
+  for (i = 0; i < this.gateways.length; i++)
+    if (this.gateways[i].online) this.gateways[i].ultimoContacto = this.t.epoch;
   for (i = 0; i < this.hsus.length; i++) this.hsus[i].paso(dt);
   this.ncu.paso();
   /* los TCU sin comunicación SIGUEN funcionando: pierden la Zigbee, no la cabeza.
@@ -1871,6 +2050,31 @@ Planta.prototype.tcu = function (id) {
 Planta.prototype.seguidores = function () {
   return this.tcus.filter(function (t) { return !t.repetidor; });
 };
+/* Estado operativo del hail stow. "Protegido por telemetría" y "físicamente
+   protegido" son deliberadamente dos contadores: un inclinómetro descalibrado
+   puede dar el primero sin dar el segundo. */
+Planta.prototype.resumenGranizo = function () {
+  var G = this.granizo.snapshot(), T = this.seguidores();
+  var r = { total:T.length, ordenados:G.defensa ? T.length : 0, ack:0, moviendo:0,
+    protegido:0, fisico:0, pendiente_ack:0, sin_comms:0, fallo:0, no_modelado:0,
+    estados:{}, fase:G.phase, defensa:G.defensa, episode:G.episode, command_id:G.command_id };
+  for (var i = 0; i < T.length; i++) {
+    var e = T[i].hailEjecucion();
+    r.estados[e.estado] = (r.estados[e.estado] || 0) + 1;
+    if (e.ack) r.ack++;
+    if (e.estado === 'MOVIENDO') r.moviendo++;
+    if (e.telemetria) r.protegido++;
+    if (e.fisica) r.fisico++;
+    if (e.estado === 'PENDIENTE_ACK') r.pendiente_ack++;
+    if (e.estado === 'SIN_COMMS') r.sin_comms++;
+    if (e.estado === 'FALLO') r.fallo++;
+    if (e.estado === 'NO_MODELADO') r.no_modelado++;
+  }
+  r.pct = r.total ? 100 * r.protegido / r.total : 100;
+  r.pct_fisico = r.total ? 100 * r.fisico / r.total : 100;
+  return r;
+};
+
 /* Resumen de flota con el mismo vocabulario que el SCADA. */
 Planta.prototype.resumen = function () {
   var r = { ok: 0, aviso: 0, alarma: 0, offline: 0, total: 0, socMin: 100, socMedio: 0,
@@ -1884,6 +2088,7 @@ Planta.prototype.resumen = function () {
     if (t.parked) r.noDisponibles++;
   }
   r.socMedio /= Math.max(1, T.length);
+  r.granizo = this.resumenGranizo();
   return r;
 };
 
@@ -1933,7 +2138,7 @@ Planta.prototype.regsTCU = function (t) {
   pon32(30015, u32(t.energiaMotorTotal, wo));
   pon(30020, t.moviendo === 0 ? 0 : (t.moviendo > 0 ? 0x0001 : 0x0002));
   pon(30030, u16(t.zbAddr));
-  pon(30031, u16((t.online ? 0 : 0x0100) | t.zbCanal));
+  pon(30031, u16((t.comDisponible() ? 0 : 0x0100) | t.zbCanal));
 
   /* reloj en BCD: [mes|año] [hora|día] [seg|min] */
   var f = this.fechaSim();
@@ -2438,7 +2643,7 @@ Planta.prototype._escribeNcu = function (dir, def, v, out) {
 var API = {
   Planta: Planta, TCU: TCU, HSU: HSU, NCU: NCU, Meteo: Meteo,
   PERFILES: PERFILES, perfilDe: perfilDe, TIPO_REG: TIPO_REG, FISICA: F,
-  Abanderamiento: Abanderamiento, Difusa: Difusa, Cielo: Cielo,
+  Abanderamiento: Abanderamiento, Difusa: Difusa, Cielo: Cielo, Granizo: Granizo, Gateway: Gateway,
   ESCRITURA: ESCRITURA,
   K: K, K_CANON: K_CANON, ajusta: ajusta, restauraCanon: restauraCanon, tocados: tocados,
   PARAMS: PARAMS,
