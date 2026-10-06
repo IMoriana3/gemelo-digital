@@ -801,7 +801,7 @@ TCU.prototype.comDisponible = function () {
   if (g && !g.online) return false;
   if (this.viaRepetidor != null) {
     var r = this.p.tcu(this.viaRepetidor);
-    if (!r || !r.online || r.sinAlimentacion) return false;
+    if (!r || !r.comDisponible()) return false;
   }
   return true;
 };
@@ -1603,6 +1603,16 @@ TCU.prototype.estadoTxt = function () {
   return CRIT_TXT[this.criterio];
 };
 
+/* ═══════════════════ GATEWAY — eslabón real de la ruta de radio ═════════════
+   No inventa RF: solo permite que un fallo de gateway corte de golpe todos los
+   equipos cuya ruta depende de él. El detalle de enlace sigue siendo del modelo
+   de comunicaciones; aquí se simula la CONSECUENCIA operacional. */
+function Gateway(id, planta) {
+  this.id = id; this.p = planta; this.online = true;
+  this.ultimoContacto = planta.t.epoch;
+}
+Gateway.prototype.salud = function () { return this.online ? 'ok' : 'offline'; };
+
 /* ═══════════════════ NCU — controlador de red ═══════════════════ */
 function NCU(planta) {
   this.p = planta;
@@ -1618,6 +1628,7 @@ function NCU(planta) {
   this.alarmaViento = false; this.alarmaNieve = false;
   this.alarmaRacha = false; this.falloWs = false; this.falloSs = false;
   this.vientoInvertido = false;
+  this.hail = planta.granizo ? planta.granizo.snapshot() : null;
   this.timeoutPosicion = 3600;             /* 40080: vuelta a automático (s) */
   /* LO QUE LA NCU HA LEÍDO de cada HSU, que no es lo que la HSU está midiendo: una
      copia por estación, con la marca de cuándo se sacó. Ver `NCU.prototype.paso`. */
@@ -1717,6 +1728,10 @@ Planta.prototype.ranura = function (i, n) { return n > 0 ? i / n : 0; };
 
 NCU.prototype.paso = function () {
   var H = this.p.hsus, ahora = this.p.ahora(), Tp = this.p.poleoS();
+  this.hail = this.p.granizo ? this.p.granizo.snapshot() : null;
+  var G = this.p.gateways || [];
+  this.gw1Alarma = !!(G[0] && !G[0].online);
+  this.gw2Alarma = !!(G[1] && !G[1].online);
   var enVuelta = H.length + this.p.tcus.length;
   for (var k = 0; k < H.length; k++) {
     var hh = H[k];
@@ -1818,7 +1833,10 @@ function Planta(cfg) {
     /* `|| 1` hacía que `nRep: 0` —cero repetidores, que es lo que pide media prueba
        de este repo— cayera al defecto y montara uno igual. Se pregunta por null. */
     nRep: cfg.nRep != null ? cfg.nRep : 1,
+    nGw: cfg.nGw != null ? cfg.nGw : 2,
     grupos: cfg.grupos || 4,
+    topologia: cfg.topologia || null,
+    granizo: Object.assign({}, Granizo.CANON, cfg.granizo || {}),
     deadband: cfg.deadband != null ? cfg.deadband : K.HYST_DEG,
     iMotorMax: cfg.iMotorMax || 7000,        /* 41040: sobrecorriente por software (mA) */
     iCalado: cfg.iCalado || 9000,            /* corriente de calado con el eje atascado (mA) */
@@ -1898,6 +1916,9 @@ function Planta(cfg) {
      desde que arranca la planta, igual que en el simulador de batería */
   this.diaBase = Math.floor(this.t.epoch / 86400);
   this.meteo = new Meteo(); this.meteo.p = this;
+  this.granizo = new Granizo(this.cfg.granizo);
+  this.gateways = [];
+  for (var gg = 1; gg <= this.cfg.nGw; gg++) this.gateways.push(new Gateway(gg, this));
   this.ncu = new NCU(this);
   this.hsus = []; this.tcus = [];
   var i;
@@ -1942,10 +1963,44 @@ function Planta(cfg) {
     }
   }
   this.ordenaVuelta();
+  this.asignaTopologia();
   this.repartaDesajustes(this.cfg.averias && this.cfg.averias.desajusteSig);
   /* y un paso mínimo para que el estado derivado (sol, objetivo, alarmas) exista */
   this.paso(0.001);
 }
+
+/* La identidad exacta de gateway/repetidor puede venir de un registry/as-built.
+   Si no viene, se construye una topología SINTÉTICA y se etiqueta así. Los saltos
+   medidos solo permiten inferir que existe un repetidor, no cuál: esa parte queda
+   marcada como inferida. */
+Planta.prototype.asignaTopologia = function () {
+  var topo = this.cfg.topologia || {}, gmap = topo.gatewayByTcu || {},
+      rmap = topo.repeaterByTcu || {}, reps = this.tcus.filter(function (t) { return t.repetidor; }),
+      seg = this.seguidores(), nGw = Math.max(1, this.gateways.length), i;
+  this.topologiaFuente = this.cfg.topologia ? 'configurada' : 'sintética · no as-built';
+  for (i = 0; i < reps.length; i++) {
+    reps[i].gateway = topo.gatewayByRepeater && topo.gatewayByRepeater[reps[i].id] != null
+      ? +topo.gatewayByRepeater[reps[i].id]
+      : 1 + (i % nGw);
+    reps[i].viaRepetidor = null;
+  }
+  for (i = 0; i < seg.length; i++) {
+    var t = seg[i], expG = gmap[t.id];
+    t.gateway = expG != null ? +expG : Math.min(nGw, 1 + Math.floor(i * nGw / Math.max(1, seg.length)));
+    var expR = rmap[t.id];
+    if (expR != null) t.viaRepetidor = +expR;
+    else if (t.saltos > 0 && reps.length) {
+      var candidatos = reps.filter(function (r) { return r.gateway === t.gateway; });
+      if (!candidatos.length) candidatos = reps;
+      t.viaRepetidor = candidatos[i % candidatos.length].id;
+      t.rutaInferida = true;
+    } else t.viaRepetidor = null;
+  }
+};
+Planta.prototype.gateway = function (id) {
+  for (var i = 0; i < this.gateways.length; i++) if (this.gateways[i].id === +id) return this.gateways[i];
+  return null;
+};
 
 /* Un paso de simulación. dt en segundos SIMULADOS (no de reloj de pared): así el
    acelerador de la interfaz no cambia la física, solo cuánto tiempo pasa por tick. */
@@ -1971,7 +2026,10 @@ Planta.prototype.paso = function (dt) {
   if (ent) { this.t.epoch += ent; this.tResto -= ent; }
   this.averiasPaso(dt);
   this.meteo.paso(dt);          /* el viento va llegando a lo que se le ha pedido */
+  this.granizo.paso(dt);
   var i;
+  for (i = 0; i < this.gateways.length; i++)
+    if (this.gateways[i].online) this.gateways[i].ultimoContacto = this.t.epoch;
   for (i = 0; i < this.hsus.length; i++) this.hsus[i].paso(dt);
   this.ncu.paso();
   /* los TCU sin comunicación SIGUEN funcionando: pierden la Zigbee, no la cabeza.
@@ -1992,6 +2050,31 @@ Planta.prototype.tcu = function (id) {
 Planta.prototype.seguidores = function () {
   return this.tcus.filter(function (t) { return !t.repetidor; });
 };
+/* Estado operativo del hail stow. "Protegido por telemetría" y "físicamente
+   protegido" son deliberadamente dos contadores: un inclinómetro descalibrado
+   puede dar el primero sin dar el segundo. */
+Planta.prototype.resumenGranizo = function () {
+  var G = this.granizo.snapshot(), T = this.seguidores();
+  var r = { total:T.length, ordenados:G.defensa ? T.length : 0, ack:0, moviendo:0,
+    protegido:0, fisico:0, pendiente_ack:0, sin_comms:0, fallo:0, no_modelado:0,
+    estados:{}, fase:G.phase, defensa:G.defensa, episode:G.episode, command_id:G.command_id };
+  for (var i = 0; i < T.length; i++) {
+    var e = T[i].hailEjecucion();
+    r.estados[e.estado] = (r.estados[e.estado] || 0) + 1;
+    if (e.ack) r.ack++;
+    if (e.estado === 'MOVIENDO') r.moviendo++;
+    if (e.telemetria) r.protegido++;
+    if (e.fisica) r.fisico++;
+    if (e.estado === 'PENDIENTE_ACK') r.pendiente_ack++;
+    if (e.estado === 'SIN_COMMS') r.sin_comms++;
+    if (e.estado === 'FALLO') r.fallo++;
+    if (e.estado === 'NO_MODELADO') r.no_modelado++;
+  }
+  r.pct = r.total ? 100 * r.protegido / r.total : 100;
+  r.pct_fisico = r.total ? 100 * r.fisico / r.total : 100;
+  return r;
+};
+
 /* Resumen de flota con el mismo vocabulario que el SCADA. */
 Planta.prototype.resumen = function () {
   var r = { ok: 0, aviso: 0, alarma: 0, offline: 0, total: 0, socMin: 100, socMedio: 0,
@@ -2005,6 +2088,7 @@ Planta.prototype.resumen = function () {
     if (t.parked) r.noDisponibles++;
   }
   r.socMedio /= Math.max(1, T.length);
+  r.granizo = this.resumenGranizo();
   return r;
 };
 
@@ -2559,7 +2643,7 @@ Planta.prototype._escribeNcu = function (dir, def, v, out) {
 var API = {
   Planta: Planta, TCU: TCU, HSU: HSU, NCU: NCU, Meteo: Meteo,
   PERFILES: PERFILES, perfilDe: perfilDe, TIPO_REG: TIPO_REG, FISICA: F,
-  Abanderamiento: Abanderamiento, Difusa: Difusa, Cielo: Cielo,
+  Abanderamiento: Abanderamiento, Difusa: Difusa, Cielo: Cielo, Granizo: Granizo, Gateway: Gateway,
   ESCRITURA: ESCRITURA,
   K: K, K_CANON: K_CANON, ajusta: ajusta, restauraCanon: restauraCanon, tocados: tocados,
   PARAMS: PARAMS,
