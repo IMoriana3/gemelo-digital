@@ -9,6 +9,7 @@
 <!-- Gráficas en canvas 2D sin librerías. Leaflet LOCAL (lib/) solo para elegir emplazamiento. -->
 <link rel="stylesheet" href="lib/leaflet.css">
 <script src="lib/leaflet.js"></script>
+<script src="/proyectos/lib/meteo-bus.js"></script><!-- WeatherState v1 compartido; fallo de carga no bloquea la batería -->
 <style>
   :root{
     /* Estándar de la casa Factiun (mismos tokens que index.html) */
@@ -454,6 +455,59 @@ function cRateSafeLFP(t){
 }
 
 /* ═══════════ Meteo — filas {t, ghi, dhi, temp, wind, poa?, phi?, el?, az?} ═══════════ */
+/* WeatherState v1 transversal: la batería consume la misma serie que el resto
+   cuando cubre exactamente lo que necesita, y publica cada fuente real/local
+   que carga. Si el bus común no existe (offline/404), no cambia el camino antiguo. */
+function weatherRowsFromBus(d){
+  if(!d||!Array.isArray(d.points)||!d.points.length)return null;
+  var out=[];
+  for(var i=0;i<d.points.length;i++){
+    var p=d.points[i],t=new Date(p.time);
+    if(isNaN(t))continue;
+    if(p.ghi_wm2==null||p.dhi_wm2==null)continue;
+    out.push({t:t,ghi:Math.max(0,+p.ghi_wm2||0),dhi:Math.max(0,+p.dhi_wm2||0),
+      temp:p.temperature_c==null?15:+p.temperature_c,
+      wind:p.wind_speed_10m_ms==null?0:+p.wind_speed_10m_ms});
+  }
+  return out.length?out:null;
+}
+function weatherBusCached(loc,provider,days,year){
+  try{
+    if(!window.FactiunMeteo)return null;
+    var d=window.FactiunMeteo.latest({provider:provider,lat:+loc.lat,lon:+loc.lon});
+    if(!d||!d.meta)return null;
+    if(year!=null){
+      if(d.meta.start_date!==year+'-01-01'||d.meta.end_date!==year+'-12-31')return null;
+      if(!d.points||d.points.length<24*330)return null;
+    }else{
+      var rows=weatherRowsFromBus(d); if(!rows||rows.length<Math.max(24,days*20))return null;
+      var now=Date.now(),first=+rows[0].t,last=+rows[rows.length-1].t;
+      if(first>now+3*3600e3||last<now+(days-1)*864e5)return null;
+      return rows;
+    }
+    return weatherRowsFromBus(d);
+  }catch(e){return null;}
+}
+function weatherBusPublish(rows,loc,meta){
+  try{
+    if(!window.FactiunMeteo||!rows||!rows.length)return;
+    window.FactiunMeteo.publish({
+      schema:'weather-state.v1',
+      meta:Object.assign({lat:+loc.lat,lon:+loc.lon,retrieved_at:new Date().toISOString(),
+        resolution_minutes:rows.length>1?Math.round((+rows[1].t-+rows[0].t)/60000):null,
+        producer:'gemelo-digital/bateria.html'},meta||{}),
+      points:rows.map(function(x){return {
+        time:(x.t instanceof Date?x.t:new Date(x.t)).toISOString(),
+        ghi_wm2:isFinite(+x.ghi)?+x.ghi:null,
+        dhi_wm2:isFinite(+x.dhi)?+x.dhi:null,
+        temperature_c:isFinite(+x.temp)?+x.temp:null,
+        wind_speed_10m_ms:isFinite(+x.wind)?+x.wind:null,
+        poa_wm2:x.poa!=null&&isFinite(+x.poa)?+x.poa:null,
+        tracker_angle_deg:x.phi!=null&&isFinite(+x.phi)?+x.phi:null
+      };})
+    });
+  }catch(e){ /* intercambio auxiliar, nunca tumba la simulación */ }
+}
 function parseOM(j){
   var H=j.hourly, out=[];
   for(var i=0;i<H.time.length;i++){
@@ -467,17 +521,24 @@ function parseOM(j){
 }
 var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m&windspeed_unit=ms";
 function fetchOpenMeteo(loc,days){
+  var cached=weatherBusCached(loc,'openmeteo_forecast',days,null);
+  if(cached)return Promise.resolve(cached);
   var u="https://api.open-meteo.com/v1/forecast?latitude="+loc.lat+"&longitude="+loc.lon+
     "&hourly="+OM_VARS+"&forecast_days="+days+"&timezone=UTC";
-  return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM);
+  return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM)
+    .then(function(m){weatherBusPublish(m,loc,{provider:'openmeteo_forecast',mode:'forecast',forecast_days:+days,source_url:u});return m;});
 }
 function fetchYearOrNull(loc,y){
   return fetchOpenMeteoYear(loc,y).catch(function(){return null});
 }
 function fetchOpenMeteoYear(loc,year){
+  var cached=weatherBusCached(loc,'openmeteo_era5',null,year);
+  if(cached)return Promise.resolve(cached);
   var u="https://archive-api.open-meteo.com/v1/archive?latitude="+loc.lat+"&longitude="+loc.lon+
     "&start_date="+year+"-01-01&end_date="+year+"-12-31&hourly="+OM_VARS+"&timezone=UTC";
-  return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM);
+  return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM)
+    .then(function(m){weatherBusPublish(m,loc,{provider:'openmeteo_era5',mode:'archive',
+      start_date:year+'-01-01',end_date:year+'-12-31',source_url:u});return m;});
 }
 /* Sintético: cielo claro atenuado por nubes + temperatura estacional/diurna */
 function synthMeteo(loc,days,doy0,clouds){
@@ -1098,7 +1159,10 @@ function getMeteo(loc){
   if(v==='pvsyst'){
     var f=$('file').files[0];
     if(!f)return Promise.reject(new Error("Selecciona el CSV horario de PVSyst"));
-    return f.text().then(parsePVSyst).then(function(m){$('srcTag').textContent='PVSyst · '+f.name;return m});
+    return f.text().then(parsePVSyst).then(function(m){
+      weatherBusPublish(m,loc,{provider:'pvsyst_csv',mode:'simulation_input',filename:f.name});
+      $('srcTag').textContent='PVSyst · '+f.name;return m;
+    });
   }
   return Promise.resolve(synthMeteo(loc,+$('sdays').value,+$('doy').value,+$('clouds').value))
     .then(function(m){$('srcTag').textContent='Sintético · '+loc.n;return m});
