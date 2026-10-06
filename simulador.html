@@ -116,6 +116,7 @@
   .fld input[type=range]{width:100%;accent-color:var(--accent);margin:2px 0}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+  .row4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
   .btn{width:100%;padding:9px;background:var(--accent);color:#06281c;border:0;border-radius:9px;font:600 13px var(--sans);cursor:pointer}
   .btn:hover{filter:brightness(1.08)}
   .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line2)}
@@ -234,10 +235,11 @@
           <label>Emplazamiento</label>
           <select id="loc"></select>
         </div>
-        <div class="row3">
+        <div class="row4">
           <div class="fld"><label>TCU</label><input type="number" id="nTcu" value="24" min="1" max="6000"></div>
           <div class="fld"><label>HSU</label><input type="number" id="nHsu" value="2" min="1" max="10"></div>
-          <div class="fld"><label>Repet.</label><input type="number" id="nRep" value="1" min="0" max="10"></div>
+          <div class="fld"><label>GW</label><input type="number" id="nGw" value="2" min="1" max="8"></div>
+          <div class="fld"><label>Repet.</label><input type="number" id="nRep" value="1" min="0" max="20"></div>
         </div>
         <div class="fld"><label>Grupos de limpieza <span class="rv" id="nGrupV">4</span></label>
           <input type="range" id="nGrup" min="1" max="10" step="1" value="4"></div>
@@ -333,6 +335,37 @@
           <input type="range" id="temp" min="-20" max="40" value="14"></div>
       </div>
 
+      <div class="grp" id="hailPanel">
+        <h3>Granizo · forecast → ejecución de flota</h3>
+        <div class="note" id="hailEstado" style="margin-top:0">Sin señal. Esta capa NO inventa un registro Modbus de hail stow: modela decisión, reparto y ejecución hasta que exista un binding de firmware documentado.</div>
+        <div class="row2">
+          <div class="fld"><label>Tamaño <span class="rv" id="hailMmV">22 mm</span></label>
+            <input type="range" id="hailMm" min="0" max="60" step="1" value="22"></div>
+          <div class="fld"><label>Prob. ≥19 mm <span class="rv" id="hailProbV">70 %</span></label>
+            <input type="range" id="hailProb" min="0" max="100" step="1" value="70"></div>
+        </div>
+        <div class="row2">
+          <div class="fld"><label>ETA <span class="rv" id="hailEtaV">90 min</span></label>
+            <input type="range" id="hailEta" min="0" max="180" step="1" value="90"></div>
+          <div class="fld"><label>Viento previsto viene de <span class="rv" id="hailDirV">270° O</span></label>
+            <input type="range" id="hailDir" min="0" max="359" step="1" value="270"></div>
+        </div>
+        <div class="row3">
+          <div class="fld"><label>Lead <span class="rv" id="hailLeadV">60 min</span></label>
+            <input type="number" id="hailLead" min="0" max="180" value="60"></div>
+          <div class="fld"><label>Señal +impacto <span class="rv" id="hailAfterV">15 min</span></label>
+            <input type="number" id="hailAfter" min="0" max="120" value="15"></div>
+          <div class="fld"><label>Hold salida <span class="rv" id="hailHoldV">60 min</span></label>
+            <input type="number" id="hailHold" min="0" max="240" value="60"></div>
+        </div>
+        <div class="btns">
+          <button class="btn" id="hailSend">⚡ Emitir / reforecast</button>
+          <button class="btn sec" id="hailWithdraw">Retirar aviso</button>
+          <button class="btn sec" id="hailMissing">Sin dato</button>
+        </div>
+        <div class="note" style="margin-top:7px"><b>ORDENADO ≠ ACK ≠ MOVIENDO ≠ EN POSICIÓN ≠ PROTEGIDO.</b> La planta y cada TCU los muestran por separado. La confirmación física solo existe en el gemelo; en campo requiere instrumento externo.</div>
+      </div>
+
       <div class="grp">
         <h3>Entradas de hardware de la NCU</h3>
         <div class="note" style="margin-top:0">Esto <b>no se manda</b>: son contactos del armario que la NCU <b>lee</b>. Viven en 30100, que es de solo lectura — escribirla por Modbus se rechaza con excepción 02.<br>La <b>seta de emergencia no está aquí</b>: es del TCU (30002.4), y se pulsa en el bloque de averías del equipo. El bit 30100.13 que el R7 llama <i>Stop button</i> es una entrada libre del módulo digital y en estas plantas <b>no tiene nada cableado</b>, así que se publica a 0.</div>
@@ -413,7 +446,10 @@
         <div class="note" style="margin-top:0">Actúan sobre <b id="selNota">TCU 1</b>.</div>
         <label class="sw"><input type="checkbox" id="avAtasco"><span>Eje calado (rotor bloqueado)</span></label>
         <label class="sw"><input type="checkbox" id="avDuro"><span>Eje duro (fricción alta)</span></label>
-        <label class="sw"><input type="checkbox" id="avOff"><span>Sin comunicación (Zigbee)</span></label>
+        <label class="sw"><input type="checkbox" id="avOff"><span>Radio propia TCU caída</span></label>
+        <label class="sw"><input type="checkbox" id="avGw"><span>Gateway de su ruta caído</span></label>
+        <label class="sw"><input type="checkbox" id="avRutaRep"><span>Repetidor de su ruta caído</span></label>
+        <div class="note" id="rutaNota" style="margin-top:-2px"></div>
         <label class="sw"><input type="checkbox" id="avSeta"><span>Seta local pulsada</span></label>
         <label class="sw"><input type="checkbox" id="avCable"><span>Cable de la seta cortado (lazo NC)</span></label>
         <button class="btn sec" id="btnLimpiar">🔓 Limpiar alarmas · 40007.13</button>
@@ -620,6 +656,7 @@
 <script src="sim/viento.js"></script>
 <script src="sim/cielo.js"></script>
 <script src="sim/difusa.js"></script>
+<script src="sim/granizo.js"></script>
 <script src="sim/canon.js"></script>
 <script src="lib/three.min.js"></script><!-- LOCAL, sin CDN: el simulador sigue abriendo sin red -->
 <script src="seguidor.js?v=13"></script><!-- FUENTE ÚNICA del modelo del seguidor -->
@@ -713,8 +750,15 @@ function construye() {
   P = new SIM.Planta({
     nTcu: Math.max(1, +$('nTcu').value || 24),
     nHsu: Math.max(1, +$('nHsu').value || 2),
+    nGw: Math.max(1, +$('nGw').value || 2),
     nRep: Math.max(0, +$('nRep').value || 0),
     grupos: +$('nGrup').value || 4,
+    granizo: {
+      leadMin: Math.max(0, +$('hailLead').value || 0),
+      afterMin: Math.max(0, +$('hailAfter').value || 0),
+      holdMin: Math.max(0, +$('hailHold').value || 0),
+      defensaDeg: 55, preMin: 30
+    },
     perfil: $('perfil').value,
     motorModel: /^(canon|factiun)$/.test($('motorModel').value) ? $('motorModel').value : +$('motorModel').value,
     estrategiaViento: $('estrViento').value,
