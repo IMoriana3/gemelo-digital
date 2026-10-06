@@ -90,9 +90,21 @@ function aplica(P, e) {
   }
   if (e.t === 'w') return P.escribe(e.dev || 'tcu', e.id || 1, e.dir, e.vals || [e.v || 0]);
   if (e.t === 'av') {
+    var on = !!e.on;
+    if (e.k === 'gw_off') {
+      var gw = P.gateway(e.id || 1);
+      if (!gw) return { ok:false, avisos:['no hay gateway ' + e.id] };
+      gw.online = !on;
+      return { ok:true, aplicados:['gateway ' + gw.id + (on ? ' OFF' : ' ON')] };
+    }
+    if (e.k === 'rep_off') {
+      var rp = P.tcu(e.id || 1);
+      if (!rp || !rp.repetidor) return { ok:false, avisos:['no hay repetidor ' + e.id] };
+      rp.online = !on;
+      return { ok:true, aplicados:['repetidor ' + rp.id + (on ? ' OFF' : ' ON')] };
+    }
     var tc = P.tcu(e.id || 1);
     if (!tc) return { ok: false, avisos: ['no hay TCU ' + e.id] };
-    var on = !!e.on;
     if (e.k === 'atasco') tc.ejeAtascado = on;
     else if (e.k === 'duro') tc.ejeDuro = on;
     else if (e.k === 'off') tc.online = !on;
@@ -133,7 +145,9 @@ var TIPOS = {
     n: 'Avería', campo: 'k',
     ks: [ { k: 'atasco',  n: 'eje calado' },
           { k: 'duro',    n: 'eje duro' },
-          { k: 'off',     n: 'sin comunicación' },
+          { k: 'off',     n: 'radio propia TCU caída' },
+          { k: 'gw_off',  n: 'gateway caído' },
+          { k: 'rep_off', n: 'repetidor caído' },
           { k: 'seta',    n: 'seta local pulsada' },
           { k: 'cable',   n: 'cable de seta cortado' },
           { k: 'accel',   n: 'inclinómetro averiado' } ]
@@ -189,7 +203,10 @@ function textoDe(e) {
   }
   if (e.t === 'w') return hh + ' · escribe ' + (e.dev || 'tcu').toUpperCase() +
     (e.dev === 'ncu' ? '' : ' ' + (e.id || 1)) + ' ' + e.dir + ' = ' + (e.vals ? e.vals.join(',') : e.v);
-  if (e.t === 'av') return hh + ' · ' + e.k + (e.on ? ' ON' : ' OFF') + ' en TCU ' + (e.id || 1);
+  if (e.t === 'av') {
+    var donde = e.k === 'gw_off' ? 'GW ' : (e.k === 'rep_off' ? 'repetidor ' : 'TCU ');
+    return hh + ' · ' + e.k + (e.on ? ' ON' : ' OFF') + ' en ' + donde + (e.id || 1);
+  }
   return hh + ' · ?';
 }
 
