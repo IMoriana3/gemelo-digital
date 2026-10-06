@@ -2707,12 +2707,52 @@ var METEO_EV = { viento: ['viento', 3.6], racha: ['rachas', 1], dirViento: ['dir
     toca();
   };
 });
+
+/* Granizo: el forecast NO es una orden Modbus inventada. Actualiza la capa de
+   decisión del gemelo; la NCU lo reparte a cada TCU en su propia ranura de red. */
+function aplicaCfgGranizo() {
+  if (!P) return;
+  var c=P.granizo.cfg;
+  c.leadMin=Math.max(0,+$('hailLead').value||0);
+  c.afterMin=Math.max(0,+$('hailAfter').value||0);
+  c.holdMin=Math.max(0,+$('hailHold').value||0);
+}
+function emiteGranizo() {
+  if (!P) return;
+  aplicaCfgGranizo();
+  var ev={t:'hail',k:'update',eta:+$('hailEta').value||0,mm:+$('hailMm').value||0,
+          prob:+$('hailProb').value||0,dir:+$('hailDir').value||0};
+  P.granizo.actualiza({eta_min:ev.eta,mm:ev.mm,prob_pct:ev.prob,dir_deg:ev.dir});
+  graba(ev);
+  HIST.evento(P.t.epoch,'granizo: reforecast '+ev.mm+' mm · '+ev.prob+' % · ETA '+ev.eta+' min','hail',P.t.hora);
+  toca();
+}
+$('hailSend').onclick=emiteGranizo;
+$('hailWithdraw').onclick=function(){
+  if(!P)return;P.granizo.retira();graba({t:'hail',k:'withdraw'});
+  HIST.evento(P.t.epoch,'granizo: retirada de aviso','hail',P.t.hora);toca();
+};
+$('hailMissing').onclick=function(){
+  if(!P)return;P.granizo.sinDato();graba({t:'hail',k:'missing'});
+  HIST.evento(P.t.epoch,'granizo: dato ausente · no desescala','hail',P.t.hora);toca();
+};
+['hailMm','hailProb','hailEta','hailDir','hailLead','hailAfter','hailHold'].forEach(function(id){
+  $(id).oninput=function(){aplicaCfgGranizo();pintaGranizoUI();};
+});
+
 /* averías: actúan sobre el equipo seleccionado */
 function sincronizaAverias() {
   var t = tcuSel();
   $('selNota').textContent = (t.repetidor ? 'Repetidor ' : 'TCU ') + t.id;
   $('avAtasco').checked = t.ejeAtascado; $('avDuro').checked = t.ejeDuro;
   $('avOff').checked = !t.online; $('avSeta').checked = t.setaLocal;
+  var gw=P.gateway(t.gateway), rep=t.viaRepetidor!=null?P.tcu(t.viaRepetidor):null;
+  $('avGw').checked=!!(gw&&!gw.online);
+  $('avRutaRep').checked=!!(rep&&!rep.online);
+  $('avRutaRep').disabled=!rep;
+  $('rutaNota').innerHTML='Ruta: <b>NCU → GW'+t.gateway+
+    (rep?' → repetidor '+rep.id+(t.rutaInferida?' <span class="aprox">(inferido)</span>':''):'')+
+    ' → '+(t.repetidor?'R':'TCU')+t.id+'</b> · '+P.topologiaFuente+'.';
   $('avCable').checked = t.cableSetaCortado; $('avAccel').checked = !t.sensor.ok;
   $('desaj').value = t.sensor.desajuste; $('desajV').textContent = num(t.sensor.desajuste, 1) + '°';
   $('offset').value = t.sensor.offsetCfg; $('offsetV').textContent = num(t.sensor.offsetCfg, 1) + '°';
@@ -2742,6 +2782,14 @@ $('btnLimpiar').onclick = function () {
   };
 });
 $('avOff').onchange = function () { tcuSel().online = !this.checked; graba({ t: 'av', k: 'off', id: sel, on: this.checked }); toca(); };
+$('avGw').onchange=function(){
+  var t=tcuSel(),g=P.gateway(t.gateway);if(!g)return;g.online=!this.checked;
+  graba({t:'av',k:'gw_off',id:g.id,on:this.checked});toca();
+};
+$('avRutaRep').onchange=function(){
+  var t=tcuSel(),r=t.viaRepetidor!=null?P.tcu(t.viaRepetidor):null;if(!r)return;r.online=!this.checked;
+  graba({t:'av',k:'rep_off',id:r.id,on:this.checked});toca();
+};
 $('avSeta').onchange = function () { tcuSel().setaLocal = this.checked; graba({ t: 'av', k: 'seta', id: sel, on: this.checked }); toca(); };
 $('socSet').oninput = function () { tcuSel().soc = +this.value; $('socV').textContent = this.value + ' %'; toca(); };
 $('manSet').oninput = function () {
@@ -3030,6 +3078,7 @@ function arranca() {
       if (T && PLANTAS[+$('loc').value] === L0) tocaPlanta(); else pintaNotaBT();
     });
   construye();
+preparaHailFx();
 aplicaEstrategia();
 aplicaPoliticaDifusa();
 pintaNotaBT();
