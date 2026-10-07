@@ -423,18 +423,19 @@ var FABRICANTES = {
                 + 'ninguno de los otros dos. La RSU y el seguidor se ven aquí por los '
                 + 'bloques que la NCU republica —que es como los lee el SCADA—, y no '
                 + 'hay pestaña propia porque no hay mapa que poner en ella.',
-      tmu: 'TMU y sus MDU (bloque 22000): un seguidor de P4Q con accionamiento '
-         + 'multipunto. Este simulador mueve UN eje por TCU, así que no tiene de '
-         + 'dónde sacar la posición de cada MDU ni su desvío entre ellas (PosDif). '
-         + 'Inventarlo sería dar un número de reparto de carga que nadie ha medido.',
-      rsuExt: 'RSU externas (bloque 30300, hasta 20): estaciones de otra planta o '
-            + 'de otro fabricante que la NCU lee por Modbus. No hay ninguna '
-            + 'configurada en la cartera, y fabricar una sería inventarse una '
-            + 'fuente de meteo que no existe.',
-      rsuVirt: 'RSU virtuales (bloque 37000, 2 unidades): sensor de viento local + '
-             + 'sensor de nieve local CABLEADOS A LA PROPIA NCU, no por radio. El '
-             + 'gemelo mide el viento en las estaciones y lo reparte por poleo; no '
-             + 'modela sensores colgados del armario.',
+      multipunto: 'Accionamiento MULTIPUNTO: varias MDU bajo una misma TMU. El '
+                + 'bloque 22000 se publica —con una unidad de accionamiento, que es '
+                + 'lo que este gemelo mueve: un eje por seguidor— pero `PosDif`, la '
+                + 'mayor diferencia de posición entre MDU, se queda en blanco a '
+                + 'propósito. Con una sola valdría cero, y un cero ahí se leería como '
+                + '«se ha medido la divergencia y es nula» cuando lo cierto es que no '
+                + 'hay varias que comparar. Cuánto se separan entre sí no es una '
+                + 'cuenta: es una medida de campo que nadie ha hecho.',
+      niveles7: 'Niveles de viento 3 a 7 de la RSU virtual (bloque 37000). El '
+              + 'abanderamiento canónico tiene DOS umbrales —parcial a 40 km/h y '
+              + 'total a 60— y de ahí sale el nivel 0/1/2 de la estación; el mapa '
+              + 'deja poner siete. Los otros cinco van en blanco: rellenarlos sería '
+              + 'dar por configurado lo que nadie ha configurado.',
       picos: 'Picos de viento del sensor local por día (bloque 36000): es el '
            + 'historial del último MES, y la simulación arranca en el día que se '
            + 'le pide. Sin mes detrás, serían 31 días inventados.',
@@ -576,10 +577,35 @@ function bits(campos, valores) {
   return w & 0xFFFF;
 }
 
-/* ═══════════════════ HSU — estación meteo ═══════════════════ */
-function HSU(id, planta) {
+/* ═══════════════════ HSU / RSU — estación meteo ══════════════════════════════
+   UN SOLO MODELO para los tres sitios de donde la NCU saca el tiempo, porque es el
+   MISMO equipo midiendo lo mismo. Lo que cambia es POR DÓNDE lo lee, y eso sí tiene
+   consecuencia medible:
+
+     'zigbee'  la estación de siempre. Habla por radio y espera SU TURNO en la vuelta
+               de poleo, junto a los seguidores. Es la HSU de Sunner y la RSU propia
+               de P4Q.
+     'modbus'  RSU EXTERNA (bloque 30300, hasta 20): una estación de otra planta o de
+               otro fabricante que la NCU lee por Modbus. Otro bus, así que NO compite
+               por el turno de la Zigbee — pero sigue siendo un equipo remoto que
+               puede dejar de contestar.
+     'local'   RSU VIRTUAL (umbrales en el 37000, 2 unidades): sensor de viento y de
+               nieve CABLEADOS al armario de la NCU. No hay radio ni bus que esperar,
+               así que la NCU lo lee en cuanto mide. Esa es la diferencia que el
+               gemelo puede enseñar: una ráfaga que un seguidor nota una vuelta más
+               tarde por la Zigbee, aquí la NCU la tiene ya.
+
+   Las tres solo existen en el mapa de P4Q; el de Sunner no tiene sitio para las dos
+   últimas, así que una planta de Sunner solo lleva 'zigbee'. */
+function HSU(id, planta, opts) {
+  opts = opts || {};
   this.id = id; this.p = planta;
-  this.rnd = new Rnd(9000 + id * 7);
+  /* por dónde la lee la NCU. Decide si espera turno de poleo y si puede perder
+     comunicación, no lo que mide. */
+  this.enlace = opts.enlace || 'zigbee';
+  this.externa = this.enlace === 'modbus';
+  this.virtual = this.enlace === 'local';
+  this.rnd = new Rnd(9000 + id * 7 + (this.externa ? 500 : 0) + (this.virtual ? 900 : 0));
   this.viento = 3; this.racha = 3; this.gust = 1; this.dir = 200 + id * 15;
   this.nieve = 0; this.ghi = 0; this.poa = 0; this.difusa = 0;
   this.nivel = 0; this.vBat = 13200;
@@ -1851,6 +1877,21 @@ Planta.prototype.ranura = function (i, n) { return n > 0 ? i / n : 0; };
 
 NCU.prototype.paso = function () {
   var H = this.p.hsus, ahora = this.p.ahora(), Tp = this.p.poleoS();
+  /* LAS QUE NO ESPERAN TURNO. La vuelta de poleo es de la Zigbee; una RSU externa
+     va por otro bus y una virtual va cableada al armario, así que ninguna compite
+     por una ranura. La externa sigue siendo un equipo remoto y puede dejar de
+     contestar; la virtual solo falla si falla su sensor. Esa es la consecuencia de
+     verdad: una ráfaga que un seguidor nota una vuelta más tarde, en la virtual la
+     NCU la tiene ya. */
+  var fuera = this.p.rsusExt.concat(this.p.rsusVirt);
+  for (var q = 0; q < fuera.length; q++) {
+    var fq = fuera[q];
+    if (fq.externa && !fq.online) continue;      /* remota que no contesta */
+    fq.ultimoContacto = Math.floor(ahora);
+    fq.visto = { nivel: fq.nivel, viento: fq.viento, dir: fq.dir,
+                 av: fq.alarmaViento(), an: fq.alarmaNieve(), ar: fq.alarmaRacha(),
+                 fw: fq.falloVientoSensor, fs: fq.falloNieveSensor, t: ahora };
+  }
   this.hail = this.p.granizo ? this.p.granizo.snapshot() : null;
   var G = this.p.gateways || [];
   this.gw1Alarma = !!(G[0] && !G[0].online);
@@ -1870,10 +1911,25 @@ NCU.prototype.paso = function () {
                       fw: hh.falloVientoSensor, fs: hh.falloNieveSensor, t: ahora };
   }
 
-  /* y ahora agrega SOBRE SU COPIA, no sobre las estaciones */
+  /* y ahora agrega SOBRE SU COPIA, no sobre las estaciones.
+     ENTRAN LAS TRES CLASES: las de radio por su copia de la vuelta, y las externas y
+     virtuales por la suya. Para decidir un abanderamiento el peor dato es el que
+     cuenta, y de dónde venga la lectura no cambia eso — lo que cambia es CUÁNDO la
+     tiene la NCU, que es lo que el poleo ya modela. */
   var n = 0, av = false, an = false, ar = false, fw = false, fs = false, este = false, vmax = 0, dmax = 180;
-  for (var i = 0; i < H.length; i++) {
-    var h = this.visto[i];
+  /* OJO AL `slice`: `this.visto` se rellena POR ÍNDICE y tiene huecos mientras una
+     estación no haya entrado en su primera ranura, así que su `length` puede ser
+     MENOR que el número de estaciones. `visto.slice(0, H.length)` devolvía un array
+     más corto y la estación que faltaba dejaba de contarse — y una estación sin
+     lectura todavía es precisamente lo que pone los bits GlobalWS/GlobalSS del
+     30002. Medido: el 30002 pasaba de 384 a 0 en una planta de Sunner, sin que
+     nada de Sunner hubiera cambiado. Se recorre por ÍNDICE para conservar los
+     huecos, que aquí son un dato. */
+  var copias = [];
+  for (var w0 = 0; w0 < H.length; w0++) copias.push(this.visto[w0]);
+  for (var w = 0; w < fuera.length; w++) if (fuera[w].visto) copias.push(fuera[w].visto);
+  for (var i = 0; i < copias.length; i++) {
+    var h = copias[i];
     /* sin lectura todavía, o una estación que dejó de contestar y a la que se le ha
        pasado el plazo: para la NCU es un fallo de sensor, que es su bit */
     if (!h || (ahora - h.t) > Tp * K.POLEO_CADUCA) { fw = true; fs = true; continue; }
@@ -1888,6 +1944,7 @@ NCU.prototype.paso = function () {
     /* dirección de viento del ESTE (45°–135°): el R7 lo republica como «inverted wind» */
     if (h.nivel > 0 && h.dir > 45 && h.dir < 135) este = true;
   }
+  this.nFuentes = copias.length;        /* de cuántas estaciones sale el resumen */
   this.nivelVientoGlobal = n; this.vientoMax = vmax; this.dirVientoMax = dmax;
   this.alarmaViento = av; this.alarmaNieve = an;
   this.alarmaRacha = ar; this.falloWs = fw; this.falloSs = fs; this.vientoInvertido = este;
@@ -2034,6 +2091,10 @@ function Planta(cfg) {
        en silencio cayendo a Sunner —eso serviría el mapa equivocado con cara de
        normalidad—: se dice y se cae al de por defecto. */
     fabricante: fabDe(cfg),
+    /* RSU externas (hasta 20) y virtuales (hasta 2). Solo P4Q las tiene en su mapa.
+       Por defecto cero: una estación que no está en la planta no se inventa. */
+    nRsuExt: Math.max(0, Math.min(20, cfg.nRsuExt | 0)),
+    nRsuVirt: Math.max(0, Math.min(2, cfg.nRsuVirt | 0)),
     wordOrder: cfg.wordOrder || 'big'
   };
   if (cfg.fabricante && !FABRICANTES[cfg.fabricante]) {
@@ -2056,6 +2117,21 @@ function Planta(cfg) {
   this.hsus = []; this.tcus = [];
   var i;
   for (i = 1; i <= this.cfg.nHsu; i++) this.hsus.push(new HSU(i, this));
+  /* LAS OTRAS DOS CLASES DE ESTACIÓN, que solo existen en el mapa de P4Q: el de
+     Sunner no tiene bloque para ellas, así que una planta de Sunner no las monta
+     aunque se pidan — y lo dice, en vez de montarlas sin sitio donde publicarlas.
+     Van en listas aparte porque publican en bloques distintos y su índice es el de
+     SU bloque: mezclarlas con las de radio desplazaría el 30200. */
+  this.rsusExt = []; this.rsusVirt = [];
+  if (this.cfg.fabricante === 'p4q') {
+    for (i = 1; i <= this.cfg.nRsuExt; i++) this.rsusExt.push(new HSU(i, this, { enlace: 'modbus' }));
+    for (i = 1; i <= this.cfg.nRsuVirt; i++) this.rsusVirt.push(new HSU(i, this, { enlace: 'local' }));
+  } else if (this.cfg.nRsuExt || this.cfg.nRsuVirt) {
+    this.avisos = (this.avisos || []).concat(
+      'las RSU externas y virtuales son del mapa de P4Q: una planta de ' +
+      FABRICANTES[this.cfg.fabricante].n + ' no tiene bloque donde publicarlas, así que ' +
+      'no se montan.');
+  }
   for (i = 1; i <= this.cfg.nTcu; i++) {
     this.tcus.push(new TCU(i, this, { grupo: 1 + ((i - 1) % this.cfg.grupos), idx: this.tcus.length }));
   }
@@ -2164,6 +2240,10 @@ Planta.prototype.paso = function (dt) {
   for (i = 0; i < this.gateways.length; i++)
     if (this.gateways[i].online) this.gateways[i].ultimoContacto = this.t.epoch;
   for (i = 0; i < this.hsus.length; i++) this.hsus[i].paso(dt);
+  /* las externas y las virtuales MIDEN igual: son el mismo equipo. Lo que cambia es
+     por dónde las lee la NCU, y eso lo decide `NCU.prototype.paso`. */
+  for (i = 0; i < this.rsusExt.length; i++) this.rsusExt[i].paso(dt);
+  for (i = 0; i < this.rsusVirt.length; i++) this.rsusVirt[i].paso(dt);
   this.ncu.paso();
   /* los TCU sin comunicación SIGUEN funcionando: pierden la Zigbee, no la cabeza.
      Lo que se congela es su marca de último contacto, que es lo que ve el SCADA. */
@@ -2185,6 +2265,26 @@ Planta.prototype.seguidores = function () {
 };
 Planta.prototype.repetidores = function () {
   return this.tcus.filter(function (t) { return t.repetidor; });
+};
+/* LAS QUE VAN EN EL BLOQUE DE DIEZ (30200). La hoja del documento se llama «RSUs +
+   Local Sensors» y tiene UN solo bloque de datos: las de radio y las cableadas a la
+   NCU comparten las diez ranuras. Las EXTERNAS no entran — tienen su propio bloque
+   (30300) y hasta veinte.
+   El orden (radio primero, cableadas después) es de este simulador: el documento no
+   lo fija. Y si entre las dos pasan de diez, se dice: el bloque no da para más. */
+Planta.prototype.estaciones = function () {
+  var t = this.hsus.concat(this.rsusVirt);
+  if (t.length > 10) {
+    if (!this._avisoDiez) {
+      this._avisoDiez = true;
+      this.avisos = (this.avisos || []).concat(
+        'el bloque de estaciones de la NCU son DIEZ ranuras y hay ' + t.length +
+        ' (' + this.hsus.length + ' de radio + ' + this.rsusVirt.length + ' cableadas): ' +
+        'las que sobran no se publican.');
+    }
+    t = t.slice(0, 10);
+  }
+  return t;
 };
 
 /* ── el fabricante de esta planta, y lo que de él cuelga ──
@@ -2657,7 +2757,94 @@ Planta.prototype.regsNcuP4Q = function () {
      suyo. Es la diferencia de equipo que separa a los dos fabricantes. */
   this.publicaTcus(R, this.seguidores());
   this.publicaRepetidores(R);
-  this.publicaEstaciones(R);
+  this.publicaTmu(R);
+  /* LA VIRTUAL VA EN EL MISMO BLOQUE QUE LAS DE RADIO, y esto fue un fallo mío que
+     cazó el mantenedor: la tenía en su lista publicando solo umbrales, o sea con
+     configuración y sin una lectura. La hoja del documento se llama literalmente
+     «RSUs + Local Sensors» y su bloque de datos es UNO: base 30200, índice 1..10,
+     diez registros por unidad. O sea que una RSU cableada al armario ocupa una de
+     esas diez ranuras igual que una de radio — lo que la hoja «Local Sensors»
+     añade es solo sus UMBRALES (37000) y sus picos por día (36000).
+
+     EL ORDEN dentro de las diez —primero las de radio y después las cableadas— lo
+     pone este simulador: el documento no lo dice. Va declarado aquí para que nadie
+     lo lea como si fuera del fabricante. */
+  this.publicaEstaciones(R, this.estaciones(), 30200, 29320, 29380, 29440, false);
+  /* RSU EXTERNAS: el MISMO bloque de diez registros, en su base (30300) y con sus
+     tres marcas de tiempo (29340/29400/29460). Es el mismo equipo leído por otro
+     bus, así que la disposición es idéntica — y por eso se reutiliza la función en
+     vez de copiarla. Sin extendido: el 28000 es solo de las de esta planta. */
+  this.publicaEstaciones(R, this.rsusExt, 30300, 29340, 29400, 29460, true);
+  this.publicaRsusVirtuales(R);
+  return R;
+};
+
+/* ── RSU VIRTUAL: sus UMBRALES, en el 37000 ───────────────────────────────────
+   Este bloque no trae medidas: son 46 registros de umbrales y tiempos por unidad
+   —cuándo entra la alarma de viento, los siete niveles con sus tiempos de subida y
+   bajada, las rachas, la dirección y la nieve—. Así que publicarlo es publicar LA
+   CONFIGURACIÓN de la planta, y de eso el gemelo sí sabe.
+
+   PERO SOLO SABE DOS NIVELES. El abanderamiento canónico tiene dos umbrales
+   —parcial a 40 km/h y total a 60— y de ahí sale el `nivel` 0/1/2 de la estación.
+   El mapa deja poner SIETE. Los niveles 3 a 7 NO se publican: inventarse cinco
+   umbrales para rellenar un bloque sería dar por configurado lo que nadie ha
+   configurado, y aquí un hueco se lee como hueco.
+
+   Lo que sí se publica sale de los parámetros EN VIGOR (`K`), no de una copia: si
+   alguien mueve un umbral con la planta en marcha, aquí se ve. */
+Planta.prototype.publicaRsusVirtuales = function (R) {
+  var wo = this.cfg.wordOrder, i, par;
+  for (i = 0; i < this.rsusVirt.length; i++) {
+    var b = 37000 + i * 46;
+    /* entrada y salida de la alarma de viento: los dos umbrales del canon */
+    par = f32(K.WIND_T2, wo); R[b + 0] = par[0]; R[b + 1] = par[1];
+    par = f32(K.WIND_T1, wo); R[b + 2] = par[0]; R[b + 3] = par[1];
+    /* la histéresis de desabanderamiento del B2, que es un tiempo de salida: el
+       `DESTOW_MIN` del canon, en segundos, y el que esté en vigor */
+    R[b + 5] = u16(K.DESTOW_MIN * 60);
+    /* nivel 1 y nivel 2. Del 3 al 7 no se publica nada: el gemelo no los tiene. */
+    par = f32(K.WIND_T1, wo); R[b + 6] = par[0]; R[b + 7] = par[1];
+    par = f32(K.WIND_T2, wo); R[b + 8] = par[0]; R[b + 9] = par[1];
+    /* nieve: el umbral de alarma que de verdad usa la estación */
+    par = f32(K.SNOW_ALARM_M, wo); R[b + 41] = par[0]; R[b + 42] = par[1];
+  }
+  return R;
+};
+
+/* ── TMU: bloque 22000, paso 26 ───────────────────────────────────────────────
+   La TMU manda sobre sus MDU, y TODO este bloque son AGREGADOS sobre ellas: la
+   posición máxima y la mínima con el id de cuál, el pico de corriente máximo y
+   mínimo con el suyo, las temperaturas, y `PosDif` — «la mayor diferencia de
+   posición entre dispositivos».
+
+   ESTE GEMELO MUEVE UN EJE POR SEGUIDOR, o sea una sola unidad de accionamiento.
+   Con una, los agregados no se inventan: el máximo y el mínimo son el mismo valor,
+   el id es 1, y eso es literalmente verdad para un seguidor de accionamiento
+   único. Lo que NO se publica es `PosDif`: con una MDU valdría cero, y un cero ahí
+   se leería como «se ha medido la divergencia entre accionamientos y es nula»,
+   cuando lo cierto es que no hay varias que comparar. En blanco dice lo que es.
+
+   Un seguidor P4Q MULTIPUNTO —varias MDU por TMU— pediría saber cuánto se separan
+   entre sí, y eso no es una cuenta: es una medida de campo que nadie ha hecho. Va
+   declarado en `sinModelar`. */
+Planta.prototype.publicaTmu = function (R) {
+  var segs = this.seguidores(), i;
+  for (i = 0; i < segs.length && i < 200; i++) {
+    var c = segs[i], b = 22000 + i * 26;
+    /* una sola MDU: su bit de estado puesto y ninguna alarma de esclava */
+    R[b + 6] = 1; R[b + 7] = 0; R[b + 8] = 0;
+    R[b + 9] = bits({ m: [0, 0], ok: [1, 1] },
+                    { m: c.motorHabilitado ? 1 : 0, ok: c.motorHabilitado ? 1 : 0 });
+    /* posición en radianes ×1000, y con una MDU el máximo ES el mínimo */
+    R[b + 10] = s16(Math.round(c.angulo * D2R * 1000));
+    R[b + 11] = s16(Math.round(c.angulo * D2R * 1000));
+    R[b + 12] = bits({ max: [0, 7], min: [8, 15] }, { max: 1, min: 1 });
+    R[b + 13] = u16(c.iMotorPico); R[b + 14] = u16(c.iMotorPico);
+    R[b + 15] = bits({ max: [0, 7], min: [8, 15] }, { max: 1, min: 1 });
+    R[b + 16] = kx10(c.tPcb); R[b + 17] = kx10(c.tPcb);
+    R[b + 18] = bits({ max: [0, 7], min: [8, 15] }, { max: 1, min: 1 });
+  }
   return R;
 };
 
@@ -2703,10 +2890,12 @@ Planta.prototype.publicaRepetidores = function (R) {
    El bloque compacto lleva OTRA disposición que el mapa propio de la estación: lo
    que se ve aquí es lo que la NCU republica, no lo que la estación sirve en su
    propio Modbus. */
-Planta.prototype.publicaEstaciones = function (R) {
+Planta.prototype.publicaEstaciones = function (R, lista, base, tSnow, tWind, tComm, ext) {
   var wo = this.cfg.wordOrder, j, par;
-  for (j = 0; j < this.hsus.length; j++) {
-    var h = this.hsus[j], hb = 30200 + j * 10;
+  lista = lista || this.hsus; base = base || 30200;
+  tSnow = tSnow || 29320; tWind = tWind || 29380; tComm = tComm || 29440;
+  for (j = 0; j < lista.length; j++) {
+    var h = lista[j], hb = base + j * 10;
     R[hb + 1] = bits({ nivel: [0, 2], este: [3, 3] },
                      { nivel: h.nivel, este: (h.dir > 45 && h.dir < 135) ? 1 : 0 });
     R[hb + 2] = bits({ ws: [0, 0], ss: [1, 1], nieve: [6, 6], inund: [7, 7],
@@ -2717,13 +2906,17 @@ Planta.prototype.publicaEstaciones = function (R) {
     par = f32(h.viento, wo); R[hb + 3] = par[0]; R[hb + 4] = par[1];
     par = f32(h.dir, wo);    R[hb + 5] = par[0]; R[hb + 6] = par[1];
     par = f32(h.nieve, wo);  R[hb + 7] = par[0]; R[hb + 8] = par[1];
-    par = u32(h.ultimoContacto, wo); R[29440 + j * 2] = par[0]; R[29440 + j * 2 + 1] = par[1];
+    par = u32(h.ultimoContacto, wo); R[tComm + j * 2] = par[0]; R[tComm + j * 2 + 1] = par[1];
     /* últimas lecturas VÁLIDAS (sin alarma) de nieve y viento: se congelan mientras
        la alarma esté activa, que es como se sabe desde cuándo sopla */
     if (!h.alarmaNieve()) h.ultimaNieveOk = this.t.epoch;
     if (!h.alarmaViento()) h.ultimoVientoOk = this.t.epoch;
-    par = u32(h.ultimaNieveOk || this.t.epoch, wo); R[29320 + j * 2] = par[0]; R[29320 + j * 2 + 1] = par[1];
-    par = u32(h.ultimoVientoOk || this.t.epoch, wo); R[29380 + j * 2] = par[0]; R[29380 + j * 2 + 1] = par[1];
+    par = u32(h.ultimaNieveOk || this.t.epoch, wo); R[tSnow + j * 2] = par[0]; R[tSnow + j * 2 + 1] = par[1];
+    par = u32(h.ultimoVientoOk || this.t.epoch, wo); R[tWind + j * 2] = par[0]; R[tWind + j * 2 + 1] = par[1];
+    /* EL EXTENDIDO (28000) ES SOLO DE LAS PROPIAS. Las RSU externas no lo tienen en
+       el mapa: son estaciones de otro, y la NCU solo republica de ellas el bloque
+       básico. Publicarlo sería darles registros que su documento no les da. */
+    if (ext) continue;
     var eb = 28000 + j * 100;
     par = f32(h.viento, wo); R[eb + 4] = par[0]; R[eb + 5] = par[1];
     par = f32(h.dir, wo);    R[eb + 6] = par[0]; R[eb + 7] = par[1];

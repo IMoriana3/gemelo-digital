@@ -302,6 +302,17 @@
           <div class="fld"><label>GW</label><input type="number" id="nGw" value="2" min="1" max="8"></div>
           <div class="fld"><label>Repet.</label><input type="number" id="nRep" value="1" min="0" max="20"></div>
         </div>
+        <!-- SOLO P4Q: su mapa tiene bloque para estas dos y el de Sunner no, así que
+             con Sunner elegido se esconden en vez de ofrecer algo que no se montaría. -->
+        <div class="row4" id="filaRsu" style="display:none">
+          <div class="fld"><label>RSU ext.</label><input type="number" id="nRsuExt" value="0" min="0" max="20"></div>
+          <div class="fld"><label>RSU virt.</label><input type="number" id="nRsuVirt" value="0" min="0" max="2"></div>
+        </div>
+        <div class="fld" id="notaRsu" style="display:none"><span class="rv" style="font-weight:400">
+          La <b>RSU externa</b> es una estación de otra planta o de otro fabricante que la NCU lee por
+          Modbus; la <b>virtual</b> es un sensor de viento y nieve cableados al propio armario. Las tres
+          miden lo mismo — lo que cambia es que las dos últimas <b>no esperan turno de Zigbee</b>.
+        </span></div>
         <div class="fld"><label>Grupos de limpieza <span class="rv" id="nGrupV">4</span></label>
           <input type="range" id="nGrup" min="1" max="10" step="1" value="4"></div>
         <div class="fld"><label>Configuración de la mesa</label>
@@ -832,6 +843,8 @@ function construye() {
     nGw: Math.max(1, +$('nGw').value || 2),
     nRep: Math.max(0, +$('nRep').value || 0),
     fabricante: $('fabricante').value,
+    nRsuExt: Math.max(0, +$('nRsuExt').value || 0),
+    nRsuVirt: Math.max(0, +$('nRsuVirt').value || 0),
     grupos: +$('nGrup').value || 4,
     granizo: {
       leadMin: Math.max(0, +$('hailLead').value || 0),
@@ -2881,8 +2894,22 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
   };
 });
 $('mbDev').onchange = function () { pintaUnidades(); pintaEscritura(); previos = {}; pintaTodo(); };
-/* Cambiar de fabricante cambia la planta: no es una vista, así que se rehace. */
-$('fabricante').onchange = function () { construye(); if (CAMPO) CAMPO.construye(P); };
+/* Cambiar de fabricante cambia la planta: no es una vista, así que se rehace. Y las
+   RSU externas y virtuales solo tienen sitio en el mapa de P4Q, así que sus casillas
+   aparecen y desaparecen con él — ofrecerlas con Sunner elegido sería ofrecer algo
+   que la planta no montaría. */
+function pintaCasillasRsu() {
+  var esP4Q = $('fabricante').value === 'p4q';
+  $('filaRsu').style.display = esP4Q ? '' : 'none';
+  $('notaRsu').style.display = esP4Q ? '' : 'none';
+}
+$('fabricante').onchange = function () {
+  pintaCasillasRsu(); construye(); if (CAMPO) CAMPO.construye(P);
+};
+['nRsuExt', 'nRsuVirt'].forEach(function (id) {
+  $(id).onchange = function () { construye(); if (CAMPO) CAMPO.construye(P); };
+});
+pintaCasillasRsu();
 $('mbEscribirBtn').onclick = function () {
   var c = $('mbEsc'); c.style.display = (c.style.display === 'none') ? '' : 'none';
   if (c.style.display === '') pintaEscritura();
