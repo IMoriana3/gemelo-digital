@@ -81,7 +81,20 @@ try {
   MAPAS = r.MAPAS; BLOQUES_FAB = r.BLOQUES_FAB;
 } catch (e) {
   console.error('la ficha no se ha podido evaluar: ' + e.message);
-  console.error('si ha cambiado de forma, hay que arreglar ESTE extractor, no copiar el mapa a mano.');
+  console.error('  ' + FICHA);
+  /* DOS CAUSAS, Y LA ACCIÓN ES DISTINTA. Decir solo «arregla el extractor» mandó a
+     mirar el sitio equivocado la primera vez que esto pasó en CI: la ficha estaba
+     bien y lo viejo era el PIN. Así que se nombran las dos. */
+  if (/BLOQUES_FAB/.test(e.message)) {
+    console.error('\nEsa ficha es ANTERIOR a los dos fabricantes: todavía trae `var DEV={…}`');
+    console.error('literal, sin `BLOQUES_FAB` ni `MAPAS`. Si es el clon del pin, lo que hay que');
+    console.error('mover es el PIN (pines.json → repos["cobertura-zigbee"]), con el procedimiento');
+    console.error('que ese fichero describe: clonar el candidato, correr los arneses CONTRA ÉL y');
+    console.error('moverlo solo si pasan.');
+  } else {
+    console.error('\nSi la ficha ha cambiado de forma otra vez, hay que arreglar ESTE extractor.');
+    console.error('Lo que NO vale es copiar el mapa a mano: sería una segunda fuente que envejece sola.');
+  }
   process.exit(1);
 }
 
