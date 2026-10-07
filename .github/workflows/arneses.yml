@@ -129,6 +129,21 @@ jobs:
         working-directory: gemelo-digital
         run: node tools/carea_bt.mjs --hermano=../cobertura-zigbee
 
+      # El mapa Modbus está GENERADO de la ficha del hermano, y hasta hoy nadie lo
+      # comprobaba: el extractor no corría en CI. La ficha pasó de un fabricante a
+      # dos —y de `var DEV={…}` literal a `var DEV=MAPAS.sunner`—, el extractor
+      # empezó a reventar, y `sim/modbus-map.js` se quedó DOS SEMANAS en el R7 sin
+      # que nada lo dijera. Un generador que nadie vuelve a correr es una copia a
+      # mano con buena intención.
+      #
+      # Carea contra el CLON DEL PIN, igual que `carea_lazo`: lo que se exige es que
+      # el mapa del gemelo sea el de la ficha a la que este repo está pinado, no el
+      # de la punta del hermano —si no, mover la ficha pondría rojo a todo el mundo
+      # y el pin dejaría de significar nada.
+      - name: El mapa Modbus está regenerado
+        working-directory: gemelo-digital
+        run: node tools/extrae_mapa.mjs --check ../cobertura-zigbee/modbus.html
+
       - name: El catálogo está regenerado
         working-directory: gemelo-digital
         run: node tools/genera_plantas.mjs --check --desde ../proyectos --cobertura ../cobertura-zigbee

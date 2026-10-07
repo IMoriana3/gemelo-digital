@@ -95,17 +95,17 @@ const NO_ES_ARNES = {
     'MÓDULO, no banco: exporta scriptsDe/envuelto/desnudos y quien las ejecuta es '
     + 'prueba_bateria.mjs, que sí es puerta. Corriéndolo suelto no imprime nada ni '
     + 'puede fallar, así que enchufarlo sería un verde que no puede ser otra cosa.',
-  'tools/extrae_mapa.mjs':
-    'GENERADOR: saca el mapa del DWG. Se corre a mano cuando llega un plano nuevo y '
-    + 'escribe en el árbol; no tiene veredicto que dar sobre una PR.',
   'tools/extrae_plantas.mjs':
     'GENERADOR: saca PLANTAS_REALES (posición de cada seguidor) de los layouts del '
-    + 'DWG. Mismo caso que extrae_mapa: escribe, no juzga.',
+    + 'DWG. Escribe en el árbol y no juzga: se corre a mano cuando llega un plano '
+    + 'nuevo. Para meterlo en la puerta valdría lo mismo que se le hizo a '
+    + 'extrae_mapa —un --check que carease su salida contra los layouts del pin—, y '
+    + 'es trabajo pendiente, no una decisión tomada.',
   'tools/extrae_saltos.mjs':
     'GENERADOR: saca los saltos de cada equipo del zigbee_routes.csv del hermano '
     + 'cobertura-zigbee y escribe sim/saltos/<planta>.json, con el que la vuelta de '
-    + 'poleo se ordena por profundidad de malla. Mismo caso que extrae_mapa: escribe, '
-    + 'no juzga. Para meterlo en la puerta haría falta una captura de rutas versionada '
+    + 'poleo se ordena por profundidad de malla. Mismo caso que extrae_plantas: '
+    + 'escribe, no juzga. Para meterlo en la puerta haría falta una captura de rutas versionada '
     + 'en el repo contra la que carear su salida, y hoy no hay ninguna: existen el '
     + 'formato, el recolector y el visor, pero el CSV no está.',
   'sim/servidor.mjs':
