@@ -12,6 +12,11 @@
     "3. Se mueve el commit aquí SOLO si pasan, y el PR dice qué cambió en el hermano y por qué el pin nuevo es legítimo.",
     "Nunca se fija «el último commit» a ciegas: se fija uno contra el que esto pasa, verificado ejecutándolo."
   ],
+  "_por_que_consume_vive_AQUI": [
+    "`consume` es la lista de rutas del hermano que este repo lee de verdad, y la LEE `tools/deriva_pines.mjs` para decidir de qué avisar. Está aquí y no allí porque el 2026-10-07 estuvo en los dos sitios y se separó: al añadir `modbus.html` al pin se actualizó el `para_que` de abajo y NO la tabla del reportero, así que con la ficha recién cambiada el vigilante dijo «nada de lo que este repo consume ha cambiado».",
+    "Esa es la avería que importa, y no es la duplicación: es que una lista incompleta NO FALLA, MIENTE. Un vigilante que filtra tiene que filtrar, porque uno que grita por todo se deja de leer — pero filtrando con una lista vieja da el «todo en orden» con autoridad, y nadie va a mirar detrás de un verde.",
+    "Las rutas que la puerta nombra explícitamente (`../<hermano>/<fichero>` en .github/workflows/arneses.yml) NO se escriben a mano aquí: `tools/prueba_pines.mjs` las DERIVA del workflow y exige que estén cubiertas. Las que no aparecen ahí —porque al arnés se le pasa el directorio raíz del hermano y es él quien abre los ficheros de dentro— sí se declaran, y van marcadas con su motivo en `consume_sin_derivar`."
+  ],
   "repos": {
     "proyectos": {
       "commit": "113c54ee937fe8c7bba1e06be88382790d3027dc",
@@ -20,6 +25,12 @@
         "tools/genera_plantas.mjs --check",
         "tools/prueba_cartera.mjs"
       ],
+      "consume": [
+        "cartera-tabla.html"
+      ],
+      "consume_sin_derivar": {
+        "cartera-tabla.html": "La puerta pasa `--desde ../proyectos` (el directorio), y es `genera_plantas.mjs` quien abre este fichero de dentro. El workflow no nombra la ruta, así que no se puede derivar de él."
+      },
       "verificado": "2026-09-09 · los dos arneses pasan contra este commit"
     },
     "cobertura-zigbee": {
@@ -33,6 +44,16 @@
         "sim/bt.js (en caliente, sin copia)",
         "tools/extrae_mapa.mjs --check"
       ],
+      "consume": [
+        "plantas_indice.json",
+        "_layout.json",
+        "js/control_core.js",
+        "modbus.html"
+      ],
+      "consume_sin_derivar": {
+        "plantas_indice.json": "La puerta pasa `--cobertura ../cobertura-zigbee` (el directorio) y es `genera_plantas.mjs` quien abre el índice de dentro.",
+        "_layout.json": "Sufijo, no ruta: son los `<planta>_layout.json` del hermano, uno por planta, de los que sale el centroide. Se comparan por `includes`, así que una ruta exacta no serviría."
+      },
       "verificado": "2026-10-07 · los CINCO arneses pasan contra este commit, clonándolo limpio y corriéndolos contra el clon (no contra el árbol de trabajo): extrae_mapa --check, carea_lazo, carea_bt, genera_plantas --check y prueba_cartera. 363 commits desde el pin anterior (22e6657d), y de lo que este repo CONSUME solo se ha movido `modbus.html`, en tres commits: d9ac2c6 (la NCU R8 entra sin echar al R7 y se ven las dos), 8683463 (el extractor del hermano tiraba filas con contenido: cinco subvariables vuelven al mapa) y c0d6322 (P4Q entra como fabricante, con su NCU revT y su propio espacio de direcciones). `js/control_core.js` NO se ha tocado — la ley del lazo es la misma, que es lo que más importaba al mover este pin. HUBO QUE MOVERLO: la ficha pasó de `var DEV={…}` literal a `var DEV=MAPAS.sunner`, así que el extractor nuevo no puede leer la ficha del pin viejo y la puerta del mapa se ponía roja contra ella. Es el caso que el procedimiento de arriba describe: el pin se mueve porque este repo NECESITA el contenido nuevo, verificado ejecutándolo, no porque el hermano haya avanzado. Los pines de `proyectos` y `SolarGPTfull` NO se mueven en el mismo commit: también han avanzado, pero nada de aquí lo pide y moverlos sin un motivo sería fijar «el último commit» a ciegas, que es justo lo que el procedimiento prohíbe."
     },
     "SolarGPTfull": {
@@ -41,6 +62,16 @@
       "lo_usan": [
         "tools/carea_resultado.mjs"
       ],
+      "consume": [
+        "solargpt/solargpt_core/tcu_compare.py",
+        "solargpt/solargpt_core/tcu.py",
+        "solargpt/solargpt_core/tracker.py"
+      ],
+      "consume_sin_derivar": {
+        "solargpt/solargpt_core/tcu_compare.py": "`carea_resultado.mjs` no está en la puerta (este hermano es privado y CI no lo alcanza), así que el workflow no nombra ninguna ruta suya. Se declara aquí a mano o el vigilante se quedaría ciego para el único hermano que ya corre sólo en local.",
+        "solargpt/solargpt_core/tcu.py": "Igual: lo importa `tcu_compare` y entra por la misma puerta ausente.",
+        "solargpt/solargpt_core/tracker.py": "Igual: de aquí salen los canónicos que el espejo refleja."
+      },
       "verificado": "2026-09-09 · 5/5 careos contra este commit · importa con numpy y pandas, sin pvlib",
       "CI_NO_LO_ALCANZA": "Este repo es PRIVADO y el GITHUB_TOKEN por defecto se limita al repositorio donde corre, así que la puerta no puede clonarlo (medido: la tirada 1 murió con «could not read Username» justo en este fetch, tras clonar los dos públicos sin problema). Por eso `carea_resultado.mjs` está en EXCLUIDOS de tools/inventario_arneses.mjs, con lo que haría falta para meterlo. El pin se conserva porque en LOCAL sí se usa, y el vigilante lo dirá como «no verificable» en cada tirada en vez de callárselo."
     }
