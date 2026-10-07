@@ -1023,9 +1023,32 @@ const fab = await pg.evaluate(async () => {
   b.fuentes = P.ncu.nFuentes;
   document.getElementById('nRsuExt').value = '0';
   document.getElementById('nRsuVirt').value = '0';
+
+  /* ── EL MULTIPUNTO, desde la página ──────────────────────────────────────────
+     Que la casilla monte las MDU de verdad, y que la ficha del seguidor DIGA
+     cuál retiene. Se mide aquí y no solo en sim/prueba.mjs porque el motor y la
+     página son dos cosas: el motor puede saber quién retiene y la ficha no
+     pintarlo, y entonces la mesa se queda quieta sin explicación — que es como
+     se lee una avería del simulador. */
+  document.getElementById('nMdu').value = '15';
+  document.getElementById('nMdu').dispatchEvent(new Event('change', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 1200));
+  const t1 = P.tcu(1);
+  b.nMdu = t1.mdus.length;
+  /* lee lo que la ficha PINTA, no lo que el motor sabe: `pintaDetalle()` escribe
+     en #kvTcu, que es el panel del seguidor seleccionado. */
+  const fichaDe = () => { pintaDetalle(); return document.getElementById('kvTcu').textContent; };
+  b.fichaSanas = fichaDe();
+  t1.mdus[6].hold = true;                      /* la MDU 7 */
+  await new Promise((r) => setTimeout(r, 600));
+  b.fichaRetiene = fichaDe();
+  t1.mdus[6].hold = false;
+
   /* se deja como estaba: el resto del banco mide sobre la planta por defecto */
+  document.getElementById('nMdu').value = '1';
   s.value = 'sunner'; s.dispatchEvent(new Event('change', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 1200));
+  b.verMduSunner = getComputedStyle(document.getElementById('notaMdu')).display !== 'none';
   return { sunner: a, p4q: b, vuelta: lee().fab };
 });
 ok(fab.sunner.fab === 'sunner' && fab.p4q.fab === 'p4q' && fab.vuelta === 'sunner',
@@ -1053,6 +1076,26 @@ ok(fab.p4q.ext === 3 && fab.p4q.virt === 1,
 ok(fab.p4q.fuentes >= 5,
    'que entran en el resumen de la NCU junto a las de radio',
    `${fab.p4q.fuentes} fuentes agregadas`);
+
+/* ── el multipunto, medido DESDE LA PÁGINA ── */
+ok(fab.p4q.nMdu === 15,
+   'la casilla MDU/TMU monta las quince de verdad',
+   `${fab.p4q.nMdu} MDU en el seguidor 1`);
+ok(!fab.p4q.verMduSunner,
+   'y la nota del multipunto se esconde con Sunner: su mapa no tiene bloque de TMU',
+   'ofrecer el número sería ofrecer algo que no se publicaría');
+ok(/15 de 15 MDU de alta/.test(fab.p4q.fichaSanas) &&
+   !/ESPERA/.test(fab.p4q.fichaSanas),
+   'con las quince sanas la ficha dice cuántas hay y no inventa una espera',
+   'la ficha trae «15 de 15 MDU de alta»');
+/* EL QUE IMPORTA: la mesa quieta con el nombre de la culpable delante. Sin esto el
+   motor podría saber quién retiene y la página no decirlo, y entonces el seguidor
+   se para sin explicación — indistinguible de una avería del simulador. */
+ok(/LA TMU ESPERA/.test(fab.p4q.fichaRetiene) &&
+   /MDU 7/.test(fab.p4q.fichaRetiene) &&
+   /hold/.test(fab.p4q.fichaRetiene),
+   'y con la MDU 7 en hold la ficha DICE quién retiene y por qué',
+   (fab.p4q.fichaRetiene.match(/Multipunto[^·]*·[^M]*MDU \d+[^)]*\)/) || ['(no sale)'])[0]);
 
 ok(rotos.length === 0, 'sin errores de JavaScript' + (rotos.length ? ': ' + rotos[0] : ''));
 
