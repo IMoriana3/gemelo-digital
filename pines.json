@@ -23,16 +23,17 @@
       "verificado": "2026-09-09 · los dos arneses pasan contra este commit"
     },
     "cobertura-zigbee": {
-      "commit": "22e6657d7ef289392ac67cbcf5849583a01e035e",
-      "para_que": "`plantas_indice.json` (emparejado layout↔cartera y huso por layout) y los `*_layout.json` de los que sale el centroide real de cada planta. Y desde 2026-09-16, `js/control_core.js`: el NÚCLEO COMPARTIDO del lazo de control, contra el que `tools/carea_lazo.mjs` carea la ley de este gemelo. No se vendoriza a propósito: una copia sería una quinta cabeza de la misma ley, que es justo lo que ese careo existe para evitar.",
+      "commit": "368ebf715519a4702dcc71e60518ea0ed4725abb",
+      "para_que": "`plantas_indice.json` (emparejado layout↔cartera y huso por layout) y los `*_layout.json` de los que sale el centroide real de cada planta. Y desde 2026-09-16, `js/control_core.js`: el NÚCLEO COMPARTIDO del lazo de control, contra el que `tools/carea_lazo.mjs` carea la ley de este gemelo. No se vendoriza a propósito: una copia sería una quinta cabeza de la misma ley, que es justo lo que ese careo existe para evitar. Y desde 2026-10-07, `modbus.html`: la FICHA MODBUS de la que `tools/extrae_mapa.mjs` genera `sim/modbus-map.js`. Tampoco se copia a mano, por lo mismo.",
       "lo_usan": [
         "tools/genera_plantas.mjs --check",
         "tools/prueba_cartera.mjs",
         "tools/carea_lazo.mjs",
         "tools/carea_bt.mjs",
-        "sim/bt.js (en caliente, sin copia)"
+        "sim/bt.js (en caliente, sin copia)",
+        "tools/extrae_mapa.mjs --check"
       ],
-      "verificado": "2026-09-16 · los TRES arneses pasan contra este commit, clonándolo y corriéndolos contra el clon (no contra el árbol de trabajo). El commit anterior era 06b00aaa, del 9-sep, y en él `js/control_core.js` NO EXISTÍA todavía: el pin precedía al núcleo compartido, y por eso el careo del lazo estaba en EXCLUIDOS del inventario. Mover el pin OBLIGÓ a regenerar `sim/cartera.js` (el hermano da de alta «Catania», que no figura en la cartera de proyectos ni al día ni en su pin: 32 → 33 plantas, declarada como FUERA DE CARTERA por el propio generador) y a que `prueba_cartera.mjs` deje de clavar recuentos absolutos que son del hermano."
+      "verificado": "2026-10-07 · los CINCO arneses pasan contra este commit, clonándolo limpio y corriéndolos contra el clon (no contra el árbol de trabajo): extrae_mapa --check, carea_lazo, carea_bt, genera_plantas --check y prueba_cartera. 363 commits desde el pin anterior (22e6657d), y de lo que este repo CONSUME solo se ha movido `modbus.html`, en tres commits: d9ac2c6 (la NCU R8 entra sin echar al R7 y se ven las dos), 8683463 (el extractor del hermano tiraba filas con contenido: cinco subvariables vuelven al mapa) y c0d6322 (P4Q entra como fabricante, con su NCU revT y su propio espacio de direcciones). `js/control_core.js` NO se ha tocado — la ley del lazo es la misma, que es lo que más importaba al mover este pin. HUBO QUE MOVERLO: la ficha pasó de `var DEV={…}` literal a `var DEV=MAPAS.sunner`, así que el extractor nuevo no puede leer la ficha del pin viejo y la puerta del mapa se ponía roja contra ella. Es el caso que el procedimiento de arriba describe: el pin se mueve porque este repo NECESITA el contenido nuevo, verificado ejecutándolo, no porque el hermano haya avanzado. Los pines de `proyectos` y `SolarGPTfull` NO se mueven en el mismo commit: también han avanzado, pero nada de aquí lo pide y moverlos sin un motivo sería fijar «el último commit» a ciegas, que es justo lo que el procedimiento prohíbe."
     },
     "SolarGPTfull": {
       "commit": "d7a55d0abb6678082df2d7546336dabc2c6ac7e2",

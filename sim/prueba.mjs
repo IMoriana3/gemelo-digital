@@ -1890,5 +1890,338 @@ console.log('\n── GRANIZO · forecast → red → TCU → posición confirma
 }
 
 
+console.log('\n── DOS FABRICANTES: la misma dirección no significa lo mismo ──');
+const MAPAS = require('./modbus-map.js').MODBUS_MAPAS;
+/* La ficha del hermano trae dos NCU, Sunner y P4Q, y avisa de que una dirección
+   dice cosas distintas en cada una. Lo que se comprueba aquí no es que el
+   simulador «soporte dos mapas»: es que NO CONTESTE el de uno con el otro
+   delante, porque ese es el fallo que no se ve mirando. */
+{
+  const S = new SIM.Planta({ nTcu: 4, nHsu: 2, nRep: 2 });
+  const Q = new SIM.Planta({ nTcu: 4, nHsu: 2, nRep: 2, fabricante: 'p4q' });
+  S.paso(1); Q.paso(1);
+
+  ok(S.cfg.fabricante === 'sunner' && Q.cfg.fabricante === 'p4q',
+     'la planta declara su fabricante, y el de por defecto es Sunner',
+     S.fab().n + ' · ' + Q.fab().n);
+  ok(S.meteo_n() === 'HSU' && Q.meteo_n() === 'RSU',
+     'la estación meteo se llama como la llama SU mapa — y es el MISMO equipo',
+     'Sunner la llama ' + S.meteo_n() + ', P4Q ' + Q.meteo_n());
+  /* La lista de equipos es la de los que tienen MAPA PROPIO en la ficha, y de P4Q
+     solo está transcrito el documento de la NCU. Ofrecer una pestaña de TCU o de
+     RSU de P4Q enseñaría el mapa de Sunner con etiqueta de P4Q, que es el error
+     que todo este bloque existe para que no ocurra. */
+  ok(S.equipos().join(',') === 'ncu,tcu,hsu' && Q.equipos().join(',') === 'ncu',
+     'la lista de equipos es la de los que tienen mapa propio en la ficha',
+     'Sunner ' + S.equipos().join(',') + ' · P4Q ' + Q.equipos().join(','));
+  ok(Q.equipos().every(e => !!MAPAS[Q.cfg.fabricante][e]) &&
+     S.equipos().every(e => !!MAPAS[S.cfg.fabricante][e]),
+     'y cada equipo que se ofrece TIENE mapa en el fichero generado',
+     'ninguna pestaña sin mapa detrás');
+  /* RSU y HSU son lo mismo, así que el bloque republicado tiene que salir IGUAL:
+     misma base, mismo paso y los mismos valores para el mismo viento. */
+  {
+    const ds = Object.keys(S.regsNCU()).map(Number).filter(d => d >= 30200 && d < 30220);
+    const dq = Object.keys(Q.regsNCU()).map(Number).filter(d => d >= 30200 && d < 30220);
+    ok(ds.length === dq.length && ds.every((d, i) => d === dq[i]),
+       'el bloque de la estación cae en las MISMAS direcciones en los dos (30200, paso 10)',
+       ds.length + ' registros por planta');
+  }
+
+  /* un fabricante que no existe no se acepta en silencio */
+  {
+    const X = new SIM.Planta({ nTcu: 1, nHsu: 1, nRep: 0, fabricante: 'acme' });
+    ok(X.cfg.fabricante === 'sunner' && (X.avisos || []).length === 1 &&
+       /acme/.test(X.avisos[0]),
+       'un fabricante desconocido se dice, no se traga cayendo a Sunner con cara de normal',
+       (X.avisos || ['(sin aviso)'])[0]);
+  }
+
+  /* ── LA 40030, QUE ES EL CASO QUE LO ENSEÑA ──
+     Sunner R8: s16 en centésimas de grado, UN registro por grupo.
+     P4Q:       f32 en radianes, DOS registros por grupo.
+     Mismo ángulo pedido, dos codificaciones, y la 40031 significa cosas
+     distintas: allí el grupo 2, aquí media palabra del grupo 1. */
+  const des16 = (v) => (v >= 32768 ? v - 65536 : v);
+  const desf32 = (a, b) => { const u = new ArrayBuffer(4), d = new DataView(u);
+                             d.setUint16(0, a); d.setUint16(2, b); return d.getFloat32(0); };
+  S.ncu.sp7Target[1] = -33; S.ncu.sp7Target[2] = 12.5;
+  Q.ncu.sp7Target[1] = -33; Q.ncu.sp7Target[2] = 12.5;
+  S.paso(1); Q.paso(1);
+  const RS = S.regsNCU(), RQ = Q.regsNCU();
+  ok(Math.abs(des16(RS[40030]) / 100 - (-33)) < 1e-9 &&
+     Math.abs(des16(RS[40031]) / 100 - 12.5) < 1e-9,
+     'en Sunner la 40030 es el grupo 1 y la 40031 el grupo 2, en centésimas de grado',
+     des16(RS[40030]) + ' y ' + des16(RS[40031]));
+  ok(Math.abs(desf32(RQ[40030], RQ[40031]) * 180 / Math.PI - (-33)) < 1e-4 &&
+     Math.abs(desf32(RQ[40032], RQ[40033]) * 180 / Math.PI - 12.5) < 1e-4,
+     'y en P4Q el grupo 1 ocupa 40030+40031 y el grupo 2 empieza en la 40032, en radianes',
+     (desf32(RQ[40030], RQ[40031]) * 180 / Math.PI).toFixed(2) + '° y ' +
+     (desf32(RQ[40032], RQ[40033]) * 180 / Math.PI).toFixed(2) + '°');
+  /* el aserto que de verdad importa: leer la 40031 de P4Q «como en Sunner» NO da
+     un valor aproximado, da basura. Si algún día esto deja de ser verdad es que
+     alguien ha aplanado los dos mapas en uno. */
+  ok(Math.abs(des16(RQ[40031]) / 100 - 12.5) > 10,
+     'leer la 40031 de P4Q con la escala de Sunner da BASURA, no una aproximación',
+     'daría ' + (des16(RQ[40031]) / 100).toFixed(2) + '° donde el grupo 2 pide 12,50°');
+  /* y escribirla se rechaza diciendo por qué, en vez de aplicar medio flotante */
+  {
+    const r = Q.escribe('ncu', 1, 40031, [1250]);
+    ok(!r.ok && /mitad baja/.test(r.avisos.join(' ')) && /grupo 1/.test(r.avisos.join(' ')),
+       'y escribir la 40031 en P4Q se rechaza nombrando de quién es esa media palabra',
+       r.avisos[0]);
+    const par = SIM.f32(-20 * Math.PI / 180, 'big');
+    const r2 = Q.escribe('ncu', 1, 40034, par);
+    ok(r2.ok && /\[3\]/.test(r2.aplicados[0]),
+       'la 40034 en P4Q es el grupo 3, y la etiqueta lo dice con el nombre de P4Q',
+       r2.aplicados[0]);
+    const r3 = S.escribe('ncu', 1, 40034, [SIM.s16(-2000)]);
+    ok(r3.ok && /g5/.test(r3.aplicados[0]),
+       'y esa MISMA dirección en Sunner es el grupo 5, con el nombre de Sunner',
+       r3.aplicados[0]);
+  }
+
+  /* ── LO QUE SOLO TIENE UNO ── */
+  const dir = (R, de, a) => Object.keys(R).map(Number).filter(d => d >= de && d < a).length;
+  ok(dir(RS, 50000, 60000) > 0 && dir(RQ, 50000, 60000) === 0,
+     'el bloque TCU completo (50000) es SOLO de Sunner: con P4Q no se publica',
+     'Sunner ' + dir(RS, 50000, 60000) + ' registros · P4Q ' + dir(RQ, 50000, 60000));
+  ok(dir(RQ, 21750, 22000) > 0 && dir(RS, 21750, 22000) === 0,
+     'y el bloque de repetidores (21750) es SOLO de P4Q',
+     'P4Q ' + dir(RQ, 21750, 22000) + ' registros · Sunner ' + dir(RS, 21750, 22000));
+  /* el reparto de equipos que va con eso: en Sunner el repetidor gasta hueco de
+     TCU; en P4Q no, porque tiene el suyo */
+  ok(dir(RS, 30500, 30500 + 6 * 22) > dir(RQ, 30500, 30500 + 6 * 22),
+     'en Sunner los repetidores ocupan hueco de TCU y en P4Q no',
+     'bloque TCU: Sunner ' + dir(RS, 30500, 30632) + ' regs (4 seguidores + 2 repetidores) · ' +
+     'P4Q ' + dir(RQ, 30500, 30632) + ' (solo los 4 seguidores)');
+  ok(Q.repetidores().length === 2 && Q.seguidores().length === 4,
+     'y los repetidores siguen siendo equipo, no un número: tienen su objeto',
+     Q.repetidores().length + ' repetidores · ' + Q.seguidores().length + ' seguidores');
+
+  /* ── lo que el mapa de P4Q trae y esto NO simula: DICHO, no fingido ── */
+  const sm = Q.sinModelar();
+  ok(Object.keys(sm).length >= 5 && Object.keys(S.sinModelar()).length === 0,
+     'P4Q declara lo que su mapa trae y el gemelo no simula, con su motivo',
+     Object.keys(sm).join(', '));
+  ok(Object.keys(sm).every(k => sm[k].length >= 80),
+     'y cada motivo tiene sustancia: un hueco sin explicar parece una avería',
+     'el más corto: ' + Math.min.apply(null, Object.keys(sm).map(k => sm[k].length)) + ' caracteres');
+  /* LO QUE DE VERDAD NO SE PUBLICA, que ya no es lo mismo que al empezar: la TMU y
+     las dos clases de RSU sí se modelan. Quedan fuera los picos del sensor local
+     (36000, historial de un mes que la simulación no tiene detrás) y la cadena de
+     módulos (SPP, 19750, producción del seguidor que este gemelo no simula). */
+  ok(dir(RQ, 36000, 36496) === 0 && dir(RQ, 19750, 21750) === 0,
+     'los bloques que siguen sin modelar van vacíos: picos del sensor local y SPP',
+     '36000 y 19750 sin un solo registro');
+  /* y la TMU sí se publica, pero `PosDif` NO: con una sola MDU valdría cero, y un
+     cero ahí se leería como una divergencia medida y nula. */
+  ok(dir(RQ, 22000, 27200) > 0 && RQ[22004] === undefined && RQ[22005] === undefined,
+     'la TMU se publica con una unidad de accionamiento, y PosDif se queda en blanco',
+     dir(RQ, 22000, 27200) + ' registros de TMU, y la 22004 (PosDif) sin valor');
+  ok(RQ[22010] === RQ[22011] && RQ[22010] !== undefined,
+     'con una sola MDU el máximo ES el mínimo, que es literalmente verdad',
+     'PosMax = PosMin = ' + RQ[22010]);
+}
+
+console.log('\n── las TRES clases de estación de P4Q, y su latencia ──');
+/* RSU propia, RSU externa y RSU virtual son el MISMO equipo midiendo lo mismo. Lo
+   que cambia es por dónde la lee la NCU, y eso tiene una consecuencia medible: la
+   propia espera su turno en la vuelta de la Zigbee; la externa va por otro bus y la
+   virtual va cableada al armario, así que ninguna de las dos espera turno. */
+{
+  const Q = new SIM.Planta({ nTcu: 6, nHsu: 1, nRep: 1, fabricante: 'p4q',
+                             nRsuExt: 2, nRsuVirt: 1, poleoS: 5 });
+  for (let i = 0; i < 40; i++) Q.paso(1);
+  ok(Q.hsus.length === 1 && Q.rsusExt.length === 2 && Q.rsusVirt.length === 1,
+     'la planta monta las tres clases, cada una en su lista',
+     '1 de radio · 2 externas · 1 virtual');
+  ok(Q.ncu.nFuentes === 4,
+     'y la NCU agrega sobre las CUATRO: de dónde venga la lectura no cambia el peor dato',
+     Q.ncu.nFuentes + ' fuentes');
+  /* una planta de Sunner no las monta aunque se pidan, y lo dice: su mapa no tiene
+     bloque donde publicarlas */
+  {
+    const S2 = new SIM.Planta({ nTcu: 2, nHsu: 1, nRep: 0, nRsuExt: 4, nRsuVirt: 2 });
+    ok(S2.rsusExt.length === 0 && S2.rsusVirt.length === 0 &&
+       /no se montan/.test((S2.avisos || []).join(' ')),
+       'y en una planta de Sunner no se montan, y se dice por qué',
+       (S2.avisos || ['(sin aviso)'])[0].slice(0, 90) + '…');
+  }
+  /* LA LATENCIA, que es el motivo de modelarlas aparte. Se sube el viento de golpe
+     y se mira CUÁNTO TARDA la NCU en tenerlo de cada clase. La virtual no espera
+     turno; la de radio sí. */
+  const R0 = Q.regsNCU();
+  Q.meteo.viento = Q.meteo.vientoObj = 30;      /* m/s, muy por encima de todo umbral */
+  let tRadio = null, tVirt = null;
+  for (let s2 = 1; s2 <= 60 && (tRadio === null || tVirt === null); s2++) {
+    Q.paso(1);
+    if (tVirt === null && Q.rsusVirt[0].visto && Q.rsusVirt[0].visto.viento > 20) tVirt = s2;
+    if (tRadio === null && Q.ncu.visto[0] && Q.ncu.visto[0].viento > 20) tRadio = s2;
+  }
+  ok(tVirt !== null && tRadio !== null && tVirt <= tRadio,
+     'la NCU tiene el dato de la virtual ANTES o a la vez que el de la de radio',
+     'virtual a los ' + tVirt + ' s · radio a los ' + tRadio + ' s (poleo de ' + Q.poleoS() + ' s)');
+  /* y la externa puede dejar de contestar, que es lo que la separa de la virtual:
+     una va por un bus a un equipo de otro, la otra está atornillada al armario */
+  {
+    const antes = Q.rsusExt[0].ultimoContacto;
+    Q.rsusExt[0].online = false;
+    for (let i = 0; i < 10; i++) Q.paso(1);
+    ok(Q.rsusExt[0].ultimoContacto === antes,
+       'una RSU externa que no contesta congela su marca de último contacto',
+       'sigue en ' + antes);
+    const antesV = Q.rsusVirt[0].ultimoContacto;
+    for (let i = 0; i < 5; i++) Q.paso(1);
+    ok(Q.rsusVirt[0].ultimoContacto > antesV,
+       'y la virtual no: está cableada, no hay enlace que perder',
+       'su marca avanza');
+    Q.rsusExt[0].online = true;
+  }
+  /* las direcciones: la externa en SU bloque, y sin extendido — el 28000 es solo de
+     las propias, porque son estaciones de otro y su documento no les da ese bloque */
+  const R = Q.regsNCU();
+  const d = (de, a) => Object.keys(R).map(Number).filter((x) => x >= de && x < a).length;
+  const desf = (a, b) => { const u = new ArrayBuffer(4), dv = new DataView(u);
+                           dv.setUint16(0, a); dv.setUint16(2, b); return dv.getFloat32(0); };
+  /* EL BLOQUE DE DIEZ ES UNO, y lo comparten las de radio y las CABLEADAS: la hoja
+     del documento se llama «RSUs + Local Sensors» y tiene un solo bloque de datos
+     (30200, índice 1..10). Lo tuve mal —la virtual publicaba solo umbrales, o sea
+     configuración sin ninguna lectura— y lo cazó el mantenedor preguntando dónde va
+     la RSU cableada. Las EXTERNAS sí van aparte, en su 30300. */
+  ok(Q.estaciones().length === 2 &&
+     Q.estaciones()[0].enlace === 'zigbee' && Q.estaciones()[1].enlace === 'local',
+     'la RSU cableada ocupa una de las DIEZ ranuras, detrás de las de radio',
+     Q.estaciones().map((h) => h.enlace).join(' · '));
+  ok(d(30200, 30300) === 16 && d(30300, 30500) === 16,
+     'así que el 30200 lleva la de radio Y la cableada, y el 30300 las dos externas',
+     d(30200, 30300) + ' registros en el de diez · ' + d(30300, 30500) + ' en el de externas');
+  ok(d(28000, 29000) === 26,
+     'y el extendido (28000) va con ese mismo índice: también lo tiene la cableada',
+     d(28000, 29000) + ' registros, de dos estaciones');
+  /* la cableada SÍ tiene lectura, que es lo que faltaba */
+  {
+    const bv = 30200 + (Q.estaciones().length - 1) * 10;
+    ok(R[bv + 3] !== undefined && desf(R[bv + 3], R[bv + 4]) > 0,
+       'la cableada publica su viento en su ranura, no solo sus umbrales',
+       desf(R[bv + 3], R[bv + 4]).toFixed(2) + ' m/s en la ' + (bv + 3));
+  }
+  /* y si entre radio y cableadas pasan de diez, se dice: el bloque no da para más */
+  {
+    const T = new SIM.Planta({ nTcu: 1, nHsu: 10, nRep: 0, fabricante: 'p4q', nRsuVirt: 2 });
+    ok(T.estaciones().length === 10 && /DIEZ ranuras/.test((T.avisos || []).join(' ')),
+       'y pasar de diez estaciones se dice, en vez de perder dos en silencio',
+       (T.avisos || ['(sin aviso)']).slice(-1)[0].slice(0, 95) + '…');
+  }
+  ok(d(29340, 29380) === 4 && d(29400, 29440) === 4 && d(29460, 29500) === 4,
+     'las externas llevan SUS tres marcas de tiempo (29340 · 29400 · 29460)',
+     'dos estaciones × dos palabras en cada una');
+
+  /* el 37000 de la RSU virtual son UMBRALES, no medidas: 46 registros de
+     configuración por unidad, que es lo que la hoja «Local Sensors» le añade
+     ADEMÁS de su ranura en el bloque de diez. */
+  ok(Math.abs(desf(R[37000], R[37001]) - SIM.K.WIND_T2) < 1e-4 &&
+     Math.abs(desf(R[37002], R[37003]) - SIM.K.WIND_T1) < 1e-4,
+     'los umbrales de la RSU virtual son los que la planta tiene EN VIGOR',
+     'entra a ' + desf(R[37000], R[37001]).toFixed(2) + ' m/s y sale a ' +
+     desf(R[37002], R[37003]).toFixed(2));
+  ok(R[37005] === SIM.K.DESTOW_MIN * 60,
+     'y el tiempo de salida es la histéresis de desabanderamiento del canon',
+     R[37005] + ' s = ' + SIM.K.DESTOW_MIN + ' min');
+  ok(R[37010] === undefined && R[37012] === undefined,
+     'los niveles 3 a 7 van EN BLANCO: el canon tiene dos umbrales, no siete',
+     'rellenarlos sería dar por configurado lo que nadie configuró');
+  /* y si alguien mueve un umbral con la planta en marcha, aquí se ve */
+  SIM.ajusta({ WIND_T1: 9 });
+  const R2 = Q.regsNCU();
+  ok(Math.abs(desf(R2[37002], R2[37003]) - 9) < 1e-4,
+     'mover un umbral con la planta andando se ve en el registro, no en una copia',
+     desf(R2[37002], R2[37003]).toFixed(2) + ' m/s');
+  SIM.restauraCanon();
+}
+
+console.log('\n── una estación sin leer todavía ES un fallo de sensor para la NCU ──');
+/* `ncu.visto` se rellena POR ÍNDICE conforme a cada estación le toca su ranura, así
+   que mientras falte alguna el array tiene HUECOS — y un hueco es un dato: la NCU no
+   tiene lectura de esa estación y pone los bits GlobalWS/GlobalSS del 30002.
+
+   Esto se pone aquí porque lo rompí: al meter las RSU externas y virtuales en la
+   agregación hice `visto.slice(0, n)`, y `slice` sobre un array con huecos devuelve
+   uno MÁS CORTO, así que la estación que faltaba dejaba de contarse. El 30002 de una
+   planta de Sunner pasaba de 384 a 0 sin que nada de Sunner hubiera cambiado, y lo
+   cazó comparar la imagen entera registro a registro — no un test. Ahora hay test. */
+{
+  const P = new SIM.Planta({ nTcu: 4, nHsu: 2, nRep: 0, poleoS: 30 });
+  for (let i = 0; i < 200; i++) P.paso(1);
+  const wTodas = P.regsNCU()[30002];
+  ok(((wTodas >> 7) & 1) === 0 && ((wTodas >> 8) & 1) === 0,
+     'con las dos estaciones leídas, los bits de fallo de sensor están apagados',
+     '30002 = ' + wTodas);
+
+  /* EL HUECO EXACTO QUE ROMPÍA EL `slice`: lectura en la ranura 0 y ninguna en la 1.
+     Ahí `visto.length` vale 1 con dos estaciones, y un `slice(0, 2)` devuelve UNO —
+     perdiendo la que falta. Se monta a mano porque el poleo normal las lee a las dos
+     en el primer paso y entonces no hay hueco que medir. */
+  P.ncu.visto = [P.ncu.visto[0]];
+  ok(P.ncu.visto.length < P.hsus.length,
+     'el array de lecturas puede ser MÁS CORTO que el número de estaciones',
+     P.ncu.visto.length + ' lecturas para ' + P.hsus.length + ' estaciones');
+  P.ncu.paso();
+  const w = P.regsNCU()[30002];
+  ok(((w >> 7) & 1) === 1 && ((w >> 8) & 1) === 1,
+     'y la estación que falta se publica como fallo de sensor (GlobalWS y GlobalSS del 30002)',
+     '30002 = ' + w + ' = 0b' + w.toString(2).padStart(16, '0'));
+}
+
+console.log('\n── el ángulo de la SP7 baja de la NCU, por grupo ──');
+/* Lo añade el R8 (40030…40039) y P4Q ya lo tenía. No es `spTilt[7]`: ese es el
+   ángulo que cada TCU lleva en SU registro (41044…41056), por equipo. Esto es una
+   consigna de GRUPO, y antes de este registro el gemelo mandaba la SP7 a 0°. */
+{
+  const P = new SIM.Planta({ nTcu: 2, nHsu: 1, nRep: 0, dia: 172, hora: 11 });
+  for (let i = 0; i < 20; i++) P.paso(1);
+  const t = P.tcu(1);
+  ok(P.cfg.spTilt[7] === 0, 'el ángulo de la SP7 del EQUIPO sigue siendo 0° por defecto',
+     'spTilt[7] = ' + P.cfg.spTilt[7] + '°');
+  P.ncu.fuerza(7, t.grupo, true);
+  for (let i = 0; i < 60; i++) P.paso(1);
+  ok(t.sp === 7 && Math.abs(t.objetivo) < 1e-9,
+     'sin ángulo en la NCU, la SP7 va al del equipo (como antes de que el registro existiera)',
+     'objetivo ' + t.objetivo.toFixed(2) + '°');
+  P.ncu.sp7Target[t.grupo] = -33;
+  for (let i = 0; i < 200; i++) P.paso(1);
+  ok(Math.abs(t.objetivo - (-33)) < 1e-9 && Math.abs(t.anguloReal - (-33)) < 0.5,
+     'con la 40030 puesta, el eje va DE VERDAD al ángulo que manda la NCU',
+     'objetivo ' + t.objetivo.toFixed(2) + '° · eje ' + t.anguloReal.toFixed(2) + '°');
+  /* y es de GRUPO: el equipo de otro grupo no se mueve con él */
+  {
+    const G = new SIM.Planta({ nTcu: 4, nHsu: 1, nRep: 0, grupos: 2, dia: 172, hora: 11 });
+    for (let i = 0; i < 20; i++) G.paso(1);
+    const a = G.seguidores()[0], b = G.seguidores().find(x => x.grupo !== a.grupo);
+    ok(!!b, 'hay equipos en dos grupos para poder medirlo', 'grupos ' + a.grupo + ' y ' + b.grupo);
+    G.ncu.fuerza(7, a.grupo, true); G.ncu.fuerza(7, b.grupo, true);
+    G.ncu.sp7Target[a.grupo] = -40;
+    for (let i = 0; i < 200; i++) G.paso(1);
+    ok(Math.abs(a.objetivo - (-40)) < 1e-9 && Math.abs(b.objetivo) < 1e-9,
+       'y el ángulo es del GRUPO: el otro grupo sigue con el de su equipo',
+       'grupo ' + a.grupo + ' a ' + a.objetivo.toFixed(1) + '° · grupo ' + b.grupo +
+       ' a ' + b.objetivo.toFixed(1) + '°');
+  }
+  /* 0x7FFF lo desactiva, que es lo que dice el documento */
+  P.escribe('ncu', 1, 40030, [0x7FFF]);
+  for (let i = 0; i < 200; i++) P.paso(1);
+  ok(P.ncu.sp7Target[1] === null && Math.abs(t.objetivo) < 1e-9,
+     'escribir 0x7FFF lo desactiva y vuelve a mandar el ángulo del equipo',
+     'objetivo ' + t.objetivo.toFixed(2) + '°');
+  /* y 0 NO es «sin poner»: 0° es horizontal, un ángulo perfectamente válido */
+  P.escribe('ncu', 1, 40030, [0]);
+  ok(P.ncu.sp7Target[1] === 0,
+     'y 0 no es «sin poner»: es horizontal, un ángulo válido',
+     'sp7Target = ' + P.ncu.sp7Target[1]);
+  ok(P.regsNCU()[40031] === undefined,
+     'un grupo sin ángulo no publica un cero: el hueco se lee como hueco',
+     'la 40031 (grupo 2, sin poner) no está en la imagen');
+}
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);
