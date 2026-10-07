@@ -532,7 +532,7 @@ Campo3D.prototype.construye = function (P) {
   this.ajustaSombra();
 
   /* La niebla empieza PASADO el campo. Puesta antes, lavaba de gris la mitad de lejos
-     de la planta y parecía que faltaba render, no que hubiera atmósfera. Y el suelo se
+     de la planta y parecía que faltaban render, no que hubiera atmósfera. Y el suelo se
      estira más allá de donde la niebla ya lo ha borrado, así no se ve dónde acaba. */
   this.scene.fog.near = diag * 2.0;
   this.scene.fog.far = diag * 9;
@@ -968,3 +968,20 @@ function orbita(dom, cam, blanco, r0, rmin, rmax, T, alMover) {
 if (typeof window !== 'undefined') window.Campo3D = Campo3D;
 if (typeof module !== 'undefined') module.exports = Campo3D;
 })(this);
+
+/* Ayuda opcional de simulador.html: se carga desde su entrada visual, no desde
+   el motor ni desde los módulos de física. Contenido y comportamiento viven en
+   guia.js. No requiere abrir el Campo 3D ni crear un contexto WebGL. */
+(function () {
+  'use strict';
+  if (typeof document === 'undefined') return;
+  if (!document.getElementById('hailPanel') || !document.querySelector('.app > nav') ||
+      document.getElementById('simGuiaScript')) return;
+  var source = document.currentScript;
+  if (!source || !source.src) return;
+  var script = document.createElement('script');
+  script.id = 'simGuiaScript';
+  script.src = new URL('guia.js?v=1', source.src).href;
+  script.async = true;
+  document.head.appendChild(script);
+})();
