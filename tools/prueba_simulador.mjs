@@ -983,7 +983,19 @@ ok(E.tipos.includes('av'), `y el añadido es del tipo pedido (${E.tipos.join(', 
    La ficha del hermano trae dos NCU y avisa de que una misma dirección significa
    cosas distintas en cada una. Lo que se mide aquí es que la página NO sirva el
    mapa de uno con el otro elegido, y que las pestañas de equipo salgan del
-   fabricante en vez de estar tecleadas en el HTML — que es como estaban. */
+   fabricante en vez de estar tecleadas en el HTML — que es como estaban.
+
+   Y SE MIDE SOBRE LA PLANTA PEQUEÑA, que es una cuenta y no una preferencia:
+   cambiar de fabricante REHACE la planta y el campo 3D, y este bloque lo hace tres
+   veces. Con la que queda elegida —751 seguidores, render por software— eso costó 6
+   minutos de CI (`prueba_simulador` pasó de 8:21 a 14:32) para medir un selector,
+   una etiqueta y un cartel, que no tienen nada que ver con el campo. */
+await pg.evaluate(() => {
+  const s = document.getElementById('loc');
+  const i = [...s.options].findIndex((o) => /Gorraiz/.test(o.textContent));
+  if (i >= 0) { s.selectedIndex = i; s.dispatchEvent(new Event('change', { bubbles: true })); }
+});
+await pg.waitForTimeout(1200);
 const fab = await pg.evaluate(async () => {
   const lee = () => { vePestaña('modbus'); pintaModbus();
     const cuerpo = document.getElementById('mbCuerpo').textContent;
@@ -1000,12 +1012,13 @@ const fab = await pg.evaluate(async () => {
   s.value = 'p4q'; s.dispatchEvent(new Event('change', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 1200));
   const b = lee(); b.verRsu = visRsu();
-  /* y que las casillas MONTEN las estaciones: tres externas y una virtual */
+  /* y que las casillas MONTEN las estaciones: tres externas y una virtual. Se
+     escriben las dos y se avisa UNA vez: dos avisos son dos reconstrucciones de la
+     planta para el mismo cambio. */
   document.getElementById('nRsuExt').value = '3';
-  document.getElementById('nRsuExt').dispatchEvent(new Event('change', { bubbles: true }));
   document.getElementById('nRsuVirt').value = '1';
   document.getElementById('nRsuVirt').dispatchEvent(new Event('change', { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 1500));
+  await new Promise((r) => setTimeout(r, 1200));
   b.ext = P.rsusExt.length; b.virt = P.rsusVirt.length;
   b.fuentes = P.ncu.nFuentes;
   document.getElementById('nRsuExt').value = '0';
