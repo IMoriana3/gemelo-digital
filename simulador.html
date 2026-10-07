@@ -288,9 +288,17 @@
           <label>Emplazamiento</label>
           <select id="loc"></select>
         </div>
+        <!-- EL FABRICANTE DE LA NCU. No es una vista del mapa: decide qué equipos
+             tiene la planta y en qué direcciones se publican. La estación meteo se
+             llama HSU o RSU según quién la documente, y es el MISMO equipo. -->
+        <div class="fld"><label>Fabricante de la NCU</label>
+          <select id="fabricante">
+            <option value="sunner" selected>Sunner · NCU R7/R8 · estación HSU</option>
+            <option value="p4q">P4Q · AUX1-S20015 revT · estación RSU</option>
+          </select></div>
         <div class="row4">
           <div class="fld"><label>TCU</label><input type="number" id="nTcu" value="24" min="1" max="6000"></div>
-          <div class="fld"><label>HSU</label><input type="number" id="nHsu" value="2" min="1" max="10"></div>
+          <div class="fld"><label><span id="labMeteo">HSU</span></label><input type="number" id="nHsu" value="2" min="1" max="10"></div>
           <div class="fld"><label>GW</label><input type="number" id="nGw" value="2" min="1" max="8"></div>
           <div class="fld"><label>Repet.</label><input type="number" id="nRep" value="1" min="0" max="20"></div>
         </div>
@@ -823,6 +831,7 @@ function construye() {
     nHsu: Math.max(1, +$('nHsu').value || 2),
     nGw: Math.max(1, +$('nGw').value || 2),
     nRep: Math.max(0, +$('nRep').value || 0),
+    fabricante: $('fabricante').value,
     grupos: +$('nGrup').value || 4,
     granizo: {
       leadMin: Math.max(0, +$('hailLead').value || 0),
@@ -868,7 +877,9 @@ function construye() {
   var pf = SIM.perfilDe($('perfil').value);
   $('perfilNota').innerHTML = NOTA_TIPO[pf.tipo] + (pf.heated ? ' Versión <b>LT calefactada</b>: bajo 0 °C gasta 1 + 0,15·|T| W y desbloquea la carga.' : '');
   sel = 1; traza = []; previos = {}; destellos = {};
-  pintaGrupos(); pintaUnidades(); pintaTodo();
+  /* el orden importa: las pestañas de equipo las pone el fabricante de la planta,
+     y las unidades dependen de qué pestaña queda elegida */
+  pintaGrupos(); pintaEquipos(); pintaUnidades(); pintaTodo();
 }
 /* La estrategia se aplica EN CALIENTE: cambiar el techo o el SOC crítico a mitad de
    una simulación es justo lo que se quiere poder hacer para ver el efecto, sin tener
@@ -1088,9 +1099,19 @@ function pintaFijados(dev) {
     '<table class="mb"><thead><tr><th>Dirección</th><th>Registro</th><th>Crudo</th><th>Valor</th></tr></thead>' +
     '<tbody>' + filas + '</tbody></table></div>';
 }
+/* EL MAPA DEL FABRICANTE DE ESTA PLANTA, y no «el mapa». La ficha trae dos NCU y
+   avisa de que una misma dirección significa cosas distintas en cada una: servir el
+   de Sunner con una planta de P4Q no sería aproximar, sería contestar otra cosa.
+   `MODBUS_MAP` sigue existiendo como atajo al de por defecto, pero el visor pasa
+   por aquí. */
+function mapaFab(dev) {
+  var fab = (P && P.cfg && P.cfg.fabricante) || (typeof MODBUS_FAB_DEFECTO !== 'undefined' ? MODBUS_FAB_DEFECTO : 'sunner');
+  var M = (typeof MODBUS_MAPAS !== 'undefined' && MODBUS_MAPAS[fab]) || MODBUS_MAP;
+  return dev ? M[dev] : M;
+}
 /* busca la definición de un registro en el mapa, mire uno la sección que mire */
 function buscaDef(dev, dir) {
-  var M = MODBUS_MAP[dev]; if (!M) return null;
+  var M = mapaFab(dev); if (!M) return null;
   for (var i = 0; i < M.secs.length; i++) {
     var f = M.secs[i].f;
     for (var j = 0; j < f.length; j++) if (f[j][0] === dir) return f[j];
@@ -2196,12 +2217,27 @@ function pintaHsu() {
 }
 
 /* ═══════════════════ mapa Modbus en vivo ═══════════════════ */
+/* LAS PESTAÑAS DE EQUIPO LAS PONE EL FABRICANTE, no el HTML. De Sunner hay mapa
+   propio de NCU, TCU y HSU; de P4Q solo de su NCU, así que allí la estación y el
+   seguidor se ven en los bloques que la NCU republica —que es como los lee el
+   SCADA— y no hay pestaña que ofrecer. Una pestaña sin mapa detrás enseñaría el de
+   Sunner con etiqueta de P4Q, que es el error del que avisa la propia ficha. */
+function pintaEquipos() {
+  var sel = $('mbDev'), previo = sel.value, eqs = P.equipos(), M = mapaFab(), i;
+  sel.innerHTML = '';
+  for (i = 0; i < eqs.length; i++) {
+    var d = M[eqs[i]]; if (!d) continue;
+    sel.add(new Option(d.tab + ' · ' + d.eti, eqs[i]));
+  }
+  sel.value = (eqs.indexOf(previo) >= 0 && M[previo]) ? previo : eqs[0];
+  $('labMeteo').textContent = P.meteo_n();
+}
 function pintaUnidades() {
   var dev = $('mbDev').value, u = $('mbUnidad'), i;
   u.innerHTML = '';
-  if (dev === 'hsu') { for (i = 0; i < P.hsus.length; i++) u.add(new Option('HSU ' + P.hsus[i].id, String(P.hsus[i].id))); }
+  if (dev === 'hsu' || dev === 'rsu') { for (i = 0; i < P.hsus.length; i++) u.add(new Option(P.meteo_n() + ' ' + P.hsus[i].id, String(P.hsus[i].id))); }
   else { for (i = 0; i < P.tcus.length; i++) u.add(new Option((P.tcus[i].repetidor ? 'Repetidor ' : 'TCU ') + P.tcus[i].id, String(P.tcus[i].id))); }
-  u.value = String(dev === 'hsu' ? Math.min(sel, P.hsus.length) : sel);
+  u.value = String((dev === 'hsu' || dev === 'rsu') ? Math.min(sel, P.hsus.length) : sel);
   u.disabled = false;
 }
 /* Imagen de registros que toca según el dispositivo elegido. Para la NCU es la suya
@@ -2213,7 +2249,7 @@ function imagenes(dev) {
   var uni = +$('mbUnidad').value || 1;
   var img = { propia: {}, ncu: P.regsNCU(), unidad: uni };
   if (dev === 'tcu') { var t = P.tcu(uni); img.propia = t ? P.regsTCU(t) : {}; }
-  else if (dev === 'hsu') { var h = P.hsus[uni - 1]; img.propia = h ? P.regsHSU(h) : {}; }
+  else if (dev === 'hsu' || dev === 'rsu') { var h = P.hsus[uni - 1]; img.propia = h ? P.regsHSU(h) : {}; }
   else img.propia = img.ncu;
   imgActual = img.propia;
   return img;
@@ -2339,8 +2375,29 @@ function pintaBits(r, d) {
     titulo: tit.join('\n')
   };
 }
+/* DE QUIÉN ES ESTE MAPA, Y QUÉ NO SE SIMULA DE ÉL.
+   Las dos mitades van juntas a propósito. La primera, porque la ficha avisa de que
+   una misma dirección significa cosas distintas en cada fabricante: un visor que no
+   diga de quién lee invita justo a ese error. La segunda, porque un registro en
+   blanco sin explicación parece una avería del simulador, y con el motivo al lado
+   es lo que es — un hueco declarado. */
+function cartelFabricante() {
+  var f = P.fab(), sm = P.sinModelar(), ks = Object.keys(sm), i, li = '';
+  for (i = 0; i < ks.length; i++) li += '<li>' + sm[ks[i]] + '</li>';
+  return '<div class="card secmb"><h3>Mapa de ' + f.n +
+    '<span class="rw">' + f.eti + '</span></h3>' +
+    '<div class="sn">La estación meteorológica de este mapa se llama <b>' + f.meteo +
+    '</b> (' + f.meteoEti + '); en el otro fabricante es el MISMO equipo con el otro ' +
+    'nombre. <b>Una misma dirección no significa lo mismo en los dos</b>: la 40030 es ' +
+    'el ángulo de la posición segura 7 del grupo 1 en ambos, pero en Sunner R8 es un ' +
+    'entero en centésimas de grado (un registro por grupo) y en P4Q un flotante en ' +
+    'radianes (dos registros por grupo).</div>' +
+    (li ? '<div class="sn" style="margin-top:.5rem"><b>De este mapa NO se simula:</b>' +
+          '<ul style="margin:.35rem 0 0 1rem;padding:0">' + li + '</ul></div>' : '') +
+    '</div>';
+}
 function pintaModbus() {
-  var dev = $('mbDev').value, D = MODBUS_MAP[dev], img = imagenes(dev);
+  var dev = $('mbDev').value, D = mapaFab(dev), img = imagenes(dev);
   var filtro = ($('mbFiltro').value || '').trim().toLowerCase();
   var soloSim = $('mbSoloSim').checked, soloAct = $('mbSoloAct').checked;
   var uni = img.unidad, html = '', total = 0, sim = 0;
@@ -2398,7 +2455,8 @@ function pintaModbus() {
       '<tbody>' + filas + '</tbody></table></div>';
   }
   IMG_PIN = img;
-  $('mbCuerpo').innerHTML = pintaFijados(dev) + (html || '<div class="card" style="text-align:center;color:var(--tx3)">Nada casa con el filtro.</div>');
+  $('mbCuerpo').innerHTML = pintaFijados(dev) + cartelFabricante() +
+    (html || '<div class="card" style="text-align:center;color:var(--tx3)">Nada casa con el filtro.</div>');
   Array.prototype.forEach.call($('mbCuerpo').querySelectorAll('.pin'), function (el) {
     el.onclick = function (e) {
       e.stopPropagation();
@@ -2411,7 +2469,7 @@ function pintaModbus() {
   $('mbCuenta').textContent = sim + ' simulados de ' + total + ' del documento';
 }
 function exportaCsv() {
-  var dev = $('mbDev').value, D = MODBUS_MAP[dev], img = imagenes(dev), uni = img.unidad;
+  var dev = $('mbDev').value, D = mapaFab(dev), img = imagenes(dev), uni = img.unidad;
   var idx = dev === 'hsu' ? uni : (function () { for (var i = 0; i < P.tcus.length; i++) if (P.tcus[i].id === uni) return i + 1; return 1; })();
   var l = ['seccion;direccion;registro;tipo;unidad;crudo;valor'];
   for (var si = 0; si < D.secs.length; si++) {
@@ -2823,6 +2881,8 @@ Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
   };
 });
 $('mbDev').onchange = function () { pintaUnidades(); pintaEscritura(); previos = {}; pintaTodo(); };
+/* Cambiar de fabricante cambia la planta: no es una vista, así que se rehace. */
+$('fabricante').onchange = function () { construye(); if (CAMPO) CAMPO.construye(P); };
 $('mbEscribirBtn').onclick = function () {
   var c = $('mbEsc'); c.style.display = (c.style.display === 'none') ? '' : 'none';
   if (c.style.display === '') pintaEscritura();

@@ -32,10 +32,31 @@
      7. AUTO         — seguimiento solar con backtracking (modo 2); de noche, a
                        la posición nocturna. En modo 0 (OFF) el TCU no se mueve.
 
+   DOS FABRICANTES, Y LA PLANTA DECLARA EL SUYO
+   --------------------------------------------
+   La NCU de una planta es de Sunner o de P4Q, y eso no es una vista: cambia QUÉ
+   EQUIPOS EXISTEN y en qué direcciones se publican.
+
+     Sunner   NCU (R7 y R8) · TCU · HSU («Hub Sensor Unit», la estación meteo).
+              Los repetidores ocupan hueco de TCU, porque su mapa no les da sitio
+              propio.
+     P4Q      NCU revT (AUX1-S20015) · TCU · RSU. La RSU es la MISMA estación que
+              la HSU de Sunner con otro nombre —lo dice la ficha—, pero además hay
+              RSU EXTERNAS, RSU VIRTUALES, TMU (con sus MDU) y REPETIDORES con su
+              propio bloque de direcciones.
+
+   Y la misma dirección NO significa lo mismo en los dos. El caso que lo enseña:
+   la 40030 es el ángulo de la posición segura 7 del grupo 1 en ambos mapas, pero
+   en Sunner R8 es un entero en CENTÉSIMAS DE GRADO y en P4Q un flotante en
+   RADIANES sobre dos registros. Por eso `regsNCU()` reparte según el fabricante en
+   vez de servir «el mapa»: servir el de Sunner con una NCU de P4Q delante no es
+   una aproximación, es una respuesta falsa.
+
    Procedencia de los números
    --------------------------
-   · Mapa y bits: sim/modbus-map.js (generado de la ficha de cobertura-zigbee,
-     que transcribe NCU_Modbus_Map_R7 · SUNNER_TCU_ModbusMap_v6 · HSU R23).
+   · Mapa y bits: sim/modbus-map.js (generado de la ficha de cobertura-zigbee, que
+     transcribe NCU_Modbus_Map R7 y R8 · SUNNER_TCU_ModbusMap_v6 · HSU R23 ·
+     AUX1-S20015_revT de P4Q).
    · Escalas de los registros propios de la TCU: las que usa la TCU Toolbox
      (scada/tools/tcu-toolbox) contra equipo real — tilt ×10, ángulos solares
      ×100, temperaturas ×10, tensiones mV, corrientes mA, reloj en BCD.
@@ -355,7 +376,75 @@ var CRIT_TXT = ['Seguimiento', 'Backtracking', 'Manual', 'Posición de seguridad
                 'Límite de tilt', 'Noche', 'Restricción de batería', 'Motor inhibido',
                 'Cielo cubierto', 'Hail stow (capa del gemelo)', 'NO MODELADO · conflicto de protecciones'];
 var FUENTE_SP = { NINGUNA: 0, HSU: 1, NCU: 2, LOCAL: 3 };
-var FUENTE_TXT = ['—', 'meteo de la HSU', 'forzado de la NCU', 'decisión local'];
+/* El nombre de la estación meteo depende del fabricante (HSU en Sunner, RSU en
+   P4Q). Esta lista va en neutro y quien tenga planta delante usa
+   `P.fuenteTxt(i)`, que pone el nombre que toca. */
+var FUENTE_TXT = ['—', 'meteo de la estación', 'forzado de la NCU', 'decisión local'];
+
+/* ═══════════════════ FABRICANTES ════════════════════════════════════════════
+   Lo que cambia de uno a otro no es la física —el seguidor gira igual— sino QUÉ
+   EQUIPOS HAY y DÓNDE se publica cada uno. Esta tabla es la única que lo declara,
+   y de ella cuelgan las vistas Modbus, las etiquetas y qué bloques tienen sentido.
+
+   `meteo`      cómo se llama la estación meteorológica en ese mapa. Es el MISMO
+                equipo: la ficha lo dice sin rodeos — «aquí la estación
+                meteorológica se llama RSU (la HSU de Sunner)». Se traduce el
+                nombre, no se duplica el modelo.
+   `repSuyo`    si los repetidores tienen bloque propio (P4Q, base 21750) o si
+                ocupan hueco de TCU por no tener sitio en el mapa (Sunner).
+   `equipos`    de qué equipos hay MAPA PROPIO en la ficha, que es lo único que el
+                visor de registros puede ofrecer sin mentir. Y aquí los dos NO van
+                igual: de Sunner está transcrito el documento de la NCU, el del TCU
+                y el de la HSU; de P4Q, solo el de la NCU. Así que en una planta de
+                P4Q la estación y el seguidor se ven POR LA NCU —en los bloques que
+                republica, que es además como los lee el SCADA— y no hay pestaña
+                propia que ofrecer. Poner una mostraría el mapa de Sunner con una
+                etiqueta de P4Q, que es exactamente el error que todo esto evita.
+   `sinModelar` lo que su mapa trae y este simulador NO simula, con el motivo.
+                Va aquí y no en un comentario perdido porque el visor lo ENSEÑA:
+                un registro en blanco con su razón al lado es honesto; uno en
+                blanco sin explicación parece una avería del simulador. */
+var FABRICANTES = {
+  sunner: {
+    n: 'Sunner', eti: 'NCU_Modbus_Map R7/R8', meteo: 'HSU', meteoEti: 'Hub Sensor Unit',
+    repSuyo: false,
+    equipos: ['ncu', 'tcu', 'hsu'],
+    sinModelar: {}
+  },
+  p4q: {
+    n: 'P4Q', eti: 'AUX1-S20015 revT', meteo: 'RSU', meteoEti: 'Remote Sensor Unit',
+    repSuyo: true,
+    /* solo la NCU: de P4Q está transcrito su documento de NCU y nada más. La RSU y
+       el TCU se ven en los bloques que la NCU republica. */
+    equipos: ['ncu'],
+    sinModelar: {
+      mapaPropio: 'Mapa propio del TCU y de la RSU de P4Q: la ficha del hermano '
+                + 'transcribe el documento de la NCU (AUX1-S20015 revT) y de momento '
+                + 'ninguno de los otros dos. La RSU y el seguidor se ven aquí por los '
+                + 'bloques que la NCU republica —que es como los lee el SCADA—, y no '
+                + 'hay pestaña propia porque no hay mapa que poner en ella.',
+      tmu: 'TMU y sus MDU (bloque 22000): un seguidor de P4Q con accionamiento '
+         + 'multipunto. Este simulador mueve UN eje por TCU, así que no tiene de '
+         + 'dónde sacar la posición de cada MDU ni su desvío entre ellas (PosDif). '
+         + 'Inventarlo sería dar un número de reparto de carga que nadie ha medido.',
+      rsuExt: 'RSU externas (bloque 30300, hasta 20): estaciones de otra planta o '
+            + 'de otro fabricante que la NCU lee por Modbus. No hay ninguna '
+            + 'configurada en la cartera, y fabricar una sería inventarse una '
+            + 'fuente de meteo que no existe.',
+      rsuVirt: 'RSU virtuales (bloque 37000, 2 unidades): sensor de viento local + '
+             + 'sensor de nieve local CABLEADOS A LA PROPIA NCU, no por radio. El '
+             + 'gemelo mide el viento en las estaciones y lo reparte por poleo; no '
+             + 'modela sensores colgados del armario.',
+      picos: 'Picos de viento del sensor local por día (bloque 36000): es el '
+           + 'historial del último MES, y la simulación arranca en el día que se '
+           + 'le pide. Sin mes detrás, serían 31 días inventados.',
+      spp: 'Cadena de módulos del TCU (SPP, bloque 19750): tensión y corriente de '
+         + 'string, nuevas en revT. El gemelo simula el panel del TCU y su batería, '
+         + 'no la cadena de producción del seguidor.'
+    }
+  }
+};
+function fabDe(cfg) { return FABRICANTES[cfg && cfg.fabricante] ? cfg.fabricante : 'sunner'; }
 
 /* ═══════════════════ utilidades ═══════════════════ */
 function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
@@ -463,6 +552,16 @@ function f32(v, wo) {
   dv.setFloat32(0, v, false);
   var hi = dv.getUint16(0), lo = dv.getUint16(2);
   return wo === 'little' ? [lo, hi] : [hi, lo];
+}
+/* ── los inversos, para LEER lo que alguien ha escrito ──
+   Hacen falta desde que un registro de escritura trae un ángulo: hasta ahora todo
+   lo escribible era un mapa de bits o un entero sin signo, y se usaba crudo. */
+function s16inv(v) { v = v & 0xFFFF; return v >= 32768 ? v - 65536 : v; }
+function desF32(a, b, wo) {
+  var p = wo === 'little' ? [b, a] : [a, b];
+  var bu = new ArrayBuffer(4), dv = new DataView(bu);
+  dv.setUint16(0, p[0] & 0xFFFF); dv.setUint16(2, p[1] & 0xFFFF);
+  return dv.getFloat32(0, false);
 }
 function kx10(c) { return u16((c + 273.15) * 10); }      /* temperatura en K×10 */
 function bcd(n) { n = Math.round(n) % 100; return ((Math.floor(n / 10) << 4) | (n % 10)) & 0xFF; }
@@ -781,6 +880,9 @@ TCU.prototype.poleaNcu = function () {
     nieve: n.alarmaNieve,
     limpieza: n.limpieza[this.grupo - 1],
     forzado: n.forzadoDe(this.grupo),
+    /* el ángulo de la SP7 de SU grupo, si la NCU lo ha puesto. Baja por el MISMO
+       poleo que el forzado: el equipo no lo sabe antes de que le toque turno. */
+    sp7: n.sp7Target[this.grupo] != null ? n.sp7Target[this.grupo] : null,
     hail: hg,
     t: ahora
   };
@@ -882,6 +984,10 @@ TCU.prototype.entradas = function () {
     /* el forzado puede venir de la NCU (a todo el grupo) o del propio equipo, si
        alguien le ha escrito 40000 con 11..17. Gana el local, que es el más cercano. */
     forzado: this.forzadoLocal || d.forzado,
+    /* el ángulo de la SP7 de su grupo, si la NCU lo ha puesto (40030…). No tiene
+       versión local: el registro es de grupo y vive en la NCU, así que aunque el
+       forzado sea local el ángulo sigue siendo el del grupo. */
+    sp7: d.sp7 != null ? d.sp7 : null,
     comNcu: this.comDisponible()
   };
 };
@@ -1049,7 +1155,15 @@ TCU.prototype.decide = function (dt, ang) {
   /* 5 — forzados genéricos (SP2/5/6/7) */
   } else if (e.forzado) {
     sp = e.forzado; fuente = FUENTE_SP.NCU;
-    obj = cfg.spTilt[e.forzado]; crit = CRIT.SEGURIDAD;
+    /* LA SP7 PUEDE TRAER SU ÁNGULO DESDE LA NCU, por grupo. Es lo que añade el R8
+       (40030…40039) y lo que P4Q ya tenía, y no es lo mismo que `spTilt[7]`: ese es
+       el ángulo que cada TCU lleva en SU registro (41044…41056). Si la NCU no lo ha
+       puesto, manda el del equipo — que es exactamente como se comportaba esto antes
+       de que el registro existiera, y por eso el defecto sigue siendo 0°.
+       Solo la SP7: las demás no tienen registro de ángulo por grupo en ningún mapa. */
+    var spNcu = (e.forzado === SP.G7) ? e.sp7 : null;
+    obj = (spNcu != null) ? spNcu : cfg.spTilt[e.forzado];
+    crit = CRIT.SEGURIDAD;
 
   /* 6 — BATERÍA. Dos cosas distintas que caen en el mismo escalón:
      · la ESTRATEGIA (SOC < crítico) manda el seguidor a defensa y lo cuenta como
@@ -1630,6 +1744,15 @@ function NCU(planta) {
   this.vientoInvertido = false;
   this.hail = planta.granizo ? planta.granizo.snapshot() : null;
   this.timeoutPosicion = 3600;             /* 40080: vuelta a automático (s) */
+  /* ÁNGULO DE LA SP7, POR GRUPO, PUESTO DESDE LA NCU. Entra con el R8 (40030…40039)
+     y P4Q lo tiene también (40030, pero f32 en radianes y dos registros por grupo).
+     Es OTRA COSA que `spTilt[7]`: ese es el ángulo que lleva cada TCU en su propio
+     registro (41044…41056), por equipo; esto es una consigna de GRUPO que baja de la
+     NCU. `null` = sin poner, y entonces manda el del equipo — que es como se
+     comportaba el gemelo antes de que el registro existiera. El R8 usa 0x7FFF para
+     decir «desactivado», y eso se traduce a null al escribirlo. */
+  this.sp7Target = {};
+  for (var g = 1; g <= 10; g++) this.sp7Target[g] = null;
   /* LO QUE LA NCU HA LEÍDO de cada HSU, que no es lo que la HSU está midiendo: una
      copia por estación, con la marca de cuándo se sacó. Ver `NCU.prototype.paso`. */
   this.visto = [];
@@ -1906,8 +2029,18 @@ function Planta(cfg) {
     defensaTilt: cfg.defensaTilt != null ? cfg.defensaTilt : 55,
     /* tilt de cada posición de seguridad (registros 41044…41056 de la TCU) */
     spTilt: cfg.spTilt || [0, 55, 0, 55, 0, 0, 0, 0],
+    /* EL FABRICANTE DE LA NCU DE ESTA PLANTA. No es una vista: decide qué equipos
+       existen y en qué direcciones se publican. Un valor desconocido NO se acepta
+       en silencio cayendo a Sunner —eso serviría el mapa equivocado con cara de
+       normalidad—: se dice y se cae al de por defecto. */
+    fabricante: fabDe(cfg),
     wordOrder: cfg.wordOrder || 'big'
   };
+  if (cfg.fabricante && !FABRICANTES[cfg.fabricante]) {
+    this.avisos = (this.avisos || []).concat(
+      'fabricante «' + cfg.fabricante + '» desconocido: se usa ' + this.cfg.fabricante +
+      '. Los que hay son ' + Object.keys(FABRICANTES).join(' y ') + '.');
+  }
   this.loc = cfg.loc || { n: 'Gorraiz', lat: 42.81, lon: -1.58, tz: 1, dst: true };
   this.t = { dia: cfg.dia || 172, hora: cfg.hora != null ? cfg.hora : 9, epoch: Math.floor(Date.now() / 1000) };
   this.tResto = 0;
@@ -2050,6 +2183,29 @@ Planta.prototype.tcu = function (id) {
 Planta.prototype.seguidores = function () {
   return this.tcus.filter(function (t) { return !t.repetidor; });
 };
+Planta.prototype.repetidores = function () {
+  return this.tcus.filter(function (t) { return t.repetidor; });
+};
+
+/* ── el fabricante de esta planta, y lo que de él cuelga ──
+   Un solo sitio donde preguntarlo, para que ni el visor ni el motor tengan que
+   saberse la tabla. `meteo()` da el nombre de la estación —HSU o RSU— porque es
+   el MISMO equipo con dos nombres y la interfaz tiene que llamarlo como su mapa. */
+Planta.prototype.fab = function () { return FABRICANTES[this.cfg.fabricante]; };
+Planta.prototype.meteo_n = function () { return this.fab().meteo; };
+/* El texto de la fuente de una posición segura, con el nombre de estación que
+   toca: «meteo de la HSU» o «meteo de la RSU». */
+Planta.prototype.fuenteTxt = function (i) {
+  return i === FUENTE_SP.HSU ? 'meteo de la ' + this.meteo_n() : FUENTE_TXT[i];
+};
+/* Los equipos que ESTE fabricante direcciona, para que la interfaz ofrezca eso y
+   ni uno más. El id del equipo de meteo es 'hsu' o 'rsu' según el mapa, y el
+   simulador los sirve con los mismos objetos: `this.hsus`. */
+Planta.prototype.equipos = function () { return this.fab().equipos.slice(); };
+/* Lo que el mapa del fabricante trae y este simulador NO simula, con su motivo.
+   Que el visor lo pueda ENSEÑAR es la diferencia entre un hueco explicado y una
+   avería aparente. */
+Planta.prototype.sinModelar = function () { return this.fab().sinModelar; };
 /* Estado operativo del hail stow. "Protegido por telemetría" y "físicamente
    protegido" son deliberadamente dos contadores: un inclinómetro descalibrado
    puede dar el primero sin dar el segundo. */
@@ -2257,8 +2413,18 @@ Planta.prototype.regsHSU = function (h) {
   return R;
 };
 
-/* -- NCU: sus registros propios + la caché donde republica TCUs y HSUs -- */
+/* -- NCU: sus registros propios + la caché donde republica TCUs y estaciones --
+
+   REPARTE POR FABRICANTE, y no por elegancia: la misma dirección significa cosas
+   distintas en cada mapa. La 40030 es el ángulo de la posición segura 7 del grupo
+   1 en los dos, pero en Sunner R8 es un entero en centésimas de grado y en P4Q un
+   flotante en RADIANES sobre dos registros. Servir el de Sunner con una NCU de P4Q
+   delante no es aproximar: es contestar otra cosa. */
 Planta.prototype.regsNCU = function () {
+  return this.cfg.fabricante === 'p4q' ? this.regsNcuP4Q() : this.regsNcuSunner();
+};
+
+Planta.prototype.regsNcuSunner = function () {
   var wo = this.cfg.wordOrder, R = {}, n = this.ncu, i, j, par;
 
   R[30002] = bits({ viento: [1, 1], nivel: [2, 4], nieve: [5, 5], racha: [6, 6], ws: [7, 7], ss: [8, 8] },
@@ -2293,9 +2459,46 @@ Planta.prototype.regsNCU = function () {
   }
   R[40070] = auto; R[40071] = man; R[40080] = u16(n.timeoutPosicion);
 
-  /* bloque compacto de cada TCU: 22 registros a partir de 30500 (mapa R7) */
-  for (i = 0; i < this.tcus.length; i++) {
-    var c = this.tcus[i], b = 30500 + i * 22, al = c.alarmas();
+  /* ÁNGULO DE LA SP7 POR GRUPO — 40030…40039, y es del R8: el R7 no los trae.
+     Un registro por grupo, entero firmado en CENTÉSIMAS DE GRADO. Es la misma
+     consigna que P4Q pone en la misma dirección base, pero allí es un flotante en
+     radianes sobre DOS registros, así que la 40031 significa cosas distintas en
+     cada mapa: aquí el grupo 2, allí la mitad baja del flotante del grupo 1.
+     Sin poner no se publica un cero: 0 es un ángulo válido (horizontal) y el
+     documento reserva 0x7FFF para «desactivado». Un hueco se lee como hueco. */
+  for (i = 1; i <= 10; i++) {
+    if (n.sp7Target[i] == null) continue;
+    R[40030 + (i - 1)] = s16(Math.round(n.sp7Target[i] * 100));
+  }
+
+  /* El bloque compacto de cada TCU (30500) es COMÚN a los dos fabricantes: misma
+     base, mismo paso de 22 y los mismos desplazamientos y tipos, incluida la
+     posición en f32 RADIANES. En Sunner lo ocupan también los repetidores, porque
+     su mapa no les da sitio propio; en P4Q no, porque lo tienen (21750). */
+  this.publicaTcus(R, this.tcus);
+
+  /* bloque TCU COMPLETO: 50 registros desde 50000, SOLO de Sunner — el mapa de P4Q
+     no tiene ese bloque, así que publicarlo con una NCU de P4Q delante sería
+     inventarse 50 registros por equipo en direcciones que allí son otra cosa. */
+  for (i = 0; i < this.tcus.length; i++) this.publicaTcuCompleto(R, this.tcus[i], i);
+
+  this.publicaEstaciones(R);
+  return R;
+};
+
+/* ── el bloque compacto de cada TCU, republicado por la NCU ──
+   Compartido a propósito: la ficha declara la misma base (30500), el mismo paso
+   (22) y los mismos desplazamientos y tipos en los dos fabricantes. P4Q añade
+   campos en huecos que Sunner deja libres (14/15 capacidad, 17 corriente media,
+   13 días a carga completa) y el resto es idéntico, así que las escalas viven en
+   un solo sitio.
+
+   `lista` es QUIÉN entra en el bloque, y ahí sí difieren: en Sunner los
+   repetidores gastan hueco de TCU; en P4Q tienen su propio bloque. */
+Planta.prototype.publicaTcus = function (R, lista) {
+  var wo = this.cfg.wordOrder, i, par;
+  for (i = 0; i < lista.length; i++) {
+    var c = lista[i], b = 30500 + i * 22, al = c.alarmas();
     R[b + 1] = bits({ bt: [0, 0], sleep: [1, 2], dia: [7, 7], modo: [8, 9], sp: [13, 15] },
                     { bt: c.bt ? 1 : 0, sleep: c.bajaCapacidad, dia: c.solar.dia ? 1 : 0,
                       modo: c.modo, sp: c.sp });
@@ -2323,11 +2526,18 @@ Planta.prototype.regsNCU = function () {
     R[b + 21] = Math.round(c.soh) & 0xFF;
     par = u32(c.ultimoContacto, wo);
     R[29500 + i * 2] = par[0]; R[29500 + i * 2 + 1] = par[1];
+  }
+  return R;
+};
 
-    /* bloque TCU COMPLETO: 50 registros desde 50000, donde la NCU deja todo lo que
-       le saca a cada TCU (el compacto de 30500 es solo el resumen). Las escalas son
-       las que declara el R7 para este bloque: tilt en Deg×10 y temperaturas en °C
-       —no en K×10 como el compacto—, que es una de sus trampas. */
+/* ── bloque TCU COMPLETO: 50 registros desde 50000 ──
+   SOLO DE SUNNER. Es donde su NCU deja todo lo que le saca a cada TCU; el compacto
+   de 30500 es el resumen. Las escalas son las que declara el R7 PARA ESTE BLOQUE:
+   tilt en Deg×10 y temperaturas en °C —no en K×10 como el compacto—, que es una de
+   sus trampas. El mapa de P4Q no tiene este bloque. */
+Planta.prototype.publicaTcuCompleto = function (R, c, i) {
+  var wo = this.cfg.wordOrder, par, al = c.alarmas();
+  {
     var q = 50000 + i * 50, rt = this.regsTCU(c);
     R[q + 3] = 0;
     R[q + 4] = rt[30001]; R[q + 5] = rt[30002]; R[q + 6] = rt[30003];
@@ -2349,9 +2559,152 @@ Planta.prototype.regsNCU = function () {
     R[q + 33] = u16(c.iMotorPico);
     R[q + 49] = s16(c.modo === MODO.MANUAL ? c.manual * 100 : 0);
   }
+  return R;
+};
 
-  /* bloque compacto de cada HSU: 10 registros desde 30200 (otra disposición que el
-     mapa propio de la HSU) y bloque extendido de piranómetros desde 28000 */
+/* ═══════════ NCU de P4Q (AUX1-S20015 revT) ══════════════════════════════════
+   El MISMO campo simulado, publicado donde su mapa lo pone. Lo que de verdad
+   comparte con Sunner es más de lo que parece y conviene decirlo con nombres:
+
+     IGUAL, dirección por dirección — el bloque TCU (30500, paso 22, con la
+     posición en f32 RADIANES en los dos), el último contacto de cada TCU
+     (29500), el bloque de la estación meteo (30200, paso 10) y su extendido
+     (28000), los forzados de posición segura por grupo (40001…40007) y las
+     máscaras de auto/manual (40070/40071).
+
+     DISTINTO — y la 40030 es el caso que lo enseña: en Sunner R8 es
+     `sp_7_target_g1`, un entero en centésimas de grado, UN registro por grupo;
+     en P4Q es `safe_position_7_angle_rads`, un flotante en radianes, DOS
+     registros por grupo. Leer el grupo 2 en la 40031 no da un valor redondeado:
+     da la mitad baja del flotante del grupo 1.
+
+     SOLO DE P4Q — el bloque de repetidores (21750), el estado por grupo
+     (40517), el ángulo de la SP7 de los grupos custom (40116) y los comandos
+     de NCU (40100…40102).
+
+     SOLO DE SUNNER — el bloque TCU completo de 50 registros (50000), que aquí
+     no existe y por eso no se publica.
+
+   LO QUE NO SE PUBLICA, y por qué (está en `FABRICANTES.p4q.sinModelar` para que
+   el visor lo pueda ENSEÑAR, que es la diferencia entre un hueco explicado y una
+   avería aparente): TMU y sus MDU, RSU externas, RSU virtuales, los picos del
+   sensor local y la cadena de módulos (SPP).
+
+   Y DOS QUE NO SE PUBLICAN POR OTRO MOTIVO, que es de la ficha y no del modelo:
+   la 30101, la 30102 y la 30103 traen sus subvariables SIN posiciones de bit
+   declaradas —el documento las lista por nombre y la ficha lo transcribe así—,
+   de modo que colocarlas donde las pone Sunner sería inventarse el bit. Van en
+   blanco hasta que el documento diga dónde caen. La IP y la MAC (30003…30022)
+   tampoco: son configuración de red del armario, y este simulador no la modela. */
+Planta.prototype.regsNcuP4Q = function () {
+  var wo = this.cfg.wordOrder, R = {}, n = this.ncu, i, g, par;
+
+  /* resumen de las estaciones. Mismas posiciones que Sunner en lo que comparten,
+     y P4Q añade cuatro bits: comunicación global, dirección del viento, fallo
+     global de inundación y alarma de inundación de alguna. */
+  R[30002] = bits({ com: [0, 0], viento: [1, 1], nivel: [2, 4], nieve: [5, 5], racha: [6, 6],
+                    ws: [7, 7], ss: [8, 8], dir: [9, 9], fs: [10, 10], inund: [15, 15] },
+                  { com: this.hsus.some(function (h) { return !h.online; }) ? 1 : 0,
+                    viento: n.alarmaViento ? 1 : 0, nivel: n.nivelVientoGlobal,
+                    nieve: n.alarmaNieve ? 1 : 0, racha: n.alarmaRacha ? 1 : 0,
+                    ws: n.falloWs ? 1 : 0, ss: n.falloSs ? 1 : 0,
+                    dir: n.vientoInvertido ? 1 : 0, fs: 0, inund: 0 });
+  /* 30106 es la copia del resumen «considerando las RSU y las externas». Sin
+     externas configuradas, es el mismo valor — y eso es verdad, no un atajo. */
+  R[30106] = R[30002];
+
+  /* entradas digitales. El documento de P4Q las llama DigitalInput0…15 SIN decir
+     qué hay en cada una; el de Sunner nombra las 3…12 como los diez interruptores
+     de limpieza y la 13 como la seta. Se publica con el reparto de Sunner porque
+     el armario es el mismo hierro, PERO ES UN SUPUESTO DEL SIMULADOR, no algo que
+     el documento de P4Q afirme. Queda dicho aquí y marcado en el visor. */
+  var wDi = (n.upsBateriaBaja ? 1 : 0) | ((n.upsFallo ? 1 : 0) << 1);
+  for (i = 0; i < 10; i++) if (n.limpieza[i]) wDi |= 1 << (3 + i);
+  R[30100] = wDi & 0xFFFF;
+
+  par = u32(this.t.epoch, wo); R[30104] = par[0]; R[30105] = par[1];
+
+  /* ── escritura: lo que coincide con Sunner ── */
+  for (i = 1; i <= 7; i++) R[40000 + i] = n.forzados[i] & 0x3FF;
+  var auto = 0, man = 0;
+  for (i = 0; i < this.tcus.length; i++) {
+    var t = this.tcus[i], bit = 1 << (t.grupo - 1);
+    if (t.modo === MODO.AUTO) auto |= bit; else if (t.modo === MODO.MANUAL) man |= bit;
+  }
+  R[40070] = auto; R[40071] = man;
+
+  /* ── y lo que NO: el ángulo de la SP7, en RADIANES y dos registros por grupo ──
+     Aquí es donde un lector que no mire el fabricante se equivoca de verdad. */
+  for (g = 1; g <= 10; g++) {
+    if (n.sp7Target[g] == null) continue;          /* sin poner: no se publica un cero */
+    par = f32(n.sp7Target[g] * D2R, wo);
+    R[40030 + (g - 1) * 2] = par[0]; R[40030 + (g - 1) * 2 + 1] = par[1];
+  }
+  /* estado por grupo: Off / Manual / Auto, un registro por grupo desde la 40517 */
+  for (g = 1; g <= 10; g++) {
+    var hay = false, off = 0, mn = 0, au = 0;
+    for (i = 0; i < this.tcus.length; i++) {
+      var c = this.tcus[i];
+      if (c.grupo !== g) continue;
+      hay = true;
+      if (c.modo === MODO.OFF) off = 1; else if (c.modo === MODO.MANUAL) mn = 1; else au = 1;
+    }
+    if (hay) R[40517 + (g - 1)] = bits({ off: [0, 0], man: [1, 1], auto: [2, 2] },
+                                       { off: off, man: mn, auto: au });
+  }
+
+  /* los seguidores van al bloque TCU; los repetidores NO, porque aquí tienen el
+     suyo. Es la diferencia de equipo que separa a los dos fabricantes. */
+  this.publicaTcus(R, this.seguidores());
+  this.publicaRepetidores(R);
+  this.publicaEstaciones(R);
+  return R;
+};
+
+/* ── repetidores Zigbee: bloque 21750, paso 25, hasta 10 ──
+   SOLO EXISTE EN P4Q. En Sunner el repetidor gasta hueco de TCU porque su mapa no
+   le da sitio propio; aquí tiene el suyo, con lo poco que un repetidor tiene que
+   contar: si habla, si está asociado a la malla, su batería y su panel.
+
+   El gemelo ya los modela como equipo —un TCU plano, sin motor— así que esto no
+   inventa un equipo nuevo: lo publica donde su mapa lo pone. Lo que NO se publica
+   es el BLE (bits 3 y 4 de FlagsA): el simulador no modela el Bluetooth de
+   servicio, y un cero ahí se leería como «hay BLE y está apagado». */
+Planta.prototype.publicaRepetidores = function (R) {
+  var reps = this.repetidores(), i;
+  for (i = 0; i < reps.length && i < 10; i++) {
+    var r = reps[i], b = 21750 + i * 25, al = r.alarmas();
+    R[b + 4] = bits({ bat: [0, 0], com: [1, 1] },
+                    { bat: al.socL1 || al.socL2 || al.socL3 ? 1 : 0,
+                      com: r.comDisponible() ? 0 : 1 });
+    R[b + 5] = bits({ ok: [0, 0], zb: [1, 1] },
+                    { ok: r.systemOk() ? 1 : 0, zb: r.online ? 1 : 0 });
+    R[b + 6] = kx10(r.tPcb);
+    R[b + 7] = u16(r.vPanel);
+    R[b + 8] = u16(r.vPanel);
+    R[b + 9] = u16(r.vBat * 1000);
+    R[b + 10] = Math.round(r.soc) & 0xFF;
+  }
+  return R;
+};
+
+/* ── la estación meteo republicada por la NCU ─────────────────────────────────
+   LO MISMO EN LOS DOS FABRICANTES, y no por casualidad: la RSU de P4Q ES la HSU
+   de Sunner —el mismo equipo con otro nombre— y además su bloque republicado cae
+   en la MISMA base (30200), con el MISMO paso (10) y los mismos desplazamientos y
+   tipos. Comprobado campo a campo contra los dos mapas: lo único que cambia es
+   cómo llaman al registro 1 (`MSR` contra `MSRLow`/`MSRHigh`) y que P4Q declara
+   más bits de alarma en el 2.
+
+   Por eso esto se escribe UNA vez. Dos copias «por fabricante» de un bloque que
+   es idéntico serían dos sitios donde corregir la misma escala, que es el defecto
+   que este repo lleva persiguiendo.
+
+   El bloque compacto lleva OTRA disposición que el mapa propio de la estación: lo
+   que se ve aquí es lo que la NCU republica, no lo que la estación sirve en su
+   propio Modbus. */
+Planta.prototype.publicaEstaciones = function (R) {
+  var wo = this.cfg.wordOrder, j, par;
   for (j = 0; j < this.hsus.length; j++) {
     var h = this.hsus[j], hb = 30200 + j * 10;
     R[hb + 1] = bits({ nivel: [0, 2], este: [3, 3] },
@@ -2515,6 +2868,22 @@ var ESCRITURA = {
     40003: { n: 'force_sp_3', efecto: true, sp: 3 }, 40004: { n: 'force_sp_4', efecto: true, sp: 4 },
     40005: { n: 'force_sp_5', efecto: true, sp: 5 }, 40006: { n: 'force_sp_6', efecto: true, sp: 6 },
     40007: { n: 'force_sp_7', efecto: true, sp: 7 },
+    /* ÁNGULO DE LA SP7 POR GRUPO. Entra con el R8 y P4Q lo tiene en la MISMA
+       dirección base pero con otra pinta: aquí un entero en centésimas de grado,
+       un registro por grupo; allí un flotante en radianes, dos por grupo. El
+       `sp7g` dice de qué grupo es cada dirección y `_escribeNcu` decodifica según
+       el fabricante de la planta: es el único registro del catálogo donde eso
+       importa, y por eso va dicho aquí y no deducido. */
+    40030: { n: 'sp_7_target_g1',  efecto: true, sp7g: 1,  ay: 'ángulo de la SP7 del grupo 1 (R8 · Deg×100 · en P4Q f32 rad)' },
+    40031: { n: 'sp_7_target_g2',  efecto: true, sp7g: 2,  ay: 'grupo 2 — OJO: en P4Q esta dirección es la mitad baja del flotante del grupo 1' },
+    40032: { n: 'sp_7_target_g3',  efecto: true, sp7g: 3 },
+    40033: { n: 'sp_7_target_g4',  efecto: true, sp7g: 4 },
+    40034: { n: 'sp_7_target_g5',  efecto: true, sp7g: 5 },
+    40035: { n: 'sp_7_target_g6',  efecto: true, sp7g: 6 },
+    40036: { n: 'sp_7_target_g7',  efecto: true, sp7g: 7 },
+    40037: { n: 'sp_7_target_g8',  efecto: true, sp7g: 8 },
+    40038: { n: 'sp_7_target_g9',  efecto: true, sp7g: 9 },
+    40039: { n: 'sp_7_target_g10', efecto: true, sp7g: 10 },
     40070: { n: 'auto_mode', efecto: true, ay: 'un bit por grupo: pasa a AUTO' },
     40071: { n: 'manual_mode', efecto: true, ay: 'un bit por grupo: pasa a MANUAL' }
   },
@@ -2558,7 +2927,7 @@ Planta.prototype.escribe = function (dev, id, dir, vals) {
   if (def.min != null && v < def.min) { out.avisos.push(dir + ': ' + v + ' por debajo del mínimo (' + def.min + ')'); return out; }
   if (def.max != null && v > def.max) { out.avisos.push(dir + ': ' + v + ' por encima del máximo (' + def.max + ')'); return out; }
 
-  if (dev === 'ncu') return this._escribeNcu(dir, def, v, out);
+  if (dev === 'ncu') return this._escribeNcu(dir, def, v, vals, out);
   if (dev === 'hsu') {
     var h = this.hsus[(id | 0) - 1] || this.hsus[0];
     if (!h) { out.avisos.push('no hay HSU ' + id); return out; }
@@ -2612,7 +2981,7 @@ Planta.prototype.escribe = function (dev, id, dir, vals) {
   return out;
 };
 
-Planta.prototype._escribeNcu = function (dir, def, v, out) {
+Planta.prototype._escribeNcu = function (dir, def, v, vals, out) {
   var n = this.ncu;
   n.escrito = n.escrito || {}; n.escrito[dir] = v;
   if (def.sp) {
@@ -2623,6 +2992,52 @@ Planta.prototype._escribeNcu = function (dir, def, v, out) {
     out.ok = true;
     out.aplicados.push(def.n + ' = 0x' + v.toString(16) + ' (grupos ' +
       (v ? gruposDe(v).join(',') : '—') + ')');
+    return out;
+  }
+  /* EL ÁNGULO DE LA SP7, Y AQUÍ EL FABRICANTE DECIDE CÓMO SE LEE LO ESCRITO.
+     Sunner R8: un entero firmado en centésimas de grado, un registro por grupo, y
+     0x7FFF significa «desactivado» (vuelve a mandar el ángulo del equipo).
+     P4Q: un flotante en radianes sobre DOS registros, así que la dirección del
+     grupo g es 40030+(g−1)·2 y las impares son la mitad baja de la anterior.
+     Escribir la 40031 en una planta P4Q no es «el grupo 2»: es destrozar medio
+     flotante del grupo 1, y eso se dice en vez de aplicarlo. */
+  if (def.sp7g != null) {
+    var g = def.sp7g;
+    /* EL NOMBRE DEL CATÁLOGO ES EL DE SUNNER, y en P4Q no vale: la 40034 es ahí el
+       grupo 3, no el 5. Decirle al operador «sp_7_target_g5» sobre una planta de
+       P4Q sería el mismo error que este registro existe para enseñar, cometido por
+       el propio simulador. Así que en P4Q la etiqueta se arma con el grupo real. */
+    var et = def.n;
+    if (this.cfg.fabricante === 'p4q') {
+      var off = dir - 40030;
+      et = 'safe_position_7_angle_rads[' + ((off >> 1) + 1) + ']';
+      if (off % 2 !== 0) {
+        out.avisos.push(et + ': en P4Q la ' + dir + ' es la mitad baja del flotante ' +
+          'del grupo ' + ((off >> 1) + 1) + ', no el ángulo de un grupo. El ángulo es un ' +
+          'f32 en radianes y se escribe entero en la ' + (40030 + (off - 1)) + '.');
+        return out;
+      }
+      g = (off >> 1) + 1;
+      /* DOS REGISTROS, y lo normal es escribirlos de una vez: es la función 16 de
+         Modbus, y `vals` ya viene como lista. Si solo llega una palabra se acepta
+         la que quedara apuntada en la otra dirección —escribir las dos mitades por
+         separado es legal— y si no hay ninguna, se dice qué falta en vez de
+         reconstruir medio flotante. */
+      var baja = vals.length > 1 ? vals[1] : n.escrito[dir + 1];
+      if (baja == null) {
+        out.avisos.push(et + ': falta la palabra baja. En P4Q el ángulo es un f32 ' +
+          'en radianes y ocupa dos registros: escribe las dos (' + dir + ' y ' +
+          (dir + 1) + ') o la ' + (dir + 1) + ' antes.');
+        return out;
+      }
+      n.sp7Target[g] = desF32(v, baja, this.cfg.wordOrder) * (180 / Math.PI);
+    } else {
+      n.sp7Target[g] = (v === 0x7FFF) ? null : s16inv(v) / 100;
+    }
+    out.ok = true;
+    out.aplicados.push(et + ' = ' +
+      (n.sp7Target[g] == null ? 'desactivado (manda el ángulo del equipo)'
+                              : n.sp7Target[g].toFixed(2) + '° al grupo ' + g));
     return out;
   }
   if (dir === 40070 || dir === 40071) {
@@ -2649,6 +3064,7 @@ var API = {
   PARAMS: PARAMS,
   MODO: MODO, MODO_TXT: MODO_TXT, SP: SP, SP_TXT: SP_TXT,
   CRIT: CRIT, CRIT_TXT: CRIT_TXT, FUENTE_SP: FUENTE_SP, FUENTE_TXT: FUENTE_TXT,
+  FABRICANTES: FABRICANTES,
   CHARGER_TXT: CHARGER_TXT,
   posicionSolar: posicionSolar, angulos: angulos, cosAOI: cosAOI,
   BT: BTX, cargaBT: function (base) { return BTX ? BTX.carga(base) : Promise.resolve(null); },

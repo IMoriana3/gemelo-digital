@@ -212,6 +212,48 @@ ok(motor.casilla === motor.motor,
 ok(motor.sinNaN, 'y la página sabe leer las cinco opciones sin sacar NaN',
    motor.opciones.join(' · '));
 
+/* ── EL FABRICANTE DE LA NCU, EN LA PÁGINA ───────────────────────────────────
+   La ficha del hermano trae dos NCU y avisa de que una misma dirección significa
+   cosas distintas en cada una. Lo que se mide aquí es que la página NO sirva el
+   mapa de uno con el otro elegido, y que las pestañas de equipo salgan del
+   fabricante en vez de estar tecleadas en el HTML — que es como estaban. */
+const fab = await pg.evaluate(async () => {
+  const lee = () => { vePestaña('modbus'); pintaModbus();
+    const cuerpo = document.getElementById('mbCuerpo').textContent;
+    return { fab: P.cfg.fabricante,
+             estacion: P.meteo_n(),
+             lab: document.getElementById('labMeteo').textContent,
+             pestanas: [...document.getElementById('mbDev').options].map((o) => o.value),
+             cartel: /Mapa de P4Q/.test(cuerpo) ? 'p4q' : (/Mapa de Sunner/.test(cuerpo) ? 'sunner' : '?'),
+             diceSinModelar: /De este mapa NO se simula/.test(cuerpo) };
+  };
+  const a = lee();
+  const s = document.getElementById('fabricante');
+  s.value = 'p4q'; s.dispatchEvent(new Event('change', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 1200));
+  const b = lee();
+  /* se deja como estaba: el resto del banco mide sobre la planta por defecto */
+  s.value = 'sunner'; s.dispatchEvent(new Event('change', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 1200));
+  return { sunner: a, p4q: b, vuelta: lee().fab };
+});
+ok(fab.sunner.fab === 'sunner' && fab.p4q.fab === 'p4q' && fab.vuelta === 'sunner',
+   'la casilla de fabricante rehace la planta, y se puede volver',
+   `${fab.sunner.fab} → ${fab.p4q.fab} → ${fab.vuelta}`);
+ok(fab.sunner.estacion === 'HSU' && fab.p4q.estacion === 'RSU' &&
+   fab.sunner.lab === 'HSU' && fab.p4q.lab === 'RSU',
+   'la estación meteo se llama en la página como la llama SU mapa (el mismo equipo)',
+   `Sunner ${fab.sunner.lab} · P4Q ${fab.p4q.lab}`);
+ok(fab.sunner.pestanas.join(',') === 'ncu,tcu,hsu' && fab.p4q.pestanas.join(',') === 'ncu',
+   'y las pestañas de equipo las pone el fabricante: de P4Q solo hay mapa de su NCU',
+   `Sunner [${fab.sunner.pestanas}] · P4Q [${fab.p4q.pestanas}]`);
+ok(fab.sunner.cartel === 'sunner' && fab.p4q.cartel === 'p4q',
+   'el visor DICE de quién es el mapa que está sirviendo',
+   `cartel: ${fab.sunner.cartel} y ${fab.p4q.cartel}`);
+ok(fab.p4q.diceSinModelar && !fab.sunner.diceSinModelar,
+   'y con P4Q enseña qué trae su mapa que el gemelo no simula, con su motivo',
+   'un hueco explicado no se confunde con una avería del simulador');
+
 /* A PARTIR DE AQUÍ, UNA ESCENA DE REFERENCIA. Las medidas de cadencia y de sombra se
    hacen sobre una planta pequeña y siempre la misma: si se miden sobre la que toque
    estar seleccionada, el día que la lista cambie de orden los números cambian solos.
