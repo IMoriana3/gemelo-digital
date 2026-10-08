@@ -694,7 +694,7 @@
           30114 fuente de la posición segura): son del simulador, no de Sunner. Lo mismo pasa con el campo <i>TCU type</i> de 30000, donde aquí
           1 = BAT (panel propio o string) y 2 = AC.
           <br><b>Fuente del mapa:</b> NCU_Modbus_Map_R7 · SUNNER_TCU_ModbusMap_v6 (FW v1.4.3) · HSU_Modbus_Map_R23, vía
-          <a href="../cobertura-zigbee/modbus.html" style="color:var(--blue)">la ficha de cobertura-zigbee</a>.
+          <a href="https://cobertura-zigbee.imoriana3.workers.dev/modbus.html" style="color:var(--blue)">la ficha de cobertura-zigbee</a>.
         </div>
       </div>
 
@@ -3191,7 +3191,12 @@ pintaEscritura();
 }
 
 var _avisoBT = document.getElementById('avisoBT');
-SIM.cargaBT('../cobertura-zigbee').then(function () {
+/* 2026-10-08: cobertura-zigbee pasó a privado y en el plan gratuito eso lo deja sin
+   Pages (404). Publicado, el simulador lo carga de Cloudflare (con CORS); en local
+   y en los bancos, que sirven el directorio padre, sigue siendo el hermano. */
+var COB_BT = /\.github\.io$/.test(location.hostname)
+  ? 'https://cobertura-zigbee.imoriana3.workers.dev' : '../cobertura-zigbee';
+SIM.cargaBT(COB_BT).then(function () {
   if (!SIM.btListo()) {
     var m = 'No he podido cargar el <b>backtracking</b> de cobertura-zigbee: ' +
             SIM.BT.motivo() + '.<br>El simulador no lleva uno propio a propósito ' +
