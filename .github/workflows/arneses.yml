@@ -69,21 +69,21 @@ jobs:
       # configuración: es el alcance del token. Ver `carea_resultado.mjs` en la
       # lista EXCLUIDOS de tools/inventario_arneses.mjs, donde está dicho qué
       # haría falta para meterlo.
+      # El CÓMO se clona vive en tools/clona_hermano.sh, no aquí: estaba escrito
+      # dos veces —en este job y en `navegador`— y duplicar la rutina de
+      # credenciales es la enfermedad de las ocho copias del rumbo del viento.
+      # HERMANOS_RO es el secreto de LECTURA de los hermanos. Sin él se clona sin
+      # credenciales, que basta para un hermano público; con `cobertura-zigbee`
+      # privado (lo es desde el 2026-10-08) hace falta, y el script lo DICE con
+      # nombre en vez de morir en un «exit 128» que no explica nada.
       - name: Clonar los hermanos POR EL PIN
+        env:
+          HERMANOS_RO: ${{ secrets.HERMANOS_RO }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -o pipefail
-          leer () { python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['$1']['commit'])"; }
-          clonar () {
-            local repo=$1 sha=$2
-            echo "── $repo → $sha"
-            git init -q "$repo" && cd "$repo"
-            git remote add origin "https://github.com/${{ github.repository_owner }}/$repo.git"
-            git fetch -q --depth 1 origin "$sha"
-            git checkout -q FETCH_HEAD
-            cd ..
-          }
-          clonar proyectos        "$(leer proyectos)"
-          clonar cobertura-zigbee "$(leer cobertura-zigbee)"
+          bash gemelo-digital/tools/clona_hermano.sh proyectos        --pines gemelo-digital/pines.json
+          bash gemelo-digital/tools/clona_hermano.sh cobertura-zigbee --pines gemelo-digital/pines.json
 
       # El clon TIENE que estar en el commit del pin. Sin esto, el día que
       # alguien cambie el paso de arriba por un `clone` a secas, la referencia
@@ -177,16 +177,17 @@ jobs:
       # procedimiento y el mismo motivo que en el job `arneses` — si esto se
       # volviera un `clone` a secas, la página se probaría contra la punta y la
       # puerta seguiría verde midiendo otra cosa.
+      # Mismo script que el job de arriba: un solo sitio donde se clona y, por
+      # tanto, uno solo donde se decide cómo se autentica. El script comprueba
+      # por dentro que el clon quedó EN EL PIN, así que esa guarda no se pierde
+      # al dejar de estar escrita aquí.
       - name: Clonar cobertura-zigbee POR EL PIN
+        env:
+          HERMANOS_RO: ${{ secrets.HERMANOS_RO }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -o pipefail
-          sha=$(python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['cobertura-zigbee']['commit'])")
-          echo "── cobertura-zigbee → $sha"
-          git init -q cobertura-zigbee && cd cobertura-zigbee
-          git remote add origin "https://github.com/${{ github.repository_owner }}/cobertura-zigbee.git"
-          git fetch -q --depth 1 origin "$sha"
-          git checkout -q FETCH_HEAD
-          test "$(git rev-parse HEAD)" = "$sha" || { echo "el clon NO está en el pin"; exit 1; }
+          bash gemelo-digital/tools/clona_hermano.sh cobertura-zigbee --pines gemelo-digital/pines.json
 
       # La versión sale de pines.json por el mismo motivo que los commits: sin
       # fijarla, estos dos arneses carean contra un navegador distinto cada
@@ -220,6 +221,17 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: node tools/inventario_arneses.mjs
+
+      # UN SOLO SITIO CLONA, Y RECIBE EL SECRETO. `tools/clona_hermano.sh` existe
+      # para que la rutina de credenciales esté en un sitio y no en dos — estaba
+      # en dos, y el día que `cobertura-zigbee` pasó a privado las dos copias se
+      # cayeron con un «exit 128» que no explicaba nada. Un script compartido es
+      # una promesa; esto es el mecanismo: prohíbe que un paso clone por su
+      # cuenta, exige que todo paso que llame al script le pase `HERMANOS_RO`, y
+      # fija que la credencial no se incruste en la URL. BLOQUEA, y no necesita
+      # red ni hermanos: lee el .yml y el .sh.
+      - name: un solo sitio clona un hermano, y recibe el secreto
+        run: node tools/prueba_clona_hermano.mjs
 
   # ─────────────────────────────────────────────────────────────────────────
   # NO BLOQUEA, y es una decisión. Perder de vista que el hermano evoluciona es
