@@ -24,7 +24,9 @@
 
    DE DÓNDE. Del hermano al lado, en `../cobertura-zigbee`: la misma ruta
    relativa que `simulador.html` ya usa para enlazar su ficha Modbus, y el
-   mismo origen en Pages (imoriana3.github.io/cobertura-zigbee/…). El bloque
+   mismo origen que tenía en Pages. Desde el 2026-10-08 cobertura-zigbee es privado
+   y se sirve en Cloudflare (cobertura-zigbee.imoriana3.workers.dev, con CORS):
+   la página publicada pasa esa base a `carga()` (simulador.html). El bloque
    necesita exactamente dos ficheros más, comprobado llamada a llamada:
    `sol.js` (Sol.solarPos · singleaxis · trueTrackAngle · refraction ·
    cloudToIrr) e `irradiancia.js` (Irr.clearskyIneichen · dniExtra · airmassKY ·
@@ -201,7 +203,7 @@ BT.prototype.cargaSync = function (base) {
   }
 };
 
-/* En el navegador: fetch de los tres ficheros. Mismo origen en Pages. */
+/* En el navegador: fetch de los tres ficheros (hermano en local; Cloudflare, con CORS, publicado). */
 BT.prototype.carga = function (base) {
   var self = this;
   this.base = base || this.base;
