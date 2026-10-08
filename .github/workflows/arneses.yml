@@ -69,7 +69,13 @@ jobs:
       # configuración: es el alcance del token. Ver `carea_resultado.mjs` en la
       # lista EXCLUIDOS de tools/inventario_arneses.mjs, donde está dicho qué
       # haría falta para meterlo.
+      #
+      # 2026-10-08: cobertura-zigbee pasó a PRIVADO. Su fetch lleva el secreto
+      # LECTURA_TOKEN (token de sólo lectura de los repos hermanos privados) como
+      # cabecera de esa orden, sin guardarlo en la config del clon.
       - name: Clonar los hermanos POR EL PIN
+        env:
+          LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN }}
         run: |
           set -o pipefail
           leer () { python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['$1']['commit'])"; }
@@ -78,7 +84,11 @@ jobs:
             echo "── $repo → $sha"
             git init -q "$repo" && cd "$repo"
             git remote add origin "https://github.com/${{ github.repository_owner }}/$repo.git"
-            git fetch -q --depth 1 origin "$sha"
+            if [ -n "$LECTURA_TOKEN" ]; then
+              git -c http.extraHeader="Authorization: basic $(printf 'x-access-token:%s' "$LECTURA_TOKEN" | base64 -w0)" fetch -q --depth 1 origin "$sha"
+            else
+              git fetch -q --depth 1 origin "$sha" || { echo "$repo es privado: falta el secreto LECTURA_TOKEN"; return 1; }
+            fi
             git checkout -q FETCH_HEAD
             cd ..
           }
@@ -178,13 +188,19 @@ jobs:
       # volviera un `clone` a secas, la página se probaría contra la punta y la
       # puerta seguiría verde midiendo otra cosa.
       - name: Clonar cobertura-zigbee POR EL PIN
+        env:
+          LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN }}   # privado desde 2026-10-08 (ver job `arneses`)
         run: |
           set -o pipefail
           sha=$(python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['cobertura-zigbee']['commit'])")
           echo "── cobertura-zigbee → $sha"
           git init -q cobertura-zigbee && cd cobertura-zigbee
           git remote add origin "https://github.com/${{ github.repository_owner }}/cobertura-zigbee.git"
-          git fetch -q --depth 1 origin "$sha"
+          if [ -n "$LECTURA_TOKEN" ]; then
+            git -c http.extraHeader="Authorization: basic $(printf 'x-access-token:%s' "$LECTURA_TOKEN" | base64 -w0)" fetch -q --depth 1 origin "$sha"
+          else
+            git fetch -q --depth 1 origin "$sha" || { echo "cobertura-zigbee es privado: falta el secreto LECTURA_TOKEN"; exit 1; }
+          fi
           git checkout -q FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$sha" || { echo "el clon NO está en el pin"; exit 1; }
 
