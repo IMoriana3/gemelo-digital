@@ -29,7 +29,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,17 +39,31 @@ const OWNER = i >= 0 ? args[i + 1] : 'imoriana3';
 
 /* Lo que este repo consume de cada hermano. No es «todo el repo»: un cambio en
    un fichero que aquí no se lee no es deriva, es ruido — y un vigilante que
-   grita por todo se deja de leer, que es como murió el anterior. */
-const CONSUMIDO = {
-  'proyectos': ['cartera-tabla.html'],
-  'cobertura-zigbee': ['plantas_indice.json', '_layout.json'],
-  'SolarGPTfull': ['solargpt/solargpt_core/tcu_compare.py',
-                   'solargpt/solargpt_core/tcu.py',
-                   'solargpt/solargpt_core/tracker.py'],
-};
+   grita por todo se deja de leer, que es como murió el anterior.
+   SE LEE DE pines.json, NO SE TECLEA AQUÍ. Estuvo aquí hasta el 2026-10-07 y
+   se separó del pin: al añadir `modbus.html` al pin se actualizó el `para_que`
+   y no esta tabla, así que con la ficha recién cambiada este vigilante dijo
+   «nada de lo que este repo consume ha cambiado» — una lista incompleta no
+   falla, MIENTE, y encima con el verde por delante. El porqué está escrito en
+   `_por_que_consume_vive_AQUI` de pines.json. */
+export const consumidosDe = (meta) => (meta && meta.consume) || [];
+
+/* La regla de filtrado, aparte y pura, para poder ponerla roja en un banco:
+   `_layout.json` es un SUFIJO (son `<planta>_layout.json`, uno por planta), así
+   que la comparación es por `includes` y no por igualdad. */
+export const derivados = (tocados, consume) =>
+  tocados.filter(f => consume.some(p => f.includes(p)));
 
 const pines = JSON.parse(readFileSync(join(RAIZ, 'pines.json'), 'utf8'));
 const git = (dir, ...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' }).trim();
+
+/* Importado (por `tools/prueba_pines.mjs`) sólo da las dos funciones puras y no
+   clona nada. Sin esta guarda, importarlo para probarlo saldría a la red y
+   mataría el proceso en el `process.exit(0)` del final. */
+const INVOCADO_DIRECTO = process.argv[1]
+  && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+if (!INVOCADO_DIRECTO) { /* no hay cuerpo que correr */ }
+else {
 
 const tmp = mkdtempSync(join(tmpdir(), 'gem-deriva-'));
 let alDia = 0, movidos = 0, ciegos = 0;
@@ -100,7 +114,17 @@ try {
     }
 
     const tocados = git(dir, 'diff', '--name-only', `${pin}..${punta}`).split('\n').filter(Boolean);
-    const nuestros = tocados.filter(f => (CONSUMIDO[repo] || []).some(p => f.includes(p)));
+    const consume = consumidosDe(meta);
+    /* Un hermano pinchado SIN lista de consumo no se puede filtrar, y entonces
+       «nada ha cambiado» significaría «no sé mirar». Se declara, como los
+       ciegos: el vacío es error, no PASS. */
+    if (!consume.length) {
+      ciegos++;
+      console.log(`   NO VERIFICABLE — ${repo} no declara \`consume\` en pines.json,`);
+      console.log('     así que no puedo decir si lo que cambió es de los nuestros.');
+      continue;
+    }
+    const nuestros = derivados(tocados, consume);
     if (nuestros.length) {
       console.log(`   y ${nuestros.length} de los ficheros que este repo CONSUME han cambiado:`);
       nuestros.slice(0, 12).forEach(f => console.log(`     - ${f}`));
@@ -126,3 +150,5 @@ try {
 /* Salida 0 SIEMPRE, y a propósito. Si algún día esto tiene que parar una PR,
    que sea borrando esta línea con un commit que lo explique. */
 process.exit(0);
+
+}

@@ -307,11 +307,19 @@
         <div class="row4" id="filaRsu" style="display:none">
           <div class="fld"><label>RSU ext.</label><input type="number" id="nRsuExt" value="0" min="0" max="20"></div>
           <div class="fld"><label>RSU virt.</label><input type="number" id="nRsuVirt" value="0" min="0" max="2"></div>
+          <div class="fld"><label>MDU / TMU</label><input type="number" id="nMdu" value="1" min="1" max="15"></div>
         </div>
         <div class="fld" id="notaRsu" style="display:none"><span class="rv" style="font-weight:400">
           La <b>RSU externa</b> es una estación de otra planta o de otro fabricante que la NCU lee por
           Modbus; la <b>virtual</b> es un sensor de viento y nieve cableados al propio armario. Las tres
           miden lo mismo — lo que cambia es que las dos últimas <b>no esperan turno de Zigbee</b>.
+        </span></div>
+        <div class="fld" id="notaMdu" style="display:none"><span class="rv" style="font-weight:400">
+          <b>Multipunto:</b> una TMU manda hasta <b>15 MDU</b> sobre el <b>mismo tubo de par</b>. El tubo es
+          uno, así que si una sola MDU no da permiso <b>la TMU no mueve nada</b> — y los 61 bits de
+          22006&hairsp;…&hairsp;22009 dicen cuál. Con varias, los agregados de posición, corriente y
+          temperatura (y <code>PosDif</code>) se quedan <b>en blanco</b>: salen del reparto de par a lo
+          largo del tubo, y de esa geometría no hay medida.
         </span></div>
         <div class="fld"><label>Grupos de limpieza <span class="rv" id="nGrupV">4</span></label>
           <input type="range" id="nGrup" min="1" max="10" step="1" value="4"></div>
@@ -845,6 +853,7 @@ function construye() {
     fabricante: $('fabricante').value,
     nRsuExt: Math.max(0, +$('nRsuExt').value || 0),
     nRsuVirt: Math.max(0, +$('nRsuVirt').value || 0),
+    nMdu: Math.max(1, +$('nMdu').value || 1),
     grupos: +$('nGrup').value || 4,
     granizo: {
       leadMin: Math.max(0, +$('hailLead').value || 0),
@@ -2592,6 +2601,20 @@ function pintaDetalle() {
     kv('Resolución', num(t.sensor.pulsosGrado, 1) + ' pulsos/° (' + num(1 / t.sensor.pulsosGrado, 3) + '°)') +
     kv('Motor', t.motorHabilitado ? 'habilitado' : 'CORTADO' +
       (t.seta ? ' · seta pulsada' : (t.alarmaMotorEnclavada ? ' · alarma enclavada' : ''))) +
+    /* EL MULTIPUNTO, y se dice quién retiene. Una mesa quieta sin explicación se
+       lee como una avería del simulador; con el nombre de la MDU delante se lee
+       como lo que es. Con una sola MDU sana no se pinta nada: no hay multipunto
+       del que hablar y una línea «1 MDU, todo bien» sería ruido en todas las
+       plantas. */
+    (t.mdus && (t.mdus.length > 1 || t.mduQueRetiene())
+      ? kv('Multipunto', (function () {
+          var r = t.mduQueRetiene(), altas = 0, j;
+          for (j = 0; j < t.mdus.length; j++) if (t.mdus[j].viva) altas++;
+          return altas + ' de ' + t.mdus.length + ' MDU de alta · ' +
+            (r ? 'LA TMU ESPERA: la MDU ' + r.id + ' no da permiso (' + r.motivo + ')'
+               : (altas ? 'todas dan permiso' : 'ninguna de alta: la TMU no tiene accionamiento debajo'));
+        })())
+      : '') +
     kv('Alimentación', TIPO_TXT[t.perfil.tipo]) +
     kv('Perfil', t.perfil.n) +
     kv('Capacidad', t.ah ? num(t.ah, 1) + ' Ah (' + num(t.perfil.wh, 1) + ' Wh)' : 'sin batería') +
@@ -2902,11 +2925,15 @@ function pintaCasillasRsu() {
   var esP4Q = $('fabricante').value === 'p4q';
   $('filaRsu').style.display = esP4Q ? '' : 'none';
   $('notaRsu').style.display = esP4Q ? '' : 'none';
+  /* El multipunto es del accionamiento de P4Q: el mapa de Sunner no tiene bloque de
+     TMU, así que con Sunner elegido la casilla se esconde en vez de ofrecer un
+     número que no se publicaría en ninguna parte. */
+  $('notaMdu').style.display = esP4Q ? '' : 'none';
 }
 $('fabricante').onchange = function () {
   pintaCasillasRsu(); construye(); if (CAMPO) CAMPO.construye(P);
 };
-['nRsuExt', 'nRsuVirt'].forEach(function (id) {
+['nRsuExt', 'nRsuVirt', 'nMdu'].forEach(function (id) {
   $(id).onchange = function () { construye(); if (CAMPO) CAMPO.construye(P); };
 });
 pintaCasillasRsu();

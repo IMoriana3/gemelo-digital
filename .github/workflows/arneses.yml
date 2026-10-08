@@ -221,6 +221,19 @@ jobs:
         with: { node-version: '22' }
       - run: node tools/inventario_arneses.mjs
 
+      # EL VIGILANTE DE LOS PINES, VIGILADO. `deriva_pines.mjs` avisa sólo de lo
+      # que este repo LEE del hermano, y ese filtro era una tabla escrita a mano
+      # dentro del propio reportero. El 2026-10-07 se quedó atrás: `modbus.html`
+      # entró en el pin, no entró en la tabla, y con la ficha recién cambiada el
+      # vigilante dijo «nada de lo que este repo consume ha cambiado». No falló,
+      # MINTIÓ — y era el único mecanismo que existe para ver esa deriva.
+      # Esto exige que la lista salga de pines.json, que lo que la puerta nombra
+      # esté cubierto (DERIVADO de este mismo .yml) y que el filtro dependa de
+      # la lista. BLOQUEA: un filtro que miente no es un aviso de menos, es un
+      # verde de más. No necesita red ni hermanos.
+      - name: el filtro del vigilante sale del pin, no de una copia
+        run: node tools/prueba_pines.mjs
+
   # ─────────────────────────────────────────────────────────────────────────
   # NO BLOQUEA, y es una decisión. Perder de vista que el hermano evoluciona es
   # el fallo contrario al blanco móvil, y también está pagado en esta casa. Pero

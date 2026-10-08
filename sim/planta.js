@@ -423,14 +423,23 @@ var FABRICANTES = {
                 + 'ninguno de los otros dos. La RSU y el seguidor se ven aquí por los '
                 + 'bloques que la NCU republica —que es como los lee el SCADA—, y no '
                 + 'hay pestaña propia porque no hay mapa que poner en ella.',
-      multipunto: 'Accionamiento MULTIPUNTO: varias MDU bajo una misma TMU. El '
-                + 'bloque 22000 se publica —con una unidad de accionamiento, que es '
-                + 'lo que este gemelo mueve: un eje por seguidor— pero `PosDif`, la '
-                + 'mayor diferencia de posición entre MDU, se queda en blanco a '
-                + 'propósito. Con una sola valdría cero, y un cero ahí se leería como '
-                + '«se ha medido la divergencia y es nula» cuando lo cierto es que no '
-                + 'hay varias que comparar. Cuánto se separan entre sí no es una '
-                + 'cuenta: es una medida de campo que nadie ha hecho.',
+      multipunto: 'MECÁNICA de cada MDU del accionamiento multipunto. Lo que SÍ se '
+                + 'simula —desde 2026-10-07— es su estado como nodo y el permiso: '
+                + 'hasta 15 MDU por TMU (`nMdu`), cada una con alta, comunicación y '
+                + 'hold, los 61 bits de 22006..22009 publicados uno por esclava, y la '
+                + 'consecuencia de operación, que es la que importa: el tubo es UNO, '
+                + 'así que si una sola no da permiso la TMU no mueve nada. Lo que NO '
+                + 'se simula es cuánto se DESVÍA cada MDU (`PosDif`, 22004), cuánta '
+                + 'corriente le toca y a qué temperatura va: las tres salen del '
+                + 'reparto de par a lo largo del tubo, que pide espesor de pared, '
+                + 'material, número de MDU y separación entre ellas. De eso el canon '
+                + 'solo tiene el lado exterior del tubo —120 mm— y declarado como cota '
+                + 'VISUAL. Por eso con VARIAS MDU los agregados de posición, corriente '
+                + 'y temperatura (22010..22018) se quedan también en blanco: publicar '
+                + 'el ángulo mandado como máximo Y mínimo con quince sería afirmar que '
+                + 'no se tuercen, o sea afirmar PosDif = 0 por la puerta de atrás. Con '
+                + 'UNA sí se publican, porque ahí el máximo ES el mínimo y eso es '
+                + 'literalmente verdad.',
       niveles7: 'Niveles de viento 3 a 7 de la RSU virtual (bloque 37000). El '
               + 'abanderamiento canónico tiene DOS umbrales —parcial a 40 km/h y '
               + 'total a 60— y de ahí sale el nivel 0/1/2 de la estación; el mapa '
@@ -812,6 +821,26 @@ function TCU(id, planta, opts) {
   this.cableSetaCortado = false;     /* lazo NC abierto: se lee como pulsada */
   this.setaBruta = false; this.setaDeb = 0;   this.alarmaMotorEnclavada = false; /* solo la limpia 40007 bit 13 */
   this.motorHabilitado = true;
+  /* --- LAS MDU DE ESTE SEGUIDOR (accionamiento multipunto de P4Q) ---------------
+     Una TMU manda hasta 15 MDU sobre el MISMO tubo de par. Lo que se modela de
+     cada una es su estado como NODO —si está dada de alta, si habla con la TMU y
+     si tiene un hold— porque eso es bus y alarmas, de lo mismo que ya se simula
+     en el resto de la planta. Lo que NO se modela es su MECÁNICA: cuánto se
+     desvía cada una, cuánta corriente le toca o a qué temperatura va depende del
+     reparto de par a lo largo del tubo, y eso pide espesor de pared, material,
+     número de MDU y su separación. De eso el canon solo tiene el lado exterior
+     del tubo (120 mm) y declarado como cota VISUAL.
+     Como el resto de averías de este simulador, son ENTRADAS: se ponen, no salen
+     de un sorteo (igual que `setaLocal`, `ejeAtascado` o `cableSetaCortado`). */
+  this.mdus = [];
+  for (var m0 = 1; m0 <= (planta && planta.cfg ? planta.cfg.nMdu : 1); m0++) {
+    this.mdus.push({
+      id: m0,
+      viva: true,          /* dada de alta en la TMU   → StatusSlave_n */
+      comOk: true,         /* habla con la TMU         → AlarmSlaveComm_n es su negación */
+      hold: false          /* retenida por su alarma   → AlarmSlaveHold_n */
+    });
+  }
   /* --- eje: la avería es FÍSICA; el bit de alarma lo DEDUCE el firmware. Y hay dos
      averías distintas, que el equipo distingue por caminos distintos:
        · ATASCADO (rotor calado): no gira nada y el motor pega un pico de corriente,
@@ -1061,6 +1090,47 @@ TCU.prototype.leeSeta = function (dt) {
   /* el puente en H queda sin alimentación mientras la seta esté pulsada o la alarma
      de motor siga enclavada. Ojo: esto NO es una decisión del algoritmo. */
   this.motorHabilitado = !this.seta && !this.alarmaMotorEnclavada;
+};
+
+/* ── EL PERMISO DE MOVIMIENTO DEL MULTIPUNTO ──────────────────────────────────
+   `MovementPermission` (22009) tiene DIECISÉIS bits, no quince: el 0 es de la
+   TMU —`MovementAllowed_M`, la maestra— y del 1 al 15 van sus MDU. Ese desfase
+   de uno es toda la diferencia entre «quince MDU» y «quince MDU y la TMU», y es
+   lo que hace que el registro tenga 16 y no 15.
+   LA CONSECUENCIA DE VERDAD: el tubo es UNO. Si una sola MDU no da permiso, la
+   TMU no mueve nada — no mueve «las demás», porque no hay demás que mover: tirar
+   del tubo con una unidad retenida es torcerlo. Por eso esto se pregunta al lado
+   de la seta y ANTES de la ley del lazo: es hardware, no algoritmo.
+   Una MDU no da permiso si no está dada de alta, si no habla con la TMU o si
+   tiene un hold. Una que no está de alta NO cuenta como «niega»: cuenta como que
+   no existe, y por eso se mira `viva` antes que nada — si no, un multipunto
+   configurado a 15 con 3 instaladas no movería jamás. */
+TCU.prototype.permisoMdu = function (m) {
+  return !!(m.viva && m.comOk && !m.hold);
+};
+TCU.prototype.permisoMultipunto = function () {
+  var i, hay = 0;
+  for (i = 0; i < this.mdus.length; i++) {
+    var m = this.mdus[i];
+    if (!m.viva) continue;                       /* no instalada: no vota */
+    hay++;
+    if (!this.permisoMdu(m)) return false;       /* una sola basta para esperar */
+  }
+  /* NINGUNA DADA DE ALTA es un caso aparte, y no es «todas de acuerdo»: es una
+     TMU sin accionamiento debajo. El `every` de una lista vacía da true, que aquí
+     sería el vacío contado como permiso. */
+  return hay > 0;
+};
+/* Cuál es la primera que retiene, para poder DECIRLO en vez de dejar la mesa
+   quieta sin explicación. El visor y el banco lo leen de aquí. */
+TCU.prototype.mduQueRetiene = function () {
+  for (var i = 0; i < this.mdus.length; i++) {
+    var m = this.mdus[i];
+    if (m.viva && !this.permisoMdu(m)) {
+      return { id: m.id, motivo: !m.comOk ? 'sin comunicación con la TMU' : 'hold' };
+    }
+  }
+  return null;
 };
 
 /* 40007 bit 13 — «clear locked motor alarms». No limpia lo que sigue pasando: si la
@@ -1362,7 +1432,11 @@ TCU.prototype.mueve = function (dt, inhibido) {
      hardware— y por eso se pregunta antes que nada. (Lo perdí al reescribir el
      bloque y el banco lo cazó a la primera: «con la seta pulsada la mesa no se
      mueve» se puso rojo, que es exactamente lo que ese test existe para decir.) */
-  if (!this.motorHabilitado || inhibido) {
+  /* Y EL MULTIPUNTO ESPERA. Mismo sitio y misma razón que la seta: si una MDU no
+     da permiso, el tubo no se mueve. Va en la misma condición a propósito —son
+     la misma clase de cosa, hardware que no deja— y con `nMdu` a 1 y su MDU sana
+     no cambia nada: `permisoMultipunto()` da true y la rama es la de siempre. */
+  if (!this.motorHabilitado || inhibido || !this.permisoMultipunto()) {
     this.moviendo = 0; this.iMotor = 0; this.vMotor = 0; this.tSinMoverse = 0;
     this.park = null;
     if (mem !== 0) this.dirUlt = mem;
@@ -2095,6 +2169,11 @@ function Planta(cfg) {
        Por defecto cero: una estación que no está en la planta no se inventa. */
     nRsuExt: Math.max(0, Math.min(20, cfg.nRsuExt | 0)),
     nRsuVirt: Math.max(0, Math.min(2, cfg.nRsuVirt | 0)),
+    /* MDU POR SEGUIDOR: una TMU manda hasta 15 en el MISMO tubo de par. Por
+       defecto UNA, que es lo que este gemelo movía y sigue moviendo: con 1 el
+       bloque 22000 sale bit a bit como antes. El tope es del documento (los bits
+       de esclava van del 1 al 15), no una elección. */
+    nMdu: Math.max(1, Math.min(15, cfg.nMdu ? cfg.nMdu | 0 : 1)),
     wordOrder: cfg.wordOrder || 'big'
   };
   if (cfg.fabricante && !FABRICANTES[cfg.fabricante]) {
@@ -2829,21 +2908,63 @@ Planta.prototype.publicaRsusVirtuales = function (R) {
    entre sí, y eso no es una cuenta: es una medida de campo que nadie ha hecho. Va
    declarado en `sinModelar`. */
 Planta.prototype.publicaTmu = function (R) {
-  var segs = this.seguidores(), i;
+  var segs = this.seguidores(), i, j;
   for (i = 0; i < segs.length && i < 200; i++) {
-    var c = segs[i], b = 22000 + i * 26;
-    /* una sola MDU: su bit de estado puesto y ninguna alarma de esclava */
-    R[b + 6] = 1; R[b + 7] = 0; R[b + 8] = 0;
-    R[b + 9] = bits({ m: [0, 0], ok: [1, 1] },
-                    { m: c.motorHabilitado ? 1 : 0, ok: c.motorHabilitado ? 1 : 0 });
-    /* posición en radianes ×1000, y con una MDU el máximo ES el mínimo */
-    R[b + 10] = s16(Math.round(c.angulo * D2R * 1000));
-    R[b + 11] = s16(Math.round(c.angulo * D2R * 1000));
-    R[b + 12] = bits({ max: [0, 7], min: [8, 15] }, { max: 1, min: 1 });
-    R[b + 13] = u16(c.iMotorPico); R[b + 14] = u16(c.iMotorPico);
-    R[b + 15] = bits({ max: [0, 7], min: [8, 15] }, { max: 1, min: 1 });
-    R[b + 16] = kx10(c.tPcb); R[b + 17] = kx10(c.tPcb);
-    R[b + 18] = bits({ max: [0, 7], min: [8, 15] }, { max: 1, min: 1 });
+    var c = segs[i], b = 22000 + i * 26, mdus = c.mdus;
+
+    /* ── LOS 61 BITS DE ESCLAVA ──────────────────────────────────────────────
+       Tres registros de quince (estado, hold, comunicación) y uno de dieciséis
+       (permiso: el bit 0 es la TMU). Se montan POR MDU y por índice, no con un
+       valor repetido: el día que una de las quince esté retenida, el registro
+       tiene que decir CUÁL. Que esto se pudiera publicar es lo que costó el
+       arreglo del generador de la ficha del hermano — antes llegaban 5 entradas
+       de bit donde el documento trae 61, y con una no se puede nombrar a la
+       culpable. */
+    var est = {}, hold = {}, com = {}, perm = {};
+    var vEst = {}, vHold = {}, vCom = {}, vPerm = {};
+    for (j = 1; j <= 15; j++) {
+      est['s' + j] = [j - 1, j - 1];
+      hold['s' + j] = [j - 1, j - 1];
+      com['s' + j] = [j - 1, j - 1];
+      perm['s' + j] = [j, j];
+      var m = mdus[j - 1];
+      /* UNA MDU QUE NO EXISTE NO ES UNA MDU CAÍDA: sus tres bits van a cero —no
+         está de alta, no tiene hold, no ha perdido una comunicación que no
+         tenía— y tampoco niega el permiso. Poner su alarma de comunicación a 1
+         por no estar instalada diría que hay quince y nueve no contestan. */
+      vEst['s' + j] = m && m.viva ? 1 : 0;
+      vHold['s' + j] = m && m.viva && m.hold ? 1 : 0;
+      vCom['s' + j] = m && m.viva && !m.comOk ? 1 : 0;
+      vPerm['s' + j] = m && m.viva && c.permisoMdu(m) ? 1 : 0;
+    }
+    R[b + 6] = bits(est, vEst);
+    R[b + 7] = bits(hold, vHold);
+    R[b + 8] = bits(com, vCom);
+    /* el bit 0: el permiso de la MAESTRA, que es su propio motor */
+    perm.m = [0, 0]; vPerm.m = c.motorHabilitado ? 1 : 0;
+    R[b + 9] = bits(perm, vPerm);
+
+    /* ── LOS AGREGADOS DE MECÁNICA ───────────────────────────────────────────
+       Con UNA unidad de accionamiento el máximo ES el mínimo y el id es 1: eso
+       no se inventa, es literalmente verdad para un seguidor de un solo eje, que
+       es lo que este gemelo mueve.
+       CON VARIAS SE QUEDAN EN BLANCO, y es la misma decisión que `PosDif`. La
+       posición de cada MDU difiere por la torsión del tubo; la corriente, por
+       cómo se reparte el par; la temperatura, por las dos. Las tres piden
+       espesor de pared, material, número de MDU y separación — y de eso el canon
+       solo tiene el lado exterior del tubo, 120 mm, declarado como cota VISUAL.
+       Publicar el ángulo mandado como máximo Y mínimo con quince MDU sería
+       afirmar que no se tuercen: o sea, afirmar `PosDif = 0` por la puerta de
+       atrás, que es justo lo que no se puede afirmar. En blanco dice lo que es. */
+    if (mdus.length === 1) {
+      R[b + 10] = s16(Math.round(c.angulo * D2R * 1000));
+      R[b + 11] = s16(Math.round(c.angulo * D2R * 1000));
+      R[b + 12] = bits({ max: [0, 7], min: [8, 15] }, { max: 1, min: 1 });
+      R[b + 13] = u16(c.iMotorPico); R[b + 14] = u16(c.iMotorPico);
+      R[b + 15] = bits({ max: [0, 7], min: [8, 15] }, { max: 1, min: 1 });
+      R[b + 16] = kx10(c.tPcb); R[b + 17] = kx10(c.tPcb);
+      R[b + 18] = bits({ max: [0, 7], min: [8, 15] }, { max: 1, min: 1 });
+    }
   }
   return R;
 };

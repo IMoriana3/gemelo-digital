@@ -2223,5 +2223,144 @@ console.log('\n── el ángulo de la SP7 baja de la NCU, por grupo ──');
      'la 40031 (grupo 2, sin poner) no está en la imagen');
 }
 
+console.log('\n── el multipunto: la TMU ESPERA si una MDU no da permiso ──');
+/* Una TMU manda hasta 15 MDU sobre el MISMO tubo de par. Lo que se mide aquí es la
+   consecuencia de operación —el tubo es uno, así que una retenida para a todas— y
+   que los 61 bits digan CUÁL, que es para lo que hicieron falta.
+   Lo que NO se mide porque no se modela: cuánto se desvía cada MDU, su corriente y
+   su temperatura. Eso pide el reparto de par a lo largo del tubo. */
+{
+  const bitsDe = (w, n) => { const r = []; for (let i = 0; i < n; i++) r.push((w >> i) & 1); return r; };
+  const nuevo = (n) => {
+    const p = new SIM.Planta({ fabricante: 'p4q', nTcu: 1, nHsu: 1, nRep: 0,
+                               nMdu: n, dia: 172, hora: 10, averias: false });
+    return p;
+  };
+
+  /* el tope y el suelo son del DOCUMENTO (bits de esclava del 1 al 15), no una
+     elección: pedir 40 no puede dar 40 MDU, y pedir 0 no puede dar una TMU sin
+     accionamiento debajo. */
+  ok(nuevo(40).tcu(1).mdus.length === 15 && nuevo(0).tcu(1).mdus.length === 1,
+     'el número de MDU se recorta al 1..15 que dan los bits del documento',
+     'pedidas 40 → 15 · pedidas 0 → 1');
+
+  /* ── los 61 bits, uno por MDU y por índice ── */
+  const P15 = nuevo(15);
+  for (let k = 0; k < 5; k++) P15.paso(1);
+  let R = P15.regsNCU();
+  ok(bitsDe(R[22006], 15).every(b => b === 1),
+     'con 15 MDU dadas de alta, los quince bits de StatusSlaves están puestos',
+     'StatusSlaves = 0x' + R[22006].toString(16));
+  ok(R[22007] === 0 && R[22008] === 0,
+     'sanas, ni un bit de hold ni de comunicación',
+     'AlarmSlavesHold = ' + R[22007] + ' · AlarmSlavesCom = ' + R[22008]);
+  ok(bitsDe(R[22009], 16).every(b => b === 1),
+     'MovementPermission tiene DIECISÉIS: la TMU en el bit 0 y sus quince MDU detrás',
+     '0x' + R[22009].toString(16) + ' — el 16 es el desfase que distingue «15 MDU» de «15 y la TMU»');
+
+  /* ── UNA retiene, y el registro dice cuál ── */
+  const t = P15.tcu(1);
+  t.mdus[6].hold = true;                     /* la MDU 7 */
+  for (let k = 0; k < 3; k++) P15.paso(1);
+  R = P15.regsNCU();
+  ok(bitde(R[22007], 6, 6) === 1 && R[22007] === (1 << 6),
+     'el hold de la MDU 7 sale en SU bit, y solo en el suyo',
+     'AlarmSlavesHold = 0x' + R[22007].toString(16) + ' (bit 6 = esclava 7)');
+  ok(bitde(R[22009], 7, 7) === 0 && bitde(R[22009], 1, 1) === 1,
+     'la 7 deja de dar permiso y las demás siguen dándolo',
+     'MovementPermission = 0x' + R[22009].toString(16));
+  /* ESTO es el hallazgo del multipunto, y es la razón de los 60 bits: con un solo
+     bit por registro —lo que llegaba antes del arreglo de la ficha— este test no
+     se puede escribir, porque no hay forma de nombrar a la culpable. */
+  ok(t.mduQueRetiene() && t.mduQueRetiene().id === 7 && t.mduQueRetiene().motivo === 'hold',
+     'y el gemelo sabe decir QUIÉN retiene, no solo que algo retiene',
+     'retiene la MDU ' + t.mduQueRetiene().id + ' por ' + t.mduQueRetiene().motivo);
+
+  /* ── LA CONSECUENCIA: el tubo no se mueve ──
+     SE MIDE `anguloReal`, LA MESA, no `angulo`. `angulo` es lo que el TCU MIDE y
+     publica: sensor con ruido de 0,04° RMS, deriva y un filtro de 3 s, así que
+     deambula sola con el eje quieto. La primera versión de este test pedía
+     `|Δangulo| < 1e-9` y salió roja con 0,041° en diez minutos — y el eje no se
+     había movido: era la lectura. Medir el proxy en vez de la consecuencia es
+     justo el error que este banco existe para no cometer. */
+  const real0 = t.anguloReal, leido0 = t.angulo;
+  t.modo = SIM.MODO.AUTO;
+  for (let k = 0; k < 600; k++) P15.paso(1);   /* diez minutos de sol subiendo */
+  ok(Math.abs(t.anguloReal - real0) < 1e-9,
+     'con una MDU retenida la TMU NO MUEVE EL TUBO — ni esa ni las otras catorce',
+     'la MESA: ' + real0.toFixed(4) + '° → ' + t.anguloReal.toFixed(4) +
+     '° en 10 min de consigna viva');
+  ok(t.moviendo === 0 && t.iMotor === 0,
+     'y no es que empuje y no pueda: no arranca',
+     'moviendo = ' + t.moviendo + ' · iMotor = ' + t.iMotor);
+  /* y la distinción, fijada para que nadie la «arregle»: la lectura SÍ deambula
+     con el eje quieto, porque el inclinómetro tiene ruido. Un sensor que no se
+     moviera nunca sería un sensor que no está simulado. */
+  ok(Math.abs(t.angulo - leido0) > 1e-9 && Math.abs(t.angulo - leido0) < 0.5,
+     'la LECTURA sí deambula con el tubo quieto: es el inclinómetro, no el eje',
+     'medido ' + leido0.toFixed(4) + '° → ' + t.angulo.toFixed(4) + '° con la mesa parada');
+
+  /* ── suelta el hold y SÍ se mueve: el test de distinción necesita las dos caras.
+     Sin esto, «no se mueve» podría ser un seguidor roto por cualquier otra causa. */
+  t.mdus[6].hold = false;
+  for (let k = 0; k < 600; k++) P15.paso(1);
+  ok(Math.abs(t.anguloReal - real0) > 0.1,
+     'soltando el hold, el mismo seguidor con la misma consigna SÍ mueve la mesa',
+     'la MESA: ' + real0.toFixed(4) + '° → ' + t.anguloReal.toFixed(4) + '°');
+
+  /* ── sin comunicación: otra causa, otro registro, mismo efecto ── */
+  const P3 = nuevo(3); const t3 = P3.tcu(1);
+  t3.mdus[1].comOk = false;                  /* la MDU 2 */
+  for (let k = 0; k < 3; k++) P3.paso(1);
+  R = P3.regsNCU();
+  ok(R[22008] === (1 << 1) && R[22007] === 0,
+     'perder la comunicación sale en AlarmSlavesCom, no en el hold: son causas distintas',
+     'Com = 0x' + R[22008].toString(16) + ' · Hold = 0x' + R[22007].toString(16));
+  ok(bitde(R[22009], 2, 2) === 0 && t3.mduQueRetiene().motivo === 'sin comunicación con la TMU',
+     'y también quita el permiso, con su motivo propio',
+     'retiene la ' + t3.mduQueRetiene().id);
+  /* la de alta pero muda SÍ pone su bit de estado: está dada de alta, es que no
+     contesta. Distinguir «no instalada» de «instalada y muda» es el punto. */
+  ok(bitde(R[22006], 1, 1) === 1,
+     'una MDU muda sigue DADA DE ALTA: su bit de estado no se cae al perder el bus',
+     'StatusSlaves = 0x' + R[22006].toString(16));
+
+  /* ── una MDU que no está instalada NO es una MDU caída ── */
+  const P9 = nuevo(15); const t9 = P9.tcu(1);
+  for (let j = 3; j < 15; j++) t9.mdus[j].viva = false;   /* solo 3 instaladas */
+  for (let k = 0; k < 3; k++) P9.paso(1);
+  R = P9.regsNCU();
+  ok(R[22006] === 0b111 && R[22007] === 0 && R[22008] === 0,
+     'un multipunto configurado a 15 con 3 instaladas no publica 12 alarmas de comunicación',
+     'Status = 0b' + R[22006].toString(2) + ' · Hold = ' + R[22007] + ' · Com = ' + R[22008]);
+  ok(t9.permisoMultipunto() === true,
+     'y las doce que no están NO retienen el tubo: no votan, no existen',
+     'si votasen, un multipunto a medio instalar no movería jamás');
+  /* el vacío NO es permiso: una TMU sin ninguna MDU de alta no es «todas de
+     acuerdo», es una TMU sin accionamiento. El `every` de una lista vacía da true,
+     y ahí está la trampa. */
+  const tV = nuevo(3).tcu(1);
+  tV.mdus.forEach(m => { m.viva = false; });
+  ok(tV.permisoMultipunto() === false,
+     'ninguna MDU de alta NO es permiso: es una TMU sin accionamiento debajo',
+     'el vacío es error, no PASS');
+
+  /* ── los agregados de mecánica, en blanco con varias, y por qué ── */
+  const R1 = nuevo(1); for (let k = 0; k < 5; k++) R1.paso(1);
+  const r1 = R1.regsNCU();
+  ok(r1[22010] !== undefined && r1[22010] === r1[22011],
+     'con UNA unidad de accionamiento el máximo ES el mínimo: eso no se inventa',
+     'PosMax = PosMin = ' + r1[22010]);
+  const r15 = P15.regsNCU();
+  ok(r15[22010] === undefined && r15[22011] === undefined &&
+     r15[22013] === undefined && r15[22016] === undefined,
+     'con VARIAS, posición, corriente y temperatura por MDU se quedan en blanco',
+     'piden el reparto de par: espesor de pared, material, nº de MDU y separación');
+  ok(r1[22004] === undefined && r15[22004] === undefined,
+     'y PosDif en blanco con una y con quince, por la misma razón',
+     'publicar el ángulo mandado como máximo Y mínimo con 15 MDU sería afirmar ' +
+     'PosDif = 0 por la puerta de atrás');
+}
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);
