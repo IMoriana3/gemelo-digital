@@ -59,7 +59,7 @@ const PAG = `http://localhost:${PUERTO}/${CARPETA}/simulador.html`;
 /* WeatherContract se prueba puro; el navegador no necesita que el repo hermano
    proyectos del pin contenga todavía el módulo central para abrir en modo manual. */
 {
-  const A=await import('../sim/weather-contract-adapter.js');
+  const A=await import('../sim/weather-contract-adapter.mjs');
   const pkg={schema_version:'2.0.0',contract_id:'wc-twin',site:{timezone:'UTC'},
     source:{id:'open_meteo'},qa:{dataset_hash:'h-twin'},rows:[
       {t:'2026-01-01T00:00:00Z',ghi_wm2:0,temp_c:3,wind_ms:4,wind_dir_deg:180,gust_ms:7,cloud_total:.6,snow_depth_m:.01},
