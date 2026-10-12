@@ -27,6 +27,7 @@ export function stamp(pkg,consumer){
   };
 }
 function finite(v,dflt){
+  if(v===null||v===undefined||v==="")return dflt;
   const n=Number(v);return Number.isFinite(n)?n:dflt;
 }
 export function contractToBattery(pkg,{year=null}={}){
