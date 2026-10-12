@@ -63,13 +63,12 @@ jobs:
       # esperan. El commit sale de pines.json: tenerlo también aquí serían dos
       # sitios con el mismo dato, que es como se separan.
       #
-      # SOLO LOS DOS PÚBLICOS. `SolarGPTfull` es privado y el GITHUB_TOKEN por
-      # defecto está limitado a ESTE repositorio, así que un `git fetch` de otro
-      # repo privado muere con «could not read Username». No es un descuido de
-      # configuración: es el alcance del token. Ver `carea_resultado.mjs` en la
-      # lista EXCLUIDOS de tools/inventario_arneses.mjs, donde está dicho qué
-      # haría falta para meterlo.
+      # proyectos sigue siendo público; cobertura-zigbee es PRIVADO desde
+      # 2026-10-08. El GITHUB_TOKEN de este repo no alcanza al hermano, así que
+      # el fetch privado usa el token de sólo lectura compartido por las suites.
       - name: Clonar los hermanos POR EL PIN
+        env:
+          LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN }}
         run: |
           set -o pipefail
           leer () { python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['$1']['commit'])"; }
@@ -78,7 +77,11 @@ jobs:
             echo "── $repo → $sha"
             git init -q "$repo" && cd "$repo"
             git remote add origin "https://github.com/${{ github.repository_owner }}/$repo.git"
-            git fetch -q --depth 1 origin "$sha"
+            AUTH=()
+            if [ "$repo" = "cobertura-zigbee" ] && [ -n "$LECTURA_TOKEN" ]; then
+              AUTH=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$LECTURA_TOKEN" | base64 -w0)")
+            fi
+            git "${AUTH[@]}" fetch -q --depth 1 origin "$sha"
             git checkout -q FETCH_HEAD
             cd ..
           }
@@ -178,13 +181,16 @@ jobs:
       # volviera un `clone` a secas, la página se probaría contra la punta y la
       # puerta seguiría verde midiendo otra cosa.
       - name: Clonar cobertura-zigbee POR EL PIN
+        env:
+          LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN }}
         run: |
           set -o pipefail
           sha=$(python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['cobertura-zigbee']['commit'])")
           echo "── cobertura-zigbee → $sha"
           git init -q cobertura-zigbee && cd cobertura-zigbee
           git remote add origin "https://github.com/${{ github.repository_owner }}/cobertura-zigbee.git"
-          git fetch -q --depth 1 origin "$sha"
+          AUTH=(); [ -n "$LECTURA_TOKEN" ] && AUTH=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$LECTURA_TOKEN" | base64 -w0)")
+          git "${AUTH[@]}" fetch -q --depth 1 origin "$sha"
           git checkout -q FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$sha" || { echo "el clon NO está en el pin"; exit 1; }
 
