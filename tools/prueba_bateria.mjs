@@ -27,7 +27,7 @@ const ok = (c, m, x) => { console.log((c ? '  ✓ ' : '  ✗ ') + m + (!c && x ?
 
 /* WeatherContract: el adaptador se prueba sin red. */
 {
-  const A=await import('../sim/weather-contract-adapter.js');
+  const A=await import('../sim/weather-contract-adapter.mjs');
   const pkg={schema_version:'2.0.0',contract_id:'wc-bat',kind:'historical',
     site:{timezone:'Europe/Madrid'},source:{id:'open_meteo'},qa:{dataset_hash:'h-bat'},
     rows:[
