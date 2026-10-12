@@ -1073,7 +1073,7 @@ async function cargaMeteoContrato(){
   var kind=$('meteoTwinMode').value;
   if(kind==='manual'){TWIN_WC=null;TWIN_WC_LAST=null;$('wcTwinStatus').textContent='Manual · sliders / escenarios.';return;}
   try{
-    TWIN_WC_MOD=TWIN_WC_MOD||await import('./sim/weather-contract-adapter.js');
+    TWIN_WC_MOD=TWIN_WC_MOD||await import('./sim/weather-contract-adapter.mjs');
     TWIN_WC=await TWIN_WC_MOD.loadActiveContract(kind);
     if(!TWIN_WC)throw new Error('sin WeatherContract '+kind+' activo');
     var first=TWIN_WC.rows[0],near=TWIN_WC_MOD.twinWeatherSnapshot(TWIN_WC,new Date(),{maxGapMin:1e9})||TWIN_WC_MOD.twinWeatherSnapshot(TWIN_WC,first.t,{maxGapMin:1e9});
