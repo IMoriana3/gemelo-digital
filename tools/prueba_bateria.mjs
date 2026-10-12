@@ -25,6 +25,31 @@ const PAG = pathToFileURL(path.join(RAIZ, 'bateria.html')).href;
 let fallos = 0;
 const ok = (c, m, x) => { console.log((c ? '  ✓ ' : '  ✗ ') + m + (!c && x ? '  → ' + x : '')); if (!c) fallos++; };
 
+/* WeatherContract: el adaptador se prueba sin red. */
+{
+  const A=await import('../sim/weather-contract-adapter.js');
+  const pkg={schema_version:'2.0.0',contract_id:'wc-bat',kind:'historical',
+    site:{timezone:'Europe/Madrid'},source:{id:'open_meteo'},qa:{dataset_hash:'h-bat'},
+    rows:[
+      {t:'2024-01-01T00:00:00Z',ghi_wm2:0,dhi_wm2:0,temp_c:1,wind_ms:2,gust_ms:4,precip_mm:0,snowfall_cm:0},
+      {t:'2024-01-01T01:00:00Z',ghi_wm2:100,dhi_wm2:30,temp_c:2,wind_ms:5,gust_ms:8,precip_mm:1,snowfall_cm:.2}
+    ]};
+  const m=A.contractToBattery(pkg,{year:2024});
+  ok(m.length===2&&m[1].ghi===100&&m[1].wind===5&&m[1].gust===8,
+    'WeatherContract se convierte al meteo de batería sin cambiar magnitudes');
+  ok(m.contract.contract_id==='wc-bat'&&m.contract.dataset_hash==='h-bat',
+    'batería/winter conserva contract_id + dataset_hash');
+  const years=A.contractYears(pkg);
+  ok(years.length===1&&years[0]===2024,'el barrido puede enumerar años del WeatherContract');
+  const batTxt=readFileSync(path.join(RAIZ,'bateria.html'),'utf8');
+  ok(batTxt.includes('value="contract" selected')&&batTxt.includes('WeatherContract · compartido'),
+    'WeatherContract histórico es la fuente preferente de batería');
+  ok(batTxt.includes('contractOrFallback')&&batTxt.includes('open_meteo_fallback'),
+    'Open-Meteo directo queda como fallback declarado');
+  ok(batTxt.includes('winter')&&batTxt.includes('WeatherContract'),
+    'Winter mode y batería comparten la misma entrada meteorológica');
+}
+
 /* ── 1) el espejo no derrama: la comprobación se hace EN EL NAVEGADOR ──
    Aquí había una lista declarada de «globales del espejo que esta página pisa»,
    con su motivo. Era el parche correcto para el problema equivocado: la causa

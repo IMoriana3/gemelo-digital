@@ -56,6 +56,28 @@ const srv = spawn('python3', ['-m', 'http.server', String(PUERTO), '--directory'
 process.on('exit', () => { try { srv.kill(); } catch { /* nada */ } });
 const PAG = `http://localhost:${PUERTO}/${CARPETA}/simulador.html`;
 
+/* WeatherContract se prueba puro; el navegador no necesita que el repo hermano
+   proyectos del pin contenga todavía el módulo central para abrir en modo manual. */
+{
+  const A=await import('../sim/weather-contract-adapter.js');
+  const pkg={schema_version:'2.0.0',contract_id:'wc-twin',site:{timezone:'UTC'},
+    source:{id:'open_meteo'},qa:{dataset_hash:'h-twin'},rows:[
+      {t:'2026-01-01T00:00:00Z',ghi_wm2:0,temp_c:3,wind_ms:4,wind_dir_deg:180,gust_ms:7,cloud_total:.6,snow_depth_m:.01},
+      {t:'2026-01-01T01:00:00Z',ghi_wm2:50,temp_c:4,wind_ms:5,wind_dir_deg:190,gust_ms:8,cloud_total:.5,snow_depth_m:.01}
+    ]};
+  const s=A.twinWeatherSnapshot(pkg,'2026-01-01T00:20:00Z',{maxGapMin:45});
+  if(!s||s.contract.contract_id!=='wc-twin'||s.wind_ms!==4||s.cloud_total!==.6){
+    console.error('✗ WeatherContract snapshot del gemelo no conserva datos/identidad');process.exit(1);
+  }
+  const none=A.twinWeatherSnapshot(pkg,'2026-01-02T00:00:00Z',{maxGapMin:45});
+  if(none!==null){console.error('✗ el gemelo reutiliza WeatherContract fuera de cobertura');process.exit(1);}
+  const html=readFileSync(path.join(RAIZ,'simulador.html'),'utf8');
+  if(!html.includes('id="meteoTwinMode"')||!html.includes('btnMeteoContrato')||!html.includes('WEATHER alimenta la simulación; CONTROL/HSU decide')){
+    console.error('✗ la UI del gemelo no declara WeatherContract/precedencia de seguridad');process.exit(1);
+  }
+  console.log('  ✓ WeatherContract del gemelo conserva identidad, respeta cobertura y no sustituye HSU');
+}
+
 /* ── SE ESPERA A QUE EL SERVIDOR ESCUCHE, NO 1,2 SEGUNDOS ──────────────────────
    Aquí había un `setTimeout(1200)` y en CI se cayó: `ERR_CONNECTION_REFUSED`, con el
    banco muerto antes de correr una sola prueba. En una máquina cargada 1,2 s no basta
