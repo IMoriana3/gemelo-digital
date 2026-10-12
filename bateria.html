@@ -1090,7 +1090,7 @@ function chip(lab,val,cls,sub){
 function socCls(v,crit){return v<=0.001?'bad':(v<crit?'warn':'ok')}
 
 async function loadWeatherContract(kind,year){
-  const mod=await import('./sim/weather-contract-adapter.js');
+  const mod=await import('./sim/weather-contract-adapter.mjs');
   const z=await mod.loadBatteryContract({kind:kind,year:year});
   const s=z.meteo.contract;
   $('srcTag').textContent='WeatherContract '+kind+' · '+s.contract_id+' · hash '+s.dataset_hash;
@@ -1241,7 +1241,7 @@ $('run').onclick=function(){
     var years=[]; for(var y=yIni;y<=yEnd;y++)years.push(y);
     var fetchBatched=function(){
       if($('src').value==='contract'){
-        return import('./sim/weather-contract-adapter.js').then(async function(mod){
+        return import('./sim/weather-contract-adapter.mjs').then(async function(mod){
           try{
             var pkg=await mod.loadActiveContract('historical');
             if(!pkg)throw new Error('sin WeatherContract historical activo');
