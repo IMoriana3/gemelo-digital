@@ -68,7 +68,7 @@ jobs:
       # el fetch privado usa el token de sólo lectura compartido por las suites.
       - name: Clonar los hermanos POR EL PIN
         env:
-          LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN }}
+          LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN || secrets.SCADA_REPO_READ_TOKEN }}
         run: |
           set -o pipefail
           leer () { python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['$1']['commit'])"; }
@@ -226,6 +226,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: node tools/inventario_arneses.mjs
+      - name: WeatherContract v2 · batería, winter y gemelo
+        run: node tools/test_weather_contract.mjs
 
   # ─────────────────────────────────────────────────────────────────────────
   # NO BLOQUEA, y es una decisión. Perder de vista que el hermano evoluciona es
