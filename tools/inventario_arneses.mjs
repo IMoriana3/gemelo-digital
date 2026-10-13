@@ -91,6 +91,8 @@ const VIGILANTES = {
 
 /* ── lo que no es un arnés: módulos y generadores ── */
 const NO_ES_ARNES = {
+  'sim/weather-contract-adapter.mjs':
+    'MÓDULO consumidor, no banco: convierte WeatherContract v2 a las estructuras de Batería/Winter/Gemelo. Su veredicto vive en tools/test_weather_contract.mjs, que corre en un job bloqueante.',
   'tools/ambito.mjs':
     'MÓDULO, no banco: exporta scriptsDe/envuelto/desnudos y quien las ejecuta es '
     + 'prueba_bateria.mjs, que sí es puerta. Corriéndolo suelto no imprime nada ni '
