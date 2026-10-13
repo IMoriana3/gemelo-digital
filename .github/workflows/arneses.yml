@@ -71,6 +71,10 @@ jobs:
           LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN || secrets.SCADA_REPO_READ_TOKEN }}
         run: |
           set -o pipefail
+          test -n "$LECTURA_TOKEN" || {
+            echo "::error title=FALTA LECTURA_TOKEN::cobertura-zigbee es privado. Añade a este repo el secreto LECTURA_TOKEN (o SCADA_REPO_READ_TOKEN) con permiso de solo lectura sobre IMoriana3/cobertura-zigbee.";
+            exit 2;
+          }
           leer () { python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['$1']['commit'])"; }
           clonar () {
             local repo=$1 sha=$2
@@ -185,6 +189,10 @@ jobs:
           LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN }}
         run: |
           set -o pipefail
+          test -n "$LECTURA_TOKEN" || {
+            echo "::error title=FALTA LECTURA_TOKEN::cobertura-zigbee es privado. Añade a este repo el secreto LECTURA_TOKEN (o SCADA_REPO_READ_TOKEN) con permiso de solo lectura sobre IMoriana3/cobertura-zigbee.";
+            exit 2;
+          }
           sha=$(python3 -c "import json;print(json.load(open('gemelo-digital/pines.json'))['repos']['cobertura-zigbee']['commit'])")
           echo "── cobertura-zigbee → $sha"
           git init -q cobertura-zigbee && cd cobertura-zigbee
