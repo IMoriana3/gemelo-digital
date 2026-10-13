@@ -52,7 +52,7 @@
       <button type="button" id="simGuiaClose" aria-label="Cerrar guía rápida">Cerrar ×</button>
     </div>
     <div class="sg-body">
-      <p class="sg-intro">Consulta la ayuda sin salir de la aplicación. Abrirla no modifica la planta ni pausa la simulación; para detener el reloj, usa el botón de pausa.</p>
+      <p class="sg-intro">La simulación sigue mientras consultas la guía. Usa pausa si quieres detener el reloj.</p>
       <details open>
         <summary>1 · Preparar y observar la planta</summary>
         <p>Elige <b>Emplazamiento</b> y <b>Alimentación y batería</b>. Revisa el número de equipos y pulsa <b>↻ Rehacer planta</b>: reconstruye la simulación, así que úsalo antes del ensayo.</p>
@@ -79,7 +79,7 @@
       </details>
       <p class="sg-note"><b>Alcance:</b> este banco simula los equipos y su imagen de registros; no manda órdenes a la planta real. La capa de granizo no inventa un registro Modbus de firmware y su confirmación física pertenece al gemelo, no a una medida de campo.</p>
       <div class="sg-actions">
-        <button type="button" data-sg-jump="hail">Ir a los controles de granizo</button>
+        <button type="button" data-sg-jump="hail">Configurar granizo</button>
         <button type="button" data-sg-jump="campo">Ver Campo 3D</button>
       </div>
     </div>

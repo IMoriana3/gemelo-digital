@@ -332,7 +332,7 @@
 
       <div class="grp">
         <h3>Gestión de batería</h3>
-        <label class="sw"><input type="checkbox" id="estrOn" checked><span>Estrategia oficial de gestión de SOC</span></label>
+        <label class="sw"><input type="checkbox" id="estrOn" checked><span>Estrategia de carga (SOC)</span></label>
         <div class="fld"><label>SOC objetivo (techo) <span class="rv" id="socTgtV">80 %</span></label>
           <input type="range" id="socTgt" min="40" max="100" value="80"></div>
         <div class="fld"><label>SOC crítico (defensa) <span class="rv" id="socCritV">30 %</span></label>
@@ -343,7 +343,7 @@
         <div class="note" id="winterNota" style="margin-top:-4px"></div>
         <div class="fld"><label>T mínima de carga <span class="rv" id="tMinV">0 °C</span></label>
           <input type="range" id="tMin" min="-20" max="15" value="0"></div>
-        <div class="fld"><label>Cut-in del regulador <span class="rv" id="poaMinV">50 W/m²</span></label>
+        <div class="fld"><label>Umbral de arranque del regulador <span class="rv" id="poaMinV">50 W/m²</span></label>
           <input type="range" id="poaMin" min="0" max="250" value="50"></div>
         <div class="fld"><label>Consumo del motor</label>
           <select id="motorModel">
