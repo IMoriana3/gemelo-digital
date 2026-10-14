@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0B0F14">
+<meta name="theme-color" content="#0E1826">
 <link rel="icon" href="favicon.svg">
 <title>Simulador de planta equipo a equipo — Factiun</title>
 <!--
@@ -16,17 +16,28 @@
   Esta página solo pinta y manda: no duplica ni una fórmula ni una dirección.
 -->
 <style>
+/* Piel «Célula» (la de la portada y el SCADA): tipografías autoalojadas (OFL), ámbar Factiun como único color de emisión y paleta de estado aparte */
+@font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(assets/fonts/Barlow-400-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(assets/fonts/Barlow-500-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:600;font-display:swap;src:url(assets/fonts/Barlow-600-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:500;font-display:swap;src:url(assets/fonts/BarlowCondensed-500-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:600;font-display:swap;src:url(assets/fonts/BarlowCondensed-600-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:400;font-display:swap;src:url(assets/fonts/JetBrainsMono-400-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:500;font-display:swap;src:url(assets/fonts/JetBrainsMono-500-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:600;font-display:swap;src:url(assets/fonts/JetBrainsMono-600-latin.woff2) format("woff2")}
+
   :root{
     /* Estándar de la casa Factiun (mismos tokens que index.html y bateria.html) */
-    --void:#0B0F14; --panel-2:#0F151D; --text:#E7EEF4; --muted:#8093A4; --radius:14px;
-    --bg:var(--void); --panel:#121922; --card:var(--panel-2); --card2:#15212d;
-    --line:#23303D; --line2:#32485d;
-    --tx:var(--text); --tx2:var(--muted); --tx3:#5e7388;
-    --accent:#36D399; --ok:#37b87c; --warn:#e0a52b; --danger:#e2574c; --sun:#f0a93b;
-    --blue:#3aa0ff; --violet:#9b8cff;
-    --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
-    --display:'Space Grotesk',var(--sans);
+    --void:#0E1826; --panel-2:#101D30; --text:#DCE3EB; --muted:#8C9AAB; --radius:4px;
+    --bg:var(--void); --panel:#132238; --card:var(--panel-2); --card2:#1A2D48;
+    --line:#27405F; --line2:#34506F;
+    --tx:var(--text); --tx2:var(--muted); --tx3:#7F8EA1;
+    --accent:#F09030; --ok:#5BBF8A; --warn:#F2C94C; --danger:#E84858; --sun:#f0a93b;
+    --blue:#68C0D8; --violet:#9b8cff;
+    --mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Barlow','Helvetica Neue',Arial,sans-serif;
+    --display:'Barlow Condensed','Arial Narrow',var(--sans);
+    --amb-dim:#9A5E20;--fos:#68C0D8;--plata:#B8C3CE;--panel-hi:#1A2D48;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
@@ -39,7 +50,7 @@
   nav a{color:var(--tx3);font-size:12.5px;text-decoration:none}
   nav a:hover{color:var(--tx2)}
   nav .right{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--tx3);display:flex;gap:12px;align-items:center}
-  .badge{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line2);color:var(--tx2)}
+  .badge{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:3px;border:1px solid var(--line2);color:var(--tx2)}
   .badge.run{color:var(--ok);border-color:var(--ok)}
   .badge.stop{color:var(--warn);border-color:var(--warn)}
   .badge.alarm{color:var(--danger);border-color:var(--danger)}
@@ -50,12 +61,12 @@
 
   .grp{margin-bottom:14px}
   .escfila{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 4px}
-  .escfila select{flex:1;min-width:260px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}
-  .escfila input{background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;font-family:var(--mono)}
+  .escfila select{flex:1;min-width:260px;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:3px;padding:7px 9px;font:inherit;font-size:13px}
+  .escfila input{background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:3px;padding:7px 9px;font:inherit;font-size:13px;font-family:var(--mono)}
   .eco-ok{color:var(--ok)} .eco-no{color:var(--danger)}
   .fijados{border-color:var(--accent)}
   /* el guion editable: una fila por evento, todo tocable donde está */
-  .ev{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 8px;border-radius:7px;
+  .ev{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 8px;border-radius:3px;
       border:1px solid var(--bd);margin-top:5px;background:#0d141c;font-size:13px}
   .ev.hecho{opacity:.55}
   .ev.prox{border-color:var(--accent)}
@@ -66,8 +77,8 @@
   .ev .u{color:var(--tx3);font-size:12px}
   .ev .est{margin-left:auto;color:var(--tx3);font-size:12px;white-space:nowrap}
   .ev input,.ev select{background:#111a24;color:var(--tx);border:1px solid var(--bd);
-      border-radius:5px;padding:3px 6px;font-size:12.5px;font-family:inherit}
-  .ev .quita{background:none;border:1px solid var(--bd);color:var(--tx3);border-radius:5px;
+      border-radius:3px;padding:3px 6px;font-size:12.5px;font-family:inherit}
+  .ev .quita{background:none;border:1px solid var(--bd);color:var(--tx3);border-radius:3px;
       cursor:pointer;padding:2px 7px;font-size:12px}
   .ev .quita:hover{color:var(--danger);border-color:var(--danger)}
   #mb3d table.mb{width:100%}
@@ -80,7 +91,7 @@
       text-transform:uppercase;color:var(--tx3)}
   .timerow .btn,.timerow select{width:auto;padding:5px 11px;font-size:.8rem}
   .hud{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));gap:8px;margin-top:10px}
-  .ro{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 10px}
+  .ro{background:var(--card2);border:1px solid var(--line);border-radius:3px;padding:7px 10px}
   .ro .k{font-family:var(--mono);font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;
       color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ro .v{font-size:1.02rem;font-weight:600;margin-top:2px;font-family:var(--mono)}
@@ -91,7 +102,7 @@
   .flotaAgr{display:flex;flex-direction:column;gap:6px}
   .flotaAgr .flota{margin:2px 0 8px}
   .grupoF{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--line2);
-          border-radius:9px;background:var(--card2);cursor:pointer;font-size:13.5px;color:var(--tx2)}
+          border-radius:3px;background:var(--card2);cursor:pointer;font-size:13.5px;color:var(--tx2)}
   .grupoF:hover{border-color:var(--tx3)}
   .grupoF b{color:var(--tx);font-family:var(--mono);font-size:15px;min-width:2.2em;text-align:right}
   .grupoF i{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--tx3)}
@@ -112,12 +123,12 @@
   .fld{margin-bottom:8px}
   .fld label{display:flex;justify-content:space-between;font-size:12px;color:var(--tx2);margin-bottom:3px}
   .fld .rv{font-family:var(--mono);font-size:11.5px;color:var(--accent)}
-  .fld select,.fld input[type=number],.fld input[type=text]{width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px}
+  .fld select,.fld input[type=number],.fld input[type=text]{width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:3px;padding:6px 9px;font:inherit;font-size:13px}
   .fld input[type=range]{width:100%;accent-color:var(--accent);margin:2px 0}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
   .row4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-  .btn{width:100%;padding:9px;background:var(--accent);color:#06281c;border:0;border-radius:9px;font:600 13px var(--sans);cursor:pointer}
+  .btn{width:100%;padding:9px;background:var(--accent);color:#06281c;border:0;border-radius:3px;font:600 13px var(--sans);cursor:pointer}
   .btn:hover{filter:brightness(1.08)}
   .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line2)}
   .btn.dang{background:var(--danger);color:#2a0b08}
@@ -126,18 +137,18 @@
   .sw{display:flex;align-items:center;gap:8px;margin-bottom:7px;cursor:pointer;user-select:none;font-size:13px}
   .sw input{accent-color:var(--accent);width:15px;height:15px}
   .chipsg{display:flex;flex-wrap:wrap;gap:4px}
-  .cg{font:600 11px var(--mono);padding:4px 7px;border-radius:6px;border:1px solid var(--line2);background:var(--card2);color:var(--tx3);cursor:pointer;user-select:none}
+  .cg{font:600 11px var(--mono);padding:4px 7px;border-radius:3px;border:1px solid var(--line2);background:var(--card2);color:var(--tx3);cursor:pointer;user-select:none}
   .cg.on{border-color:var(--warn);color:var(--warn);background:#241d09}
   .note{font-size:11px;color:var(--tx3);line-height:1.45;margin-top:8px}
   .note b{color:var(--tx2);font-weight:600}
 
   /* pestañas */
   .tabs{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap}
-  .tab{cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--tx2);border-radius:9px;padding:7px 15px;font:inherit;font-size:13px}
+  .tab{cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--tx2);border-radius:3px;padding:7px 15px;font:inherit;font-size:13px}
   .tab.on{border-color:var(--accent);color:var(--tx);background:#10241d}
 
   .chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin-bottom:12px}
-  .chip{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 10px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:3px;padding:7px 10px}
   .chip .lab{font-size:10.5px;color:var(--tx3);line-height:1.2}
   .chip .v{font-family:var(--mono);font-size:16px;font-weight:600}
   .chip .v.ok{color:var(--ok)} .chip .v.warn{color:var(--warn)} .chip .v.bad{color:var(--danger)} .chip .v.blue{color:var(--blue)}
@@ -149,7 +160,7 @@
 
   /* rejilla de seguidores */
   .flota{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:6px}
-  .mesa{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 7px;cursor:pointer;position:relative;overflow:hidden}
+  .mesa{background:var(--card2);border:1px solid var(--line);border-radius:3px;padding:6px 7px;cursor:pointer;position:relative;overflow:hidden}
   .mesa:hover{border-color:var(--line2)}
   .mesa.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
   .mesa .id{font:600 12px var(--mono);display:flex;justify-content:space-between;align-items:center}
@@ -226,13 +237,13 @@
 
   /* mapa Modbus */
   .mbbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
-  .mbbar input[type=text],.mbbar select{background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:12.5px}
+  .mbbar input[type=text],.mbbar select{background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:3px;padding:6px 9px;font:inherit;font-size:12.5px}
   .mbbar input[type=text]{width:190px}
   .mbbar .sw{margin:0}
   .secmb{margin-bottom:14px}
   .secmb h3{margin:0 0 2px;font:600 12.5px var(--display);color:var(--tx)}
   .secmb .sn{font-size:11px;color:var(--tx3);margin-bottom:6px;font-family:var(--mono)}
-  .secmb .rw{font:600 9.5px var(--mono);padding:1px 6px;border-radius:5px;border:1px solid var(--line2);color:var(--tx3);margin-left:6px;vertical-align:2px}
+  .secmb .rw{font:600 9.5px var(--mono);padding:1px 6px;border-radius:3px;border:1px solid var(--line2);color:var(--tx3);margin-left:6px;vertical-align:2px}
   .secmb .rw.w{color:var(--warn);border-color:#4a3a10}
   table.mb{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
   table.mb th,table.mb td{padding:3px 7px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -256,14 +267,14 @@
   .aprox{color:var(--violet)}
 
   .jer{display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:12px}
-  .jer div{padding:4px 8px;border-radius:6px;border:1px solid var(--line);color:var(--tx3);display:flex;justify-content:space-between;gap:10px}
+  .jer div{padding:4px 8px;border-radius:3px;border:1px solid var(--line);color:var(--tx3);display:flex;justify-content:space-between;gap:10px}
   .jer div.gana{border-color:var(--accent);color:var(--tx);background:#10241d}
   .jer div.activa{border-color:var(--warn);color:var(--warn)}
   .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:5px 14px;font-size:12.5px}
   .kv div{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:3px 0}
   .kv span:first-child{color:var(--tx3)}
   .kv span:last-child{font-family:var(--mono)}
-  canvas.ch{width:100%;display:block;border-radius:8px}
+  canvas.ch{width:100%;display:block;border-radius:3px}
   @media (max-width:900px){ .main{grid-template-columns:1fr;overflow-y:auto} .side{border-right:0;border-bottom:1px solid var(--line)} }
 </style>
 </head>
@@ -703,7 +714,7 @@
         <div class="chips" id="chipsTcu"></div>
         <div class="card">
           <h2>Traza <span class="badge" id="hMuestras">—</span></h2>
-          <div class="sub">Lo que ha pasado, no solo lo que pasa. <b style="color:#9a8c5a">objetivo solar</b> (a trazos) · <b style="color:#e0a52b">objetivo</b> · <b style="color:#36D399">real</b> · <b style="color:#6fb7ff">medido</b> arriba; <b style="color:#b98cff">SoC</b> y <b style="color:#5e7388">viento</b> abajo. Las líneas rojas son eventos. Cada hueco tiene un culpable: entre <i>solar</i> y <i>objetivo</i>, una protección (bandera, nieve, forzado); entre <i>objetivo</i> y <i>real</i>, la banda muerta; entre <i>real</i> y <i>medido</i>, el inclinómetro.</div>
+          <div class="sub">Lo que ha pasado, no solo lo que pasa. <b style="color:#9a8c5a">objetivo solar</b> (a trazos) · <b style="color:#e0a52b">objetivo</b> · <b style="color:#36D399">real</b> · <b style="color:#6fb7ff">medido</b> arriba; <b style="color:#b98cff">SoC</b> y <b style="color:#7F8EA1">viento</b> abajo. Las líneas rojas son eventos. Cada hueco tiene un culpable: entre <i>solar</i> y <i>objetivo</i>, una protección (bandera, nieve, forzado); entre <i>objetivo</i> y <i>real</i>, la banda muerta; entre <i>real</i> y <i>medido</i>, el inclinómetro.</div>
           <canvas id="hCanvas" style="width:100%;height:260px;display:block;border-radius:8px"></canvas>
           <div class="escfila" style="margin-top:8px">
             <button class="btn sec" id="hCsv" style="width:auto;padding:6px 12px">CSV de la traza</button>
@@ -2616,19 +2627,19 @@ function grafica() {
   if (c.width !== W) { c.width = W; c.height = H; }
   g.clearRect(0, 0, W, H);
   var pad = 26, w = W - pad * 2, h = H - 22;
-  g.strokeStyle = '#23303D'; g.lineWidth = 1;
+  g.strokeStyle = '#27405F'; g.lineWidth = 1;
   for (var i = 0; i <= 4; i++) {
     var y = 10 + h * i / 4;
     g.beginPath(); g.moveTo(pad, y); g.lineTo(pad + w, y); g.stroke();
   }
-  g.fillStyle = '#5e7388'; g.font = '10px ui-monospace,monospace';
+  g.fillStyle = '#7F8EA1'; g.font = '10px ui-monospace,monospace';
   g.fillText('+55°', 2, 14); g.fillText('0°', 2, 10 + h / 2 + 3); g.fillText('−55°', 2, 10 + h - 1);
   if (traza.length < 2) { g.fillText('sin datos todavía — dale a Simular', pad + 10, 10 + h / 2 - 8); return; }
   var x = function (i) { return pad + w * i / (traza.length - 1); };
   var yAng = function (a) { return 10 + h / 2 - (a / 55) * (h / 2); };
   var yS = function (s) { return 10 + h - (s / 100) * h; };
   /* seguimiento puro, de referencia */
-  g.strokeStyle = '#32485d'; g.setLineDash([3, 3]); g.beginPath();
+  g.strokeStyle = '#34506F'; g.setLineDash([3, 3]); g.beginPath();
   traza.forEach(function (p, i) { i ? g.lineTo(x(i), yAng(p.tt)) : g.moveTo(x(i), yAng(p.tt)); });
   g.stroke(); g.setLineDash([]);
   /* techo de carga y SOC crítico de la estrategia: las dos rayas entre las que se

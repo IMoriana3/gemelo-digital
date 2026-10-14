@@ -3,39 +3,47 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0B0F14">
+<meta name="theme-color" content="#0E1826">
 <link rel="icon" href="../favicon.svg">
 <title>Arena Solar · Juegos internos — Factiun</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
 <style>
+/* Piel «Célula» (la de la portada y el SCADA): tipografías autoalojadas (OFL), ámbar Factiun como único color de emisión y paleta de estado aparte */
+@font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(../assets/fonts/Barlow-400-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(../assets/fonts/Barlow-500-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:600;font-display:swap;src:url(../assets/fonts/Barlow-600-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:500;font-display:swap;src:url(../assets/fonts/BarlowCondensed-500-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:600;font-display:swap;src:url(../assets/fonts/BarlowCondensed-600-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:400;font-display:swap;src:url(../assets/fonts/JetBrainsMono-400-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:500;font-display:swap;src:url(../assets/fonts/JetBrainsMono-500-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:600;font-display:swap;src:url(../assets/fonts/JetBrainsMono-600-latin.woff2) format("woff2")}
+
   :root{
-    --bg:#0B0F14;--panel-2:#0F151D;--text:#E7EEF4;--muted:#8093A4;
-    --card:#0F151D;--card2:#15212d;--line:#23303D;--line2:#32485d;
-    --accent:#36D399;--tx:var(--text);--tx2:var(--muted);--tx3:#5e7388;
-    --sans:'IBM Plex Sans',system-ui,sans-serif;--display:'Space Grotesk',var(--sans);
+    --bg:#0E1826;--panel-2:#101D30;--text:#DCE3EB;--muted:#8C9AAB;
+    --card:#101D30;--card2:#1A2D48;--line:#27405F;--line2:#34506F;
+    --accent:#F09030;--tx:var(--text);--tx2:var(--muted);--tx3:#7F8EA1;
+    --sans:'Barlow','Helvetica Neue',Arial,sans-serif;--display:'Barlow Condensed','Arial Narrow',var(--sans);
+    --amb-dim:#9A5E20;--fos:#68C0D8;--plata:#B8C3CE;--panel-hi:#1A2D48;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(120% 90% at 50% -10%,#16263a 0%,#0b0f14 55%);
+  body{margin:0;background:radial-gradient(120% 90% at 50% -10%,#16263a 0%,#0E1826 55%);
     color:var(--tx);font-family:var(--sans);min-height:100vh}
   /* Rejilla de juegos de 250 px minimo: con el tope en 1040 px sobraban 460 px a cada lado en
      una pantalla de 1920 y se quedaba en cuatro columnas. */
   .wrap{max-width:min(2560px,96vw);margin:0 auto;padding:34px 20px 60px}
-  .logo{font:700 13px var(--display);color:var(--accent);letter-spacing:.18em;text-transform:uppercase}
-  h1{font:700 36px/1.05 var(--display);margin:8px 0 6px}
+  .logo{font:600 13px var(--display);color:var(--accent);letter-spacing:.18em;text-transform:uppercase}
+  h1{font:600 36px/1.05 var(--display);margin:8px 0 6px}
   .sub{color:var(--tx2);font-size:15px;max-width:640px;margin-bottom:30px}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
-  .game{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:16px;
+  .game{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:3px;
     padding:20px;text-decoration:none;color:inherit;transition:.16s;position:relative;overflow:hidden;min-height:182px}
   .game.live:hover{border-color:var(--accent);transform:translateY(-3px);box-shadow:0 14px 40px rgba(0,0,0,.4)}
   .game .ic{font-size:34px;margin-bottom:12px}
-  .game h2{font:700 18px var(--display);margin:0 0 6px}
+  .game h2{font:600 18px var(--display);margin:0 0 6px}
   .game p{color:var(--tx2);font-size:13px;line-height:1.45;margin:0;flex:1}
   .tag{align-self:flex-start;margin-top:14px;font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.05em;
-    padding:5px 10px;border-radius:999px}
-  .tag.on{background:rgba(54,211,153,.16);color:var(--accent);border:1px solid var(--accent)}
-  .tag.soon{background:#15212d;color:var(--tx3);border:1px solid var(--line2)}
+    padding:5px 10px;border-radius:3px}
+  .tag.on{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent);border:1px solid var(--accent)}
+  .tag.soon{background:#1A2D48;color:var(--tx3);border:1px solid var(--line2)}
   .game.soon{opacity:.62}
   .phase{grid-column:1/-1;font:600 12px var(--sans);text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);
     margin:20px 0 -4px;display:flex;align-items:center;gap:10px}
