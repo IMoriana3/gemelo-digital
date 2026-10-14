@@ -3,31 +3,42 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#0B0F14">
+<meta name="theme-color" content="#0E1826">
 <link rel="icon" href="../favicon.svg">
 <title>Tracker en Realidad Aumentada — Factiun</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="../seguidor.js?v=7"></script>
 <script src="escena.js"></script>
 <style>
-  :root{--void:#0B0F14;--text:#E7EEF4;--muted:#8093A4;--line:#23303D;--line2:#32485d;--card2:#15212d;
-    --tx:var(--text);--tx2:var(--muted);--tx3:#5e7388;--accent:#36D399;--sans:'IBM Plex Sans',system-ui,sans-serif;--display:'Space Grotesk',var(--sans);}
+/* Piel «Célula» (la de la portada y el SCADA): tipografías autoalojadas (OFL), ámbar Factiun como único color de emisión y paleta de estado aparte */
+@font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(../assets/fonts/Barlow-400-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(../assets/fonts/Barlow-500-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:600;font-display:swap;src:url(../assets/fonts/Barlow-600-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:500;font-display:swap;src:url(../assets/fonts/BarlowCondensed-500-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:600;font-display:swap;src:url(../assets/fonts/BarlowCondensed-600-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:400;font-display:swap;src:url(../assets/fonts/JetBrainsMono-400-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:500;font-display:swap;src:url(../assets/fonts/JetBrainsMono-500-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:600;font-display:swap;src:url(../assets/fonts/JetBrainsMono-600-latin.woff2) format("woff2")}
+
+  :root{--void:#0E1826;--text:#DCE3EB;--muted:#8C9AAB;--line:#27405F;--line2:#34506F;--card2:#1A2D48;
+    --tx:var(--text);--tx2:var(--muted);--tx3:#7F8EA1;--accent:#F09030;--sans:'Barlow','Helvetica Neue',Arial,sans-serif;--display:'Barlow Condensed','Arial Narrow',var(--sans);
+    --amb-dim:#9A5E20;--fos:#68C0D8;--plata:#B8C3CE;--panel-hi:#1A2D48;
+  }
   *{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden}
-  body{background:#0B0F14;color:var(--tx);font-family:var(--sans);user-select:none;-webkit-user-select:none}
+  body{background:#0E1826;color:var(--tx);font-family:var(--sans);user-select:none;-webkit-user-select:none}
   #cv{position:fixed;inset:0}#cv canvas{display:block;width:100%;height:100%}
   .bar{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:10px 14px;z-index:10;
-    background:linear-gradient(180deg,rgba(11,15,20,.7),transparent)}
-  .bar .b{font:700 14px var(--display);color:var(--accent)}.bar .t{font:600 13px var(--sans);color:var(--tx2)}
-  .bar a{margin-left:auto;color:var(--tx2);text-decoration:none;font-size:12px;border:1px solid var(--line2);border-radius:9px;padding:6px 10px;background:rgba(13,19,26,.6)}
-  .arbtn{position:fixed;bottom:18px;left:50%;translate:-50% 0;z-index:10;background:var(--accent);color:#06210f;border:0;border-radius:14px;padding:15px 26px;font:700 17px var(--display);cursor:pointer;box-shadow:0 8px 28px rgba(54,211,153,.35)}
-  .arnote{position:fixed;bottom:78px;left:50%;translate:-50% 0;z-index:10;max-width:90%;text-align:center;color:var(--tx2);font-size:12.5px;background:rgba(13,19,26,.7);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+    background:linear-gradient(180deg,rgba(14,24,38,.7),transparent)}
+  .bar .b{font:600 14px var(--display);color:var(--accent)}.bar .t{font:600 13px var(--sans);color:var(--tx2)}
+  .bar a{margin-left:auto;color:var(--tx2);text-decoration:none;font-size:12px;border:1px solid var(--line2);border-radius:3px;padding:6px 10px;background:rgba(13,19,26,.6)}
+  .arbtn{position:fixed;bottom:18px;left:50%;translate:-50% 0;z-index:10;background:var(--accent);color:#06210f;border:0;border-radius:4px;padding:15px 26px;font:600 17px var(--display);cursor:pointer;box-shadow:0 8px 28px color-mix(in srgb,var(--accent) 39%,transparent)}
+  .arnote{position:fixed;bottom:78px;left:50%;translate:-50% 0;z-index:10;max-width:90%;text-align:center;color:var(--tx2);font-size:12.5px;background:rgba(13,19,26,.7);border:1px solid var(--line);border-radius:3px;padding:8px 12px}
   .hint{position:fixed;top:50px;left:50%;translate:-50% 0;color:var(--tx2);font-size:12px;z-index:9;text-shadow:0 1px 3px #000}
   /* overlay DOM durante la sesión RA */
   .aroverlay{position:fixed;inset:0;z-index:50;display:none;pointer-events:none}
   .aroverlay.show{display:block}
-  .aroverlay .arhint{position:absolute;top:16px;left:50%;translate:-50% 0;background:rgba(13,19,26,.85);border:1px solid var(--line2);border-radius:12px;padding:10px 16px;font-size:14px;pointer-events:none;max-width:90%;text-align:center}
-  .aroverlay .arexit{position:absolute;bottom:24px;left:50%;translate:-50% 0;background:#e2574c;color:#fff;border:0;border-radius:12px;padding:13px 22px;font:700 15px var(--sans);cursor:pointer;pointer-events:auto}
+  .aroverlay .arhint{position:absolute;top:16px;left:50%;translate:-50% 0;background:rgba(13,19,26,.85);border:1px solid var(--line2);border-radius:4px;padding:10px 16px;font-size:14px;pointer-events:none;max-width:90%;text-align:center}
+  .aroverlay .arexit{position:absolute;bottom:24px;left:50%;translate:-50% 0;background:#e2574c;color:#fff;border:0;border-radius:4px;padding:13px 22px;font:600 15px var(--sans);cursor:pointer;pointer-events:auto}
 </style>
 </head>
 <body>

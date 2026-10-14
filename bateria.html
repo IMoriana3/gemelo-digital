@@ -3,24 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0B0F14">
+<meta name="theme-color" content="#0E1826">
 <link rel="icon" href="favicon.svg">
 <title>Simulador de batería — Factiun</title>
 <!-- Gráficas en canvas 2D sin librerías. Leaflet LOCAL (lib/) solo para elegir emplazamiento. -->
 <link rel="stylesheet" href="lib/leaflet.css">
 <script src="lib/leaflet.js"></script>
 <style>
+/* Piel «Célula» (la de la portada y el SCADA): tipografías autoalojadas (OFL), ámbar Factiun como único color de emisión y paleta de estado aparte */
+@font-face{font-family:"Barlow";font-weight:400;font-display:swap;src:url(assets/fonts/Barlow-400-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:500;font-display:swap;src:url(assets/fonts/Barlow-500-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow";font-weight:600;font-display:swap;src:url(assets/fonts/Barlow-600-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:500;font-display:swap;src:url(assets/fonts/BarlowCondensed-500-latin.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:600;font-display:swap;src:url(assets/fonts/BarlowCondensed-600-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:400;font-display:swap;src:url(assets/fonts/JetBrainsMono-400-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:500;font-display:swap;src:url(assets/fonts/JetBrainsMono-500-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:600;font-display:swap;src:url(assets/fonts/JetBrainsMono-600-latin.woff2) format("woff2")}
+
   :root{
     /* Estándar de la casa Factiun (mismos tokens que index.html) */
-    --void:#0B0F14; --panel-2:#0F151D; --text:#E7EEF4; --muted:#8093A4; --radius:14px;
-    --display:'Space Grotesk',var(--sans);
-    --bg:var(--void); --panel:#121922; --card:var(--panel-2); --card2:#15212d;
-    --line:#23303D; --line2:#32485d;
-    --tx:var(--text); --tx2:var(--muted); --tx3:#5e7388;
-    --accent:#36D399; --ok:#37b87c; --warn:#e0a52b; --danger:#e2574c; --sun:#f0a93b;
-    --amber:#EF9F27; --green:#7bbb34; --blue:#3aa0ff;
-    --mono:'IBM Plex Mono',ui-monospace,monospace;
-    --sans:'IBM Plex Sans',system-ui,sans-serif;
+    --void:#0E1826; --panel-2:#101D30; --text:#DCE3EB; --muted:#8C9AAB; --radius:4px;
+    --display:'Barlow Condensed','Arial Narrow',var(--sans);
+    --bg:var(--void); --panel:#132238; --card:var(--panel-2); --card2:#1A2D48;
+    --line:#27405F; --line2:#34506F;
+    --tx:var(--text); --tx2:var(--muted); --tx3:#7F8EA1;
+    --accent:#F09030; --ok:#5BBF8A; --warn:#F2C94C; --danger:#E84858; --sun:#f0a93b;
+    --amber:#EF9F27; --green:#7bbb34; --blue:#68C0D8;
+    --mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Barlow','Helvetica Neue',Arial,sans-serif;
+    --amb-dim:#9A5E20;--fos:#68C0D8;--plata:#B8C3CE;--panel-hi:#1A2D48;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
@@ -42,7 +53,7 @@
   .grp h3{margin:0 0 8px;font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--tx3)}
   .fld{margin-bottom:9px}
   .fld label{display:block;font-size:12px;color:var(--tx2);margin-bottom:3px}
-  .fld select,.fld input[type=number]{width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px}
+  .fld select,.fld input[type=number]{width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--line2);border-radius:3px;padding:6px 9px;font:inherit;font-size:13px}
   .fld input[type=range]{width:100%;accent-color:var(--accent)}
   .fld .rv{font-family:var(--mono);font-size:12px;color:var(--accent)}
   .fld input[type=file]{width:100%;font-size:12px;color:var(--tx2)}
@@ -50,7 +61,7 @@
   .sw input{accent-color:var(--accent);width:15px;height:15px}
   .sw span{font-size:13px;color:var(--tx)}
   .sw small{display:block;font-size:11px;color:var(--tx3)}
-  .btn{width:100%;padding:10px;background:var(--accent);color:#06281c;border:0;border-radius:10px;font:600 14px var(--sans);cursor:pointer}
+  .btn{width:100%;padding:10px;background:var(--accent);color:#06281c;border:0;border-radius:3px;font:600 14px var(--sans);cursor:pointer}
   .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line2);font-size:13px;padding:8px}
   .pgrp{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:10px 0 5px;padding-top:7px;border-top:1px solid var(--line)}
   .pgrp:first-child{margin-top:2px;padding-top:0;border-top:0}
@@ -64,7 +75,7 @@
   .note b{color:var(--tx2);font-weight:600}
 
   .chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px;margin-bottom:14px}
-  .chip{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:3px;padding:8px 10px}
   .chip .lab{font-size:10.5px;color:var(--tx3);line-height:1.2}
   .chip .v{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--tx)}
   .chip .v.ok{color:var(--ok)} .chip .v.warn{color:var(--warn)} .chip .v.bad{color:var(--danger)}
@@ -715,7 +726,7 @@ var CONTROLS=[
  {k:'cons', n:'Conservador',                 d:'Objetivo 80 % · crítico 40 %: aparca antes, más margen',
   o:{strategy:true,socTgt:80,socCrit:40,fcDays:5,winter:false,defPos:DEFENSE_POS}}
 ];
-var CONTROL_COL={none:'#8093A4',std:'#36D399',winter:'#3aa0ff',plano:'#e0a52b',cons:'#c084fc'};
+var CONTROL_COL={none:'#8C9AAB',std:'#36D399',winter:'#3aa0ff',plano:'#e0a52b',cons:'#c084fc'};
 function runControls(meteo,prof,loc,soc0,base){
   return CONTROLS.map(function(c){
     var o={};for(var k in base)o[k]=base[k];
@@ -898,8 +909,8 @@ function frame(g,yMin,yMax,rows,yFmt){
   x.textAlign='right';x.textBaseline='middle';
   for(var k=0;k<=4;k++){
     var v=yMin+(yMax-yMin)*k/4, yy=Y(v);
-    x.strokeStyle='rgba(35,48,61,.8)';x.beginPath();x.moveTo(p.l,yy);x.lineTo(W-p.r,yy);x.stroke();
-    x.fillStyle='#5e7388';x.fillText(yFmt(v),p.l-6,yy);
+    x.strokeStyle='rgba(39,64,95,.8)';x.beginPath();x.moveTo(p.l,yy);x.lineTo(W-p.r,yy);x.stroke();
+    x.fillStyle='#7F8EA1';x.fillText(yFmt(v),p.l-6,yy);
   }
   var stepH=rows.length>1?((+rows[1].t)-(+rows[0].t))/36e5:1;
   var daily=stepH>=10;
@@ -912,7 +923,7 @@ function frame(g,yMin,yMax,rows,yFmt){
     if(totalDays>45 && !isMonth)continue;
     var xx=X(i);
     x.strokeStyle='rgba(50,72,93,.55)';x.beginPath();x.moveTo(xx,p.t);x.lineTo(xx,H-p.b);x.stroke();
-    x.fillStyle='#5e7388';
+    x.fillStyle='#7F8EA1';
     x.fillText(totalDays>45?MES[t.getUTCMonth()]:fmt(t.getUTCDate())+'/'+fmt(t.getUTCMonth()+1),xx+3,H-p.b+4);
   }
   return {X:X,Y:Y};
@@ -1751,11 +1762,11 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   bandParked(g1,f1,mng,'rgba(226,87,76,.12)',function(r){return r.parked&&!r.stow});
   hline(g1,f1,opts.socTgt,'#37b87c',true,'objetivo '+opts.socTgt+'%');
   hline(g1,f1,opts.socCrit,'#e2574c',true,'crítico '+opts.socCrit+'%');
-  line(g1,f1,ref,function(r){return r.soc*100},'#5e7388',1);
+  line(g1,f1,ref,function(r){return r.soc*100},'#7F8EA1',1);
   line(g1,f1,mng,function(r){return r.soc*100},'#36D399',LONG?1.1:2);
   g1.x.fillStyle='#e0a52b';                       /* ✦ calibraciones (carga al 100 %) logradas */
   mng.forEach(function(r,i){if(r.cal){g1.x.beginPath();g1.x.arc(f1.X(i),f1.Y(100),2.2,0,6.284);g1.x.fill();}});
-  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con estrategia</span><span><i style="background:#5e7388"></i>Sin estrategia (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>No disponible (defensa 55°)</span><span><i style="background:rgba(58,160,255,.5)"></i>Abanderado (viento)</span><span><i style="background:#e0a52b;border-radius:50%;width:6px;height:6px"></i>Carga completa lograda</span></div>');
+  c1.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#36D399"></i>Con estrategia</span><span><i style="background:#7F8EA1"></i>Sin estrategia (referencia)</span><span><i style="background:rgba(226,87,76,.5)"></i>No disponible (defensa 55°)</span><span><i style="background:rgba(58,160,255,.5)"></i>Abanderado (viento)</span><span><i style="background:#e0a52b;border-radius:50%;width:6px;height:6px"></i>Carga completa lograda</span></div>');
 
   /* — Gráfica 2: balance energético — */
   var c2=document.createElement('div');c2.className='card';
@@ -1796,10 +1807,10 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
     if(opts.tMin>tLo)hline(g3,fT,opts.tMin,'#3aa0ff',true,'Tª mín carga '+opts.tMin+'°C');
     var wMax=Math.max(18,Math.max.apply(null,dm.map(function(r){return r.windMax})));
     var fW={X:f3.X,Y:function(v){return CH.pad.t+(165-CH.pad.t-CH.pad.b)*(1-v/wMax)}};
-    line(g3,fW,dm,'windMax','#8093A4',0.9);
-    hline(g3,fW,WIND_T1,'#8093A4',true,'abanderamiento 40 km/h');
+    line(g3,fW,dm,'windMax','#8C9AAB',0.9);
+    hline(g3,fW,WIND_T1,'#8C9AAB',true,'abanderamiento 40 km/h');
     CH.pad.r=oldR;
-    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>Irradiación (kWh/m²·día, eje izq.)</span><span><i style="background:#3aa0ff"></i>Tª mín (°C, eje der.)</span><span><i style="background:#e2574c"></i>Tª máx (°C, eje der.)</span><span><i style="background:#8093A4"></i>Viento máx (0–'+fmt(wMax)+' m/s)</span></div>');
+    c3.insertAdjacentHTML('beforeend','<div class="leg"><span><i style="background:#f0a93b"></i>Irradiación (kWh/m²·día, eje izq.)</span><span><i style="background:#3aa0ff"></i>Tª mín (°C, eje der.)</span><span><i style="background:#e2574c"></i>Tª máx (°C, eje der.)</span><span><i style="background:#8C9AAB"></i>Viento máx (0–'+fmt(wMax)+' m/s)</span></div>');
   }else{
     var oldR2=CH.pad.r; CH.pad.r=46;
     var maxG=Math.max(200,Math.max.apply(null,mng.map(function(r){return r.ghi})));
@@ -1823,13 +1834,13 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
                           Math.max.apply(null,dm.map(function(r){return r.mov})));
     var g4=mkCanvas(c4,145), f4=frame(g4,0,maxM,dm,function(v){return fmt(v)+'°'});
     bandParked(g4,f4,dm,'rgba(226,87,76,.10)',function(r){return r.parkedH>0});
-    line(g4,f4,dr,'mov','#5e7388',1);
+    line(g4,f4,dr,'mov','#7F8EA1',1);
     line(g4,f4,dm,'mov','#36D399',1.4);
   }else{
     c4.innerHTML='<h2>Posición del seguidor</h2><div class="sub">Backtracking N-S ±55° (GCR 0,397) — defensa 55° cuando no está disponible</div>';
     var g4b=mkCanvas(c4,145), f4b=frame(g4b,-60,60,mng,function(v){return fmt(v)+'°'});
     bandParked(g4b,f4b,mng,'rgba(226,87,76,.10)');
-    line(g4b,f4b,ref,'pos','#5e7388',1);
+    line(g4b,f4b,ref,'pos','#7F8EA1',1);
     line(g4b,f4b,mng,'pos','#36D399',1.6);
   }
 
