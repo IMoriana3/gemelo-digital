@@ -117,7 +117,7 @@
       <div class="note">Busca, pulsa en el mapa o teclea lat/lon — cualquier punto del mundo vale (Open-Meteo cubre todo el globo).</div>
     </div>
   </div>
-  <div class="grp"><h3>Perfil TCU (00.2t)</h3>
+  <div class="grp"><h3>Perfil de la TCU</h3>
     <div class="fld"><select id="prof"></select></div>
     <div class="fld"><label>Montaje del panel / fuente de carga</label>
       <select id="mount">
@@ -136,7 +136,7 @@
         <option value="3250">3250 mA medio @25,6 V (estudio de disponibilidad)</option>
         <option value="4000">4000 mA medio @25,6 V (estudio de disponibilidad)</option>
       </select></div>
-    <div class="fld"><label>Umbral duro de carga <span class="rv" id="poaMinV">0 W/m²</span></label>
+    <div class="fld"><label>Umbral mínimo de carga <span class="rv" id="poaMinV">0 W/m²</span></label>
       <input type="range" id="poaMin" min="0" max="200" step="10" value="0">
       <div class="note">0 = sólo la curva del regulador η(G) de PS26002_RevA, que ya arranca despacio con poca luz.</div></div>
     <div class="note" id="profNote"></div>
@@ -1557,7 +1557,7 @@ function buildReport(){
      ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
      ['Efecto del viento sobre el consumo',{v:'NO considerado — ver limitaciones',cls:'wn'}],
      ['Tª mínima de carga',{v:opts.tMin+' °C'}],
-     ['Umbral duro de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
+     ['Umbral mínimo de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
      ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA'}],
      ['Montaje de la fuente de carga',{v:opts.mountTilt!=null?('panel fijo a '+opts.mountTilt+'° orientado al ecuador'):'solidario al seguidor (plano del generador)'}],
      ['Curva de carga',{v:'CC/CV — derate ×0,8 sobre 85 % SOC, ×0,5 sobre 90 %, ×0,2 sobre 95 %'}]
