@@ -238,6 +238,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: node tools/inventario_arneses.mjs
+      - name: WeatherContract v2 · batería, winter y gemelo
+        run: node tools/test_weather_contract.mjs
 
   # ─────────────────────────────────────────────────────────────────────────
   # NO BLOQUEA, y es una decisión. Perder de vista que el hermano evoluciona es
