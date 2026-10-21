@@ -354,13 +354,13 @@ function motorW(ang){
 }
 var SLEW_DPS=FISICA.e.SLEW_DPS;                      /* velocidad real de giro (°/s) — misma que el gemelo */
 var PROFILES=[
- {id:"SP_45W_3Ah",       n:"SP · 3 Ah (76,8 Wh)",                    wh:76.8,  chgW:45, tCarga:[0,45]},
- {id:"SP_45W_6Ah",       n:"SP · 6 Ah (153,6 Wh)",                   wh:153.6, chgW:45, tCarga:[0,45]},
- {id:"SP_60W_6Ah",       n:"SP · 6 Ah (153,6 Wh) · panel 60 W",      wh:153.6, chgW:60, tCarga:[0,45], variante:true},
- {id:"STRING_60W_3Ah",   n:"STRING · 3 Ah · regulador 60 W",         wh:76.8,  chgW:60, string:true, tCarga:[0,45]},
- {id:"STRING_60W_6Ah",   n:"STRING · 6 Ah · regulador 60 W",         wh:153.6, chgW:60, string:true, tCarga:[0,45]},
- {id:"SP_45W_6Ah_LT",    n:"SP · 6,5 Ah · LT (carga a −20 °C)",      wh:166.4, chgW:45, lt:true, tCarga:[-20,60], tDescarga:[-40,60]},
- {id:"STRING_60W_6Ah_LT",n:"STRING · 6,5 Ah · LT (−20 °C) · regulador 60 W",wh:166.4, chgW:60, lt:true, string:true, tCarga:[-20,60], tDescarga:[-40,60]}
+ {id:"SP_45W_3Ah",       n:"SP · 3 Ah (76,8 Wh)",                    wh:76.8,  chgW:45, tCarga:[0,45], tDescarga:[-10,60], sinFicha:true},
+ {id:"SP_45W_6Ah",       n:"SP · 6 Ah (153,6 Wh)",                   wh:153.6, chgW:45, tCarga:[0,45], tDescarga:[-10,60], comercial:"SP 6AH ST 150",   celda:"6000 mAh · 8S1P"},
+ {id:"SP_60W_6Ah",       n:"SP · 6 Ah (153,6 Wh) · panel 60 W",      wh:153.6, chgW:60, tCarga:[0,45], tDescarga:[-10,60], comercial:"SP 6AH ST 150",   celda:"6000 mAh · 8S1P", variante:true},
+ {id:"STRING_60W_3Ah",   n:"STRING · 3,3 Ah (84,5 Wh) · regulador 60 W", wh:84.48, chgW:60, string:true, tCarga:[0,45], tDescarga:[-10,60], comercial:"STR 3.3AH ST 150", celda:"3300 mAh · 8S1P"},
+ {id:"STRING_60W_6Ah",   n:"STRING · 6 Ah · regulador 60 W",         wh:153.6, chgW:60, string:true, tCarga:[0,45], tDescarga:[-10,60], comercial:"STR 6AH ST 150",  celda:"6000 mAh · 8S1P"},
+ {id:"SP_45W_6Ah_LT",    n:"SP · 6,5 Ah · LT (carga a −20 °C)",      wh:166.4, chgW:45, lt:true, tCarga:[-20,60], tDescarga:[-40,60], comercial:"SP 6,5AH LT 150", celda:"6500 mAh · 8S2P"},
+ {id:"STRING_60W_6Ah_LT",n:"STRING · 6 Ah · LTH (carga a −30 °C) · regulador 60 W", wh:153.6, chgW:60, lt:true, string:true, tCarga:[-30,45], tDescarga:[-30,60], comercial:"STR 6AH LTH 150", celda:"6000 mAh · 8S1P"}
 ];
 /* EL MODELO NOMBRA LA BATERÍA, NO LA PAREJA. Hasta que el panel fue un eje
    propio, el catálogo listaba PAREJAS y el nombre las decía: «SP · panel 45 W ·
@@ -376,7 +376,34 @@ var PROFILES=[
 
    En STRING el vataje SÍ se queda en el nombre: ahí no es un panel, es el
    regulador colgado del generador, y no se elige aparte. */
-/* LA -LT NO LLEVA CALEFACTOR, y hasta el 2026-10-21 este simulador decía que sí.
+/* LOS NÚMEROS SALEN DE LA FICHA, no de aquí. Fuente: `DS_TCU_SUNNER_ES_v9.0.4`
+   (11/03/2025) y `SUNNER_TCU_SP_BatteryLifeEstimation` (18/09/2024), las dos del
+   mantenedor el 2026-10-21. Tabla de batería de la ficha, columna a columna:
+
+     modelo              celda        arquitectura  carga °C   descarga °C
+     SP 6AH ST 150       6000 mAh     8S1P          0…45       −10…60
+     SP 6,5AH LT 150     6500 mAh     8S2P          −20…60     −40…60
+     STR 6AH LTH 150     6000 mAh     8S1P          −30…45     −30…60
+     STR 6AH ST 150      6000 mAh     8S1P          0…45       −10…60
+     STR 3.3AH ST 150    3300 mAh     8S1P          0…45       −10…60
+
+   TRES COSAS QUE ESTABAN MAL, y las tres se corrigen aquí:
+
+   1. La variante fría del STRING NO es la del SP. Llevaba la del SP —6500 mAh,
+      8S2P, carga −20…60— y es otra celda: 6000 mAh, 8S1P, carga −30…45. Carga
+      DIEZ GRADOS MÁS ABAJO que la del SP pero tiene el techo en 45 y no en 60.
+      Y no se llama LT: se llama **LTH**.
+   2. El STRING pequeño es de 3,3 Ah (3300 mAh → 84,48 Wh), no de 3 Ah (76,8).
+   3. `SP_45W_3Ah` NO EXISTE en la ficha: los SP son 6 Ah ST y 6,5 Ah LT, no hay
+      SP de 3 Ah. Se marca `sinFicha` y se queda —no es mío borrar un producto—
+      pero el informe lo dice cuando se evalúa.
+
+   Y el nombre comercial va en `comercial`, porque la ficha NO nombra los
+   modelos por el panel: los nombra por batería y por motor («SP 6AH ST 150»,
+   donde 150 son los W del motor). El id interno de este simulador sí lleva el
+   panel, que es útil aquí y no es lo que el cliente ve escrito en su equipo.
+
+   LA -LT NO LLEVA CALEFACTOR, y hasta el 2026-10-21 este simulador decía que sí.
    Es OTRA QUÍMICA. De la ficha del equipo: carga de −20 a 60 °C contra 0 a 45 de
    la estándar, descarga de −40 a 60 contra −10 a 60, y 6500 mAh en 8S2P contra
    6000 en 8S1P (166,4 Wh contra 153,6 a 25,6 V).
@@ -1233,9 +1260,10 @@ $('year').onchange=function(){$('sweepFld').style.display=this.value==='worst'?'
 $('year').onchange();      /* estado inicial coherente con la opción seleccionada */
 function profNote(){
   var P=PROFILES[$('prof').value];
-  $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · química '+
+  $('profNote').innerHTML='<b>'+(P.comercial||P.id)+'</b>'+(P.celda?' · celda '+P.celda:'')+(P.sinFicha?' · <b>sin contraparte en la ficha SUNNER</b>':'')+
+    ' · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · química '+
     (P.lt?'<b>LiFePO₄ de baja temperatura</b> — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C, descarga de '+P.tDescarga[0]+' a '+P.tDescarga[1]+' °C, SIN calefactor'
-        :'LiFePO₄ estándar — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C')+
+        :'LiFePO₄ estándar — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C, descarga de '+P.tDescarga[0]+' a '+P.tDescarga[1]+' °C')+
     ' · motor 36 W a 0° … 67,2 W a 55° (curva medida, sin tope) · regulador η(G) PS26002_RevA';
 }
 /* Elegir equipo escribe SU suelo de carga en el panel: el umbral es del equipo,
@@ -1758,7 +1786,7 @@ function buildReport(){
   H+='<div class="cover"><div class="brand">Factiun · Ingeniería de seguimiento solar</div>'+
      '<h1>Estudio de disponibilidad<br>de batería de la TCU</h1>'+
      '<div class="sub">'+sitio+'</div>'+
-     '<div class="meta">Proyecto: '+proyecto+'<br>Modelo de TCU: '+prof.id+' — '+fmt(prof.wh,1)+' Wh (25,6 V) · fuente de carga '+prof.chgW+' W'+
+     '<div class="meta">Proyecto: '+proyecto+'<br>Modelo de TCU: '+(prof.comercial||prof.id)+' — '+fmt(prof.wh,1)+' Wh (25,6 V) · fuente de carga '+prof.chgW+' W'+
      (deCatalogo?'':' <b>(combinación de estudio, no de catálogo)</b>')+'<br>'+
      'Periodo simulado: '+f(d0)+' – '+f(d1)+' ('+fmt(dias)+' días, paso '+fmt(dtH*60)+' min)<br>'+
      'Origen de la meteorología: '+fuente+'<br>Fecha de emisión: '+fHoy+'</div>'+
@@ -1827,7 +1855,8 @@ function buildReport(){
 
   /* 5. BATERÍA Y MOTOR */
   H+='<h2 class="brk">5. Especificación de batería y motor</h2>';
-  H+=tbl([['Modelo de TCU',{v:prof.id}],
+  H+=tbl([['Modelo de TCU',{v:(prof.comercial?'<b>'+prof.comercial+'</b> (ficha SUNNER) · ':'')+prof.id+(prof.sinFicha?' — <b>sin contraparte en la ficha SUNNER</b>':'')}],
+     ['Celda',{v:prof.celda?prof.celda+' · LiFePO₄':'no declarada en la ficha'}],
      ['Capacidad nominal',{v:fmt(prof.wh,1)+' Wh ('+fmt(prof.wh/25.6,1)+' Ah a 25,6 V)'}],
      ['Química',{v:'LiFePO₄'}],
      ['Fuente de carga',{v:prof.string?fmt(prof.chgW)+' W (regulador del string)'
@@ -1835,8 +1864,8 @@ function buildReport(){
      ['Combinación panel + batería',{v:deCatalogo?'de <b>catálogo</b>':'de <b>ESTUDIO</b>: esta pareja de panel y batería no figura en el catálogo de Factiun y no debe cotizarse como producto',
         cls:deCatalogo?'':'wn'}],
      ['Variante de baja temperatura (-LT)',{v:prof.lt
-        ?'sí — celda LiFePO₄ LT, <b>sin calefactor</b>: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'
-        :'no — celda LiFePO₄ estándar: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C'}],
+        ?'sí — celda LiFePO₄ de baja temperatura, <b>sin calefactor</b>: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'
+        :'no — celda LiFePO₄ estándar: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'}],
      ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes (medido Factiun)'}],
      ['Modelo de consumo de motor',{v:motorTxt}],
      ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
@@ -1950,6 +1979,7 @@ function buildReport(){
   H+='<h2>11. Hipótesis y limitaciones</h2><ul>'+
      '<li>La transposición al plano del generador es isotrópica; en cielos muy anisótropos subestima ligeramente la captación directa.</li>'+
      '<li>La temperatura de la batería sigue a la ambiente con inercia de primer orden (τ = 1800 s). Ningún perfil lleva calefactor: la variante -LT es otra química, con el rango de carga ampliado, no una batería calentada.</li>'+
+     '<li><b>La vida que da este informe es CALCULADA y no es la de la ficha.</b> Sale del conteo rainflow más Palmgren-Miner y de la degradación calendaria, sobre la serie meteorológica de este emplazamiento. SUNNER estima la suya por otro camino en <i>SUNNER TCU SP 6Ah Battery Life Estimation</i> (18/09/2024): 2000 ciclos de ensayo entre 80 ciclos/año dan 25 años por ciclado, la calendaria a 25 °C con SoC por debajo del 70 % da más de 12 años, y concluye <b>más de 10 años</b>; en emplazamientos calientes, con tres horas diarias a 45 °C, baja a <b>7 años</b> en el peor caso, que es de donde sale el «&gt; 6 años» de la ficha. Las dos estimaciones no son comparables sin más: los 80 ciclos/año de SUNNER son el caso SIN aportación del panel —su medida es explícitamente «under the worst conditions, when there is no input energy from the solar panel»— mientras que aquí el panel recarga durante el día y el ciclado efectivo sale menor. <b>La cifra de este apartado no debe citarse como garantía</b>: para eso manda la ficha.</li>'+
      '<li><b>El límite superior de carga de la -LT (60 °C) no se modela</b>: se le aplica el derate JEITA de la celda estándar (recorte desde 35 °C, nulo a 45 °C), que para la -LT es conservador. Y el límite de DESCARGA no se modela en ninguna de las dos variantes: la batería entrega por debajo de su mínimo (−10 °C la estándar, −40 °C la -LT) como si nada. Importa en emplazamientos muy fríos.</li>'+
      '<li><b>No se valora el efecto del viento sobre el consumo del motor.</b> El viento interviene únicamente para disparar el abanderamiento; el par adicional que opone sobre la estructura, y por tanto la corriente extra que exige al motor, no se modelan. El consumo simulado es en consecuencia un <b>límite inferior</b> en emplazamientos ventosos: la metodología de referencia declara 2 m/s como velocidad de viento de referencia para ese efecto, que aquí no se aplica. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
      '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
