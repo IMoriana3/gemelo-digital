@@ -96,6 +96,9 @@
   .leg i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
   .empty{color:var(--tx3);font-size:13px;padding:30px;text-align:center}
   @media (max-width:840px){ .main{grid-template-columns:1fr;overflow-y:auto}.side{border-right:0;border-bottom:1px solid var(--line)} }
+/* Mapa base: OSM estándar (sin clave) y oscurecido por CSS. CARTO pasó a exigir API key
+   (2026-10) y el marcador de imagen necesitaba lib/images, que no está en el repo. */
+.osm-oscuro{filter:invert(1) hue-rotate(180deg) brightness(.82) contrast(.9) saturate(.6)}
 </style>
 </head>
 <body>
@@ -1100,9 +1103,9 @@ function setPick(la,lo,name){
 function ensureMap(){
   if(bmap||typeof L==='undefined')return;
   bmap=L.map('map',{worldCopyJump:true}).setView([+$('clat').value,+$('clon').value],4);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd',maxZoom:18,attribution:'© OpenStreetMap · © CARTO'}).addTo(bmap);
-  bmarker=L.marker([+$('clat').value,+$('clon').value]).addTo(bmap);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {maxZoom:19,className:'osm-oscuro',attribution:'© OpenStreetMap contributors'}).addTo(bmap);
+  bmarker=L.circleMarker([+$('clat').value,+$('clon').value],{radius:8,color:'#36D399',weight:2,fillColor:'#36D399',fillOpacity:.6}).addTo(bmap);
   bmap.on('click',function(e){setPick(e.latlng.lat,e.latlng.lng,'('+e.latlng.lat.toFixed(3)+', '+e.latlng.lng.toFixed(3)+')')});
   setTimeout(function(){bmap.invalidateSize()},90);
 }
