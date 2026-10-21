@@ -63,17 +63,21 @@ jobs:
       # esperan. El commit sale de pines.json: tenerlo también aquí serían dos
       # sitios con el mismo dato, que es como se separan.
       #
-      # cobertura-zigbee es privado: usar LECTURA_TOKEN, con permiso de lectura
-      # sobre ese repositorio. El token solo se aplica a la petición de fetch;
-      # no se guarda en la URL ni en la configuración del clon. SolarGPTfull
-      # sigue fuera de estos bancos, como declara inventario_arneses.mjs.
+      # LOS DOS hermanos son privados (proyectos lo es desde el 2026-10-20;
+      # hasta entonces se clonaba sin token y el 2026-10-21 las PR #109 y #110
+      # murieron aquí, idénticas, con «could not read Username», ANTES de correr
+      # ningún arnés). Se usa LECTURA_TOKEN para los dos: necesita permiso de
+      # lectura sobre AMBOS repositorios. El token solo se aplica a la petición
+      # de fetch; no se guarda en la URL ni en la configuración del clon.
+      # SolarGPTfull sigue fuera de estos bancos, como declara
+      # inventario_arneses.mjs.
       - name: Clonar los hermanos POR EL PIN
         env:
           LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN }}
         run: |
           set -o pipefail
           if [ -z "$LECTURA_TOKEN" ]; then
-            echo "::error::Falta LECTURA_TOKEN con permiso de lectura sobre cobertura-zigbee"
+            echo "::error::Falta LECTURA_TOKEN con permiso de lectura sobre proyectos y cobertura-zigbee"
             exit 1
           fi
           lectura_header="$(printf 'x-access-token:%s' "$LECTURA_TOKEN" | base64 -w0)"
@@ -84,11 +88,7 @@ jobs:
             echo "── $repo → $sha"
             git init -q "$repo" && cd "$repo"
             git remote add origin "https://github.com/${{ github.repository_owner }}/$repo.git"
-            if [ "$repo" = "cobertura-zigbee" ]; then
-              git -c "http.extraHeader=Authorization: basic $lectura_header" fetch -q --depth 1 origin "$sha"
-            else
-              git fetch -q --depth 1 origin "$sha"
-            fi
+            git -c "http.extraHeader=Authorization: basic $lectura_header" fetch -q --depth 1 origin "$sha"
             git checkout -q FETCH_HEAD
             cd ..
           }
@@ -262,9 +262,12 @@ jobs:
       # EL ENLACE A LA GUÍA DE PUERTAS, COMPROBADO. Un enlace roto al documento
       # que dice «una puerta verde afirma dos cosas» sería el chiste final.
       # Resuelve el fichero en el clon de `proyectos` que haya al lado —el del
-      # PIN si este repo lo fija— y si no hay, lo trae con --depth 1 (es
-      # público). Sin red y sin clon sale con rc = 2, no con 0.
+      # PIN si este repo lo fija— y si no hay, lo trae con --depth 1. Como
+      # proyectos es PRIVADO, el script necesita LECTURA_TOKEN para traerlo;
+      # sin token y sin clon sale con rc = 2, no con 0.
       - name: el enlace a la guía de puertas apunta a algo que existe
+        env:
+          LECTURA_TOKEN: ${{ secrets.LECTURA_TOKEN }}
         run: bash docs/enlace_guia.sh
 
   deriva:
