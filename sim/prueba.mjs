@@ -1876,12 +1876,19 @@ console.log('\n── GRANIZO · forecast → red → TCU → posición confirma
   const p = new SIM.Planta({ nTcu:1, nHsu:1, nRep:0, nGw:1, dia:172, hora:10, poleoS:1,
                               granizo:{leadMin:60,afterMin:0,holdMin:0} });
   const t = p.tcu(1);
-  t.anguloReal = t.angulo = -20;
+  /* La mesa se TELETRANSPORTA, y el sensor con ella: `t.angulo` lo pisa `mide()`
+     en el primer paso con el filtrado, así que ponerlo solo no hace nada, y un
+     filtrado que se queda en el lado viejo (−23°) tarda dos pasos en cruzar el
+     cero. Con el Euler saturante cruzaba en el paso 2 por 0,55°; con la forma
+     exacta del retardo (18 % más lenta a dt = τ/3) no, y el target del segundo
+     episodio se decidía con el sensor aún en negativo. Los dos fixtures de
+     arriba ya movían crudo y filtrado al teletransportar; éste no. */
+  t.anguloReal = t.angulo = t.sensor.crudo = t.sensor.filtrado = -20;
   p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:270 });
   for (let i=0;i<3;i++) p.paso(1);
   const primero = t.hail.target, ep1 = t.hail.episode;
   p.granizo.retira(); for (let i=0;i<3;i++) p.paso(1);
-  t.anguloReal = t.angulo = 20;
+  t.anguloReal = t.angulo = t.sensor.crudo = t.sensor.filtrado = 20;
   p.granizo.actualiza({ eta_min:20, mm:25, prob_pct:85, dir_deg:90 });
   for (let i=0;i<3;i++) p.paso(1);
   ok(t.hail.episode > ep1 && primero < 0 && t.hail.target > 0,

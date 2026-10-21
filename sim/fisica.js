@@ -125,7 +125,9 @@ var FISICA = {
   "K0": 0.0503,
   "K1": 0.000845,
   "JEITA_T3": 35,
-  "JEITA_T4": 45
+  "JEITA_T4": 45,
+  "TAU_BAT_S": 1800,
+  "TAU_PCB_S": 600
  }
 };
 
@@ -230,6 +232,30 @@ function cRateSafeLFP(t){
 }
 function hotDerate(t){if(t>=JEITA_T4)return 0;if(t>JEITA_T3)return 1-0.7*(t-JEITA_T3)/(JEITA_T4-JEITA_T3);return 1;}
 function heaterW(t){return t<0?1.0+0.15*Math.abs(t):0;}
+
+/* ── Retardo de primer orden, EXACTO ──────────────────────────────────────
+   Lo usan las inercias térmicas (batería, PCB) y el filtro de la medida del
+   sensor. Una sola implementación porque la consumen DOS superficies —el
+   simulador de planta y `bateria.html`— y porque la temperatura que decide
+   el calefactor es la de la BATERÍA, no la ambiente.
+
+   `1 - e^(-dt/τ)`, no `Math.min(1, dt/τ)`. La segunda es el paso de Euler y
+   SE SATURA: con τ=1800 s, a paso de 30 min vale exactamente 1 y la inercia
+   DESAPARECE —`tBat` pasa a ser `tAmb` clavado— sin que nada lo diga. Medido
+   el 2026-10-21 sobre 20 inviernos de Chorzele (53,3 °N): a paso de 1 h el
+   Euler da 1,000 y la forma exacta 0,865, y el veredicto «¿bajo 0 °C?» cambia
+   en 10 h por invierno con hasta 2,0 °C de discrepancia.
+
+   El gemelo corre a 60 s: para la batería (τ=1800 s) el Euler todavía no se
+   satura, así que esto no arregla un número roto — cierra un modo de fallo que
+   se dispara el día que alguien use un paso grueso, y que no avisaría. Para el
+   filtro del sensor (τ=3 s) SÍ está saturado hoy, y ahí está BIEN: a 20
+   constantes el filtro ha asentado de verdad, y la forma exacta da lo mismo.
+   Lo que se retira es el idioma, no un número. */
+function retardo1(actual, objetivo, dtS, tauS){
+  var tau = Math.max(1e-9, tauS);
+  return actual + (objetivo - actual) * (1 - Math.exp(-dtS / tau));
+}
 
 /* Rendimiento del regulador de carga en función de la irradiancia del panel,
    η(G) = 0,96·(1 − e^(−G/100)), digitalizada de PS26002_RevA. Espejo de
@@ -338,6 +364,7 @@ function consumoTCU(o){
 FISICA.cRateSafeLFP = cRateSafeLFP;
 FISICA.hotDerate = hotDerate;
 FISICA.heaterW = heaterW;
+FISICA.retardo1 = retardo1;
 FISICA.etaCharger = etaCharger;
 FISICA.perezCielo = perezCielo;   /* lo usa bateria.html: su poaAt sólo cambia el ALBEDO */
 FISICA.e0De = e0De;
