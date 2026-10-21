@@ -200,11 +200,11 @@
     <div class="fld"><label>Tª mínima de carga (°C)</label>
       <input type="number" id="tmin" value="0" step="1"></div>
     <label class="sw"><input type="checkbox" id="cmp" checked>
-      <span>Comparar sistemas de control<small>Simula 4 lógicas de gestión sobre la misma meteo y las enfrenta; si el perfil no es calefactado, añade su versión -LT como columna de equipo</small></span></label>
+      <span>Comparar sistemas de control<small>Simula 4 lógicas de gestión sobre la misma meteo y las enfrenta; si el perfil no es de baja temperatura, añade su versión -LT como columna de equipo</small></span></label>
     <label class="sw"><input type="checkbox" id="cliente">
       <span>Informe para el cliente<small>Quita la marca «uso interno» del informe. Sin marcar, el documento se rotula como trabajo interno de Factiun</small></span></label>
     <label class="sw"><input type="checkbox" id="winter">
-      <span>Winter mode<small>Política canónica y completa: objetivo 90 % y carga completa cada 3 días · calefactor auto en LT. No cambia el seguimiento</small></span></label>
+      <span>Winter mode<small>Política canónica y completa: objetivo 90 % y carga completa cada 3 días. No cambia el seguimiento ni el equipo</small></span></label>
   </div>
   <div class="grp"><h3>Parámetros físicos · el canon es el defecto</h3>
     <div class="note" style="margin-top:0">Los valores medidos y canónicos con los que calcula el simulador. Se pueden apartar para probar, y lo apartado sale en ámbar con su valor original. <b>El canon manda cuando no lo tocas, no siempre.</b></div>
@@ -320,14 +320,31 @@ function motorW(ang){
 }
 var SLEW_DPS=FISICA.e.SLEW_DPS;                      /* velocidad real de giro (°/s) — misma que el gemelo */
 var PROFILES=[
- {id:"SP_45W_3Ah",       n:"SP · panel 45 W · 3 Ah (76,8 Wh)",       wh:76.8,  chgW:45},
- {id:"SP_45W_6Ah",       n:"SP · panel 45 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:45},
- {id:"SP_60W_6Ah",       n:"SP · panel 60 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:60},
- {id:"STRING_60W_3Ah",   n:"STRING · regulador 60 W · 3 Ah",         wh:76.8,  chgW:60, string:true},
- {id:"STRING_60W_6Ah",   n:"STRING · regulador 60 W · 6 Ah",         wh:153.6, chgW:60, string:true},
- {id:"SP_45W_6Ah_LT",    n:"SP · 45 W · 6 Ah · LT calefactada",      wh:153.6, chgW:45, heated:true},
- {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6 Ah · LT calefactada",  wh:153.6, chgW:60, heated:true, string:true}
+ {id:"SP_45W_3Ah",       n:"SP · panel 45 W · 3 Ah (76,8 Wh)",       wh:76.8,  chgW:45, tCarga:[0,45]},
+ {id:"SP_45W_6Ah",       n:"SP · panel 45 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:45, tCarga:[0,45]},
+ {id:"SP_60W_6Ah",       n:"SP · panel 60 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:60, tCarga:[0,45]},
+ {id:"STRING_60W_3Ah",   n:"STRING · regulador 60 W · 3 Ah",         wh:76.8,  chgW:60, string:true, tCarga:[0,45]},
+ {id:"STRING_60W_6Ah",   n:"STRING · regulador 60 W · 6 Ah",         wh:153.6, chgW:60, string:true, tCarga:[0,45]},
+ {id:"SP_45W_6Ah_LT",    n:"SP · 45 W · 6,5 Ah · LT (carga a −20 °C)",    wh:166.4, chgW:45, lt:true, tCarga:[-20,60], tDescarga:[-40,60]},
+ {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6,5 Ah · LT (carga a −20 °C)",wh:166.4, chgW:60, lt:true, string:true, tCarga:[-20,60], tDescarga:[-40,60]}
 ];
+/* LA -LT NO LLEVA CALEFACTOR, y hasta el 2026-10-21 este simulador decía que sí.
+   Es OTRA QUÍMICA. De la ficha del equipo: carga de −20 a 60 °C contra 0 a 45 de
+   la estándar, descarga de −40 a 60 contra −10 a 60, y 6500 mAh en 8S2P contra
+   6000 en 8S1P (166,4 Wh contra 153,6 a 25,6 V).
+
+   El modelo viejo le cobraba 1,0 + 0,15·|T| W de calefactor —1,75 W a −5 °C,
+   casi el triple que los 0,64 W de la electrónica— y fingía la celda a 1 °C para
+   dejarla cargar. Conseguía el efecto correcto por el mecanismo equivocado y
+   penalizaba al equipo con un consumo que no existe. Y el informe lo imprimía
+   como característica del producto, en un documento para cliente.
+
+   Lo que NO se modela, y va dicho: el límite SUPERIOR de carga de la -LT (60 °C)
+   no entra. El derate JEITA de la celda estándar (35→45 °C) se aplica a las dos,
+   lo que para la -LT es conservador: en caliente se le recorta corriente antes de
+   lo que su ficha admite. Y el límite de DESCARGA no se modela en ninguna de las
+   dos: la batería entrega por debajo de su mínimo como si nada. Eso importa en
+   emplazamientos muy fríos (Chorzele baja de −28 °C) y está abierto. */
 
 /* ═══════════ Tracker (constantes del estudio de disponibilidad + gemelo) ═══════════ */
 var AXIS_MAX=FISICA.e.AXIS_MAX, GCR=FISICA.e.GCR, NIGHT_POS=FISICA.e.NIGHT_POS, DEFENSE_POS=FISICA.e.DEFENSE_POS;
@@ -685,7 +702,7 @@ function simulate(meteo,prof,loc,soc0,opts){
     tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
     /* — Consumo del paso: electrónica + motor + calefactor, todo en consumoTCU — */
     var cons=consumoTCU({dtH:dtH,dia:day,mov:deltaEff,pos:avgPos,
-                         motorModel:opts.motorModel,calefactada:prof.heated,tAmb:tBat});
+                         motorModel:opts.motorModel,tAmb:tBat});   /* sin calefactor: ningún perfil lo lleva */
     var motorWh=cons.motor, baseWh=cons.base, heatWh=cons.heat, tEff=cons.tEff, consWh=cons.total;
 
     /* — Carga: POA de la posición REAL (abanderado/defensa reduce), JEITA frío+calor, techo — */
@@ -695,6 +712,12 @@ function simulate(meteo,prof,loc,soc0,opts){
     else if(sun.el>0 && m.dhi>0) poaChg=poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi,N);
     else poaChg=(m.poa!=null)?m.poa:m.ghi;
     var chgWh=0, cRateNow=0;
+    /* EL SUELO DE CARGA ES DEL EQUIPO, y entra por `opts.tMin`. Quien lo pone ahí
+       son dos sitios, y no hay un tercero: `sincronizaTmin()` lo escribe en el panel
+       al elegir perfil, y `runControls` lo inyecta en la columna de EQUIPO. Aquí hubo
+       un `tMinCarga` que caía al valor del perfil «si opts.tMin era null»; como el
+       panel SIEMPRE lo manda, valía siempre opts.tMin y era decoración —un mutante
+       que lo devolvía a opts.tMin no mataba ninguna comprobación—. Retirado. */
     if(day && tEff>=opts.tMin && poaChg>=opts.poaMin){   /* cut-in del regulador: bajo el umbral no carga */
       var chgP=prof.string ? prof.chgW*Math.min(poaChg/POA_STRING_FULL,1)   /* string: potencia nominal desde muy poca luz */
                            : prof.chgW*Math.min(poaChg/1000,1);            /* panel dedicado: escala con la irradiancia */
@@ -778,17 +801,18 @@ var CONTROLS=[
 ];
 var CONTROL_COL={none:'#8C9AAB',std:'#36D399',winter:'#3aa0ff',cons:'#c084fc',lt:'#ff6b6b'};
 /* La comparativa varía la LÓGICA. Pero cuando el perfil evaluado no es
-   calefactado y existe su gemelo -LT, el problema del invierno —SOC a 0 % en
-   enero con las cuatro lógicas— no lo arregla ninguna lógica: lo arregla el
-   calefactor. Esa alternativa es de EQUIPO, va en una columna más y se dice. */
+   de baja temperatura y existe su gemelo -LT, el problema del invierno —SOC a
+   0 % en enero con las cuatro lógicas— no lo arregla ninguna lógica: lo arregla
+   la QUÍMICA, que carga hasta −20 °C en vez de 0 y trae 166,4 Wh en vez de
+   153,6. Esa alternativa es de EQUIPO, va en una columna más y se dice. */
 function controlesPara(prof){
   var lista=CONTROLS.slice();
-  if(prof&&!prof.heated){
+  if(prof&&!prof.lt){
     var lt=PROFILES.filter(function(p){return p.id===prof.id+'_LT'})[0];
     var std=CONTROLS.filter(function(c){return c.k==='std'})[0];
     if(lt&&std)lista.push({k:'lt',n:'Estándar · versión -LT',
-      d:'La estrategia estándar sobre el mismo equipo con batería calefactada ('+lt.id+'): alternativa de EQUIPO, no de lógica',
-      o:std.o,prof:lt});
+      d:'La estrategia estándar con la batería de baja temperatura ('+lt.id+', carga hasta '+lt.tCarga[0]+' °C y '+fmt(lt.wh,1)+' Wh): alternativa de EQUIPO, no de lógica',
+      o:std.o,prof:lt,tMin:lt.tCarga[0]});
   }
   return lista;
 }
@@ -804,6 +828,7 @@ function runControls(meteo,prof,loc,soc0,base){
     var o={};for(var k in base)o[k]=base[k];
     for(var k2 in c.o)o[k2]=c.o[k2];
     var p=c.prof||prof, s0=soc0==null?socEstacionario(o):soc0;
+    if(c.tMin!=null)o.tMin=c.tMin;              /* la columna de EQUIPO trae su propio suelo de carga */
     var rows=simulate(meteo,p,loc,s0,o);
     return {c:c,rows:rows,S:summarize(rows),soc0:s0,prof:p};
   });
@@ -1156,10 +1181,18 @@ $('year').onchange=function(){$('sweepFld').style.display=this.value==='worst'?'
 $('year').onchange();      /* estado inicial coherente con la opción seleccionada */
 function profNote(){
   var P=PROFILES[$('prof').value];
-  $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · calefactor '+(P.heated?'<b>sí (LT)</b> — carga bajo 0 °C':'no')+
+  $('profNote').innerHTML='<b>'+P.id+'</b> · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · química '+
+    (P.lt?'<b>LiFePO₄ de baja temperatura</b> — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C, descarga de '+P.tDescarga[0]+' a '+P.tDescarga[1]+' °C, SIN calefactor'
+        :'LiFePO₄ estándar — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C')+
     ' · motor 36 W a 0° … 67,2 W a 55° (curva medida, sin tope) · regulador η(G) PS26002_RevA';
 }
-profNote();$('prof').onchange=profNote;
+/* Elegir equipo escribe SU suelo de carga en el panel: el umbral es del equipo,
+   no una preferencia. Se puede seguir apartando a mano para estudiar qué pasa. */
+function sincronizaTmin(){
+  var P=PROFILES[$('prof').value];
+  if(P.tCarga)$('tmin').value=P.tCarga[0];
+}
+sincronizaTmin();profNote();$('prof').onchange=function(){sincronizaTmin();profNote();};
 [['tilt','tiltV','°'],['poaMin','poaMinV',' W/m²'],['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
  ['socCrit','socCritV','%'],['fc','fcV',''],['doy','doyV',''],['sdays','sdaysV','']].forEach(function(a){
   $(a[0]).oninput=function(){$(a[1]).textContent=this.value+a[2]};
@@ -1670,9 +1703,9 @@ function buildReport(){
        (elec.descartados.length?' Quedan descartados por agotar la batería: '+elec.descartados.map(function(x){
          return x.c.n+' ('+fmt(x.S.hZero)+' h)'}).join(', ')+'.':''):'')+
      (colLT&&colStd?(Math.abs(colLT.S.inactivePct-colStd.S.inactivePct)<5e-5&&colLT.S.hZero===colStd.S.hZero
-       ?' La versión calefactada del mismo equipo (<b>'+colLT.prof.id+'</b>, apartado 9) <b>no cambia el resultado</b> en este emplazamiento: '+
-        'el déficit de invierno es de irradiación, no de temperatura, y el calefactor no lo compensa.'
-       :' La versión calefactada del mismo equipo (<b>'+colLT.prof.id+'</b>, apartado 9) pasaría de '+
+       ?' La variante de baja temperatura (<b>'+colLT.prof.id+'</b>, apartado 9) <b>no cambia el resultado</b> en este emplazamiento: '+
+        'el déficit de invierno es de irradiación, no de temperatura, y ampliar el rango de carga en frío no lo compensa.'
+       :' La variante de baja temperatura (<b>'+colLT.prof.id+'</b>, apartado 9) pasaría de '+
        fmt(colStd.S.hZero)+' h a '+fmt(colLT.S.hZero)+' h con la batería agotada y de '+fmt(colStd.S.inactivePct,4)+' % a '+
        fmt(colLT.S.inactivePct,4)+' % de tiempo no disponible con la misma estrategia estándar.'):'')+'</div>';
   H+='<div class="kpis">'+
@@ -1718,7 +1751,9 @@ function buildReport(){
      ['Capacidad nominal',{v:fmt(prof.wh,1)+' Wh ('+fmt(prof.wh/25.6,1)+' Ah a 25,6 V)'}],
      ['Química',{v:'LiFePO₄'}],
      ['Fuente de carga',{v:fmt(prof.chgW)+' W'}],
-     ['Versión calefactada (-LT)',{v:prof.heated?'sí — P = 1,0 + 0,15·|T| W bajo 0 °C':'no'}],
+     ['Variante de baja temperatura (-LT)',{v:prof.lt
+        ?'sí — celda LiFePO₄ LT, <b>sin calefactor</b>: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'
+        :'no — celda LiFePO₄ estándar: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C'}],
      ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes (medido Factiun)'}],
      ['Modelo de consumo de motor',{v:motorTxt}],
      ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
@@ -1794,7 +1829,7 @@ function buildReport(){
        del generador— cambia el resultado más que ninguna de las cuatro lógicas. */
     H+='<p>Todas las alternativas comparten el mismo equipo —<b>'+prof.n+'</b>—, '+
        'emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión'+
-       (colLT?', salvo la última columna, que cambia el <b>equipo</b> y no la lógica: la estrategia estándar con la batería calefactada (<b>'+colLT.prof.id+'</b>)':'')+'. '+
+       (colLT?', salvo la última columna, que cambia el <b>equipo</b> y no la lógica: la estrategia estándar con la batería de baja temperatura (<b>'+colLT.prof.id+'</b>)':'')+'. '+
        (LAST.socModo==='estacionario'?'Cada columna arranca en el objetivo de carga de su propia lógica (estado estacionario).':
         'Todas las columnas arrancan en el SOC inicial del panel ('+fmt((LAST.soc0||0)*100)+' %).')+'</p>';
     H+=tbl([['Descripción'].concat(C.map(function(x){return {v:x.c.d}}))].concat([
@@ -1831,7 +1866,8 @@ function buildReport(){
   /* 11. HIPÓTESIS */
   H+='<h2>11. Hipótesis y limitaciones</h2><ul>'+
      '<li>La transposición al plano del generador es isotrópica; en cielos muy anisótropos subestima ligeramente la captación directa.</li>'+
-     '<li>La temperatura de la batería se toma igual a la ambiente, salvo en las versiones -LT con el calefactor activo.</li>'+
+     '<li>La temperatura de la batería sigue a la ambiente con inercia de primer orden (τ = 1800 s). Ningún perfil lleva calefactor: la variante -LT es otra química, con el rango de carga ampliado, no una batería calentada.</li>'+
+     '<li><b>El límite superior de carga de la -LT (60 °C) no se modela</b>: se le aplica el derate JEITA de la celda estándar (recorte desde 35 °C, nulo a 45 °C), que para la -LT es conservador. Y el límite de DESCARGA no se modela en ninguna de las dos variantes: la batería entrega por debajo de su mínimo (−10 °C la estándar, −40 °C la -LT) como si nada. Importa en emplazamientos muy fríos.</li>'+
      '<li><b>No se valora el efecto del viento sobre el consumo del motor.</b> El viento interviene únicamente para disparar el abanderamiento; el par adicional que opone sobre la estructura, y por tanto la corriente extra que exige al motor, no se modelan. El consumo simulado es en consecuencia un <b>límite inferior</b> en emplazamientos ventosos: la metodología de referencia declara 2 m/s como velocidad de viento de referencia para ese efecto, que aquí no se aplica. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
      '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
      '<li>La suciedad y la nieve acumulada no penalizan la captación del panel de la TCU.</li>'+
@@ -1871,7 +1907,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
     chip('Cargas completas',fmt(S.cal.n),S.cal.worstGap>2*opts.fcDays?'warn':'ok',
          'peor racha sin calibrar: '+fmt(S.cal.worstGap)+' d (objetivo '+opts.fcDays+')')+
     chip('Abanderamiento',fmt(S.hStow)+' h',S.hStow>0?'warn':'ok','viento ≥40/60 km/h (B2)')+
-    (S.heatWh>0?chip('Calefactor LT',fmt(S.heatWh)+' Wh','','P = 1 + 0,15·|T| bajo 0 °C'):'')+
+    /* El chip del calefactor se fue con el calefactor: ningún perfil lo lleva. */
     chip('Rainflow',fmt(S.rf.total)+' ciclos','', '≥30% DoD: '+fmt(S.rf.dod30)+' · ≥60%: '+fmt(S.rf.dod60))+
     chip('Vida estimada',fmt(S.cyc.years,1)+' años',S.cyc.years<10?'warn':'ok',
          'fade '+fmt(S.cyc.fadeYr,2)+'%/año = '+fmt(S.cyc.cycYr,2)+' ciclado + '+fmt(S.cyc.calYr,2)+' calendario')+
@@ -2045,7 +2081,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
     var hayLT=controls.some(function(x){return x.c.k==='lt'});
     cc.innerHTML='<h2>⚖️ Comparativa de sistemas de control</h2><div class="sub">Mismo equipo ('+prof.n+
       '), mismo emplazamiento y misma meteo: sólo cambia la lógica de gestión de la batería'+
-      (hayLT?' — salvo la columna <b>-LT</b>, que cambia el equipo (batería calefactada) y no la lógica':'')+'. '+
+      (hayLT?' — salvo la columna <b>-LT</b>, que cambia el equipo (química de baja temperatura) y no la lógica':'')+'. '+
       (controls[0]&&controls[0].soc0!=null&&LAST&&LAST.socModo==='estacionario'?'Cada columna arranca en su propio objetivo de carga.':'')+'</div>';
     out.appendChild(cc);
     var gc=mkCanvas(cc,210), fc=frame(gc,0,100,mng,function(v){return fmt(v)+'%'});

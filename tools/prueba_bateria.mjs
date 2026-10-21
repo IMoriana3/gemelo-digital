@@ -305,6 +305,74 @@ ok(muerta.conSol > 0 && muerta.perdida > 0 && muerta.rel < 100,
     'el informe lleva interruptor «para el cliente» y sin él se rotula como uso interno');
 }
 
+/* ── 6) LA -LT NO LLEVA CALEFACTOR: ES OTRA QUÍMICA (2026-10-21) ──
+   El mantenedor corrigió el modelo: la variante -LT no es una batería calentada,
+   es una celda LiFePO4 de baja temperatura. De su ficha: carga −20..60 °C contra
+   0..45 de la estándar, descarga −40..60 contra −10..60, y 6500 mAh en 8S2P
+   contra 6000 en 8S1P. El modelo viejo le cobraba 1,0 + 0,15·|T| W de calefactor
+   —consumo que no existe— y el informe lo imprimía como característica del
+   producto, en un documento para cliente. */
+const quim = await pg.evaluate(() => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const sin = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const lt = PROFILES.filter((p) => p.id === 'SP_45W_6Ah_LT')[0];
+  const meteo = synthMeteo(loc, 10, 350, 20).map((m) => Object.assign({}, m, { temp: -10 }));
+  const o = { motorModel: 'curva', winter: false, strategy: true, socTgt: 80, socCrit: 30, fcDays: 5, poaMin: 0, mountTilt: null };
+  const corre = (prof, tMin) => summarize(simulate(meteo, prof, loc, 0.8, Object.assign({}, o, { tMin })));
+  const R = {};
+  /* a) ningún perfil declara calefactor, y nadie gasta un vatio en calentar */
+  R.conFlagHeated = PROFILES.filter((p) => p.heated).map((p) => p.id);
+  R.heatLT = corre(lt, -20).heatWh;
+  R.heatSin = corre(sin, 0).heatWh;
+  /* b) la ficha del equipo, tal y como la leyó el mantenedor */
+  R.ficha = { lt: { wh: lt.wh, carga: lt.tCarga, descarga: lt.tDescarga, lt: !!lt.lt },
+              sin: { wh: sin.wh, carga: sin.tCarga, lt: !!sin.lt } };
+  /* c) a −10 °C la química decide quién carga: la estándar no, la LT sí */
+  R.chgSinA10 = corre(sin, 0).chg;
+  R.chgLTa10 = corre(lt, -20).chg;
+  /* d) la columna de EQUIPO trae su propio suelo aunque el panel diga 0 */
+  const C = runControls(meteo, sin, loc, null, Object.assign({}, o, { tMin: 0 }));
+  const col = C.filter((x) => x.c.k === 'lt')[0];
+  R.colLT = col ? { prof: col.prof.id, tMinUsado: col.c.tMin, chg: col.S.chg } : null;
+  R.colStd = C.filter((x) => x.c.k === 'std')[0].S.chg;
+  return R;
+});
+ok(quim.conFlagHeated.length === 0, 'ningún perfil se declara calefactado', 'siguen con heated: ' + quim.conFlagHeated.join(', '));
+ok(quim.heatLT === 0 && quim.heatSin === 0,
+  'y a −10 °C nadie gasta un vatio en calentar (el calefactor se fue con la corrección)',
+  'LT ' + quim.heatLT + ' Wh · estándar ' + quim.heatSin + ' Wh');
+ok(quim.ficha.lt.lt && quim.ficha.lt.wh === 166.4 && quim.ficha.lt.carga.join() === '-20,60' && quim.ficha.lt.descarga.join() === '-40,60',
+  'la -LT lleva la ficha real: 166,4 Wh, carga −20..60 °C, descarga −40..60 °C',
+  JSON.stringify(quim.ficha.lt));
+ok(!quim.ficha.sin.lt && quim.ficha.sin.wh === 153.6 && quim.ficha.sin.carga.join() === '0,45',
+  'y la estándar la suya: 153,6 Wh, carga 0..45 °C', JSON.stringify(quim.ficha.sin));
+ok(quim.chgSinA10 === 0 && quim.chgLTa10 > 0,
+  'a −10 °C la estándar NO carga (0 Wh) y la -LT sí (' + quim.chgLTa10.toFixed(0) + ' Wh): lo decide la química, no un calefactor',
+  'estándar ' + quim.chgSinA10 + ' · LT ' + quim.chgLTa10);
+ok(quim.colLT && quim.colLT.tMinUsado === -20 && quim.colLT.chg > 0 && quim.colStd === 0,
+  'la columna de EQUIPO usa el suelo de SU ficha (−20 °C) aunque el panel diga 0: capta ' + (quim.colLT ? quim.colLT.chg.toFixed(0) : '?') + ' Wh contra 0 de la estándar',
+  JSON.stringify({ colLT: quim.colLT, colStd: quim.colStd }));
+/* El suelo de carga del perfil llega a la simulación por el PANEL, y eso lo hace
+   `sincronizaTmin()` al elegir equipo. Sin esa sincronía el suelo del equipo no
+   entra en ninguna parte, así que se comprueba EN LA PÁGINA, moviendo el selector. */
+const sincro = await pg.evaluate(() => {
+  const idx = PROFILES.map((p, i) => [p.id, i]);
+  const pon = (id) => { $('prof').value = String(idx.filter((x) => x[0] === id)[0][1]); $('prof').onchange(); return +$('tmin').value; };
+  return { lt: pon('SP_45W_6Ah_LT'), sin: pon('SP_45W_6Ah'), ltString: pon('STRING_60W_6Ah_LT') };
+});
+ok(sincro.lt === -20 && sincro.ltString === -20 && sincro.sin === 0,
+  'elegir equipo escribe SU suelo de carga en el panel: −20 °C las -LT, 0 °C la estándar',
+  JSON.stringify(sincro));
+
+{
+  const bat4 = readFileSync(path.join(RAIZ, 'bateria.html'), 'utf8');
+  const prometen = ['Versión calefactada', 'calefactor auto en LT', 'batería calefactada', 'con el calefactor activo']
+    .filter((t) => bat4.includes(t));
+  ok(prometen.length === 0,
+    'y ningún texto de la página sigue prometiendo un calefactor que el equipo no tiene',
+    'siguen: ' + prometen.join(' · '));
+}
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice y una TCU muerta no sigue al sol'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol y la -LT es una química, no un calefactor'));
 process.exit(fallos ? 1 : 0);
