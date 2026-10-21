@@ -485,8 +485,35 @@ function fetchOpenMeteo(loc,days){
     "&hourly="+OM_VARS+"&forecast_days="+days+"&timezone=UTC";
   return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM);
 }
-function fetchYearOrNull(loc,y){
-  return fetchOpenMeteoYear(loc,y).catch(function(){return null});
+/* Un año que no baja NO desaparece. Antes volvía `null` y el barrido lo
+   saltaba en silencio: dos informes de Bellinzago del mismo día salieron con
+   doce años cada uno —al primero le faltaba 2018, al segundo 2016— y los dos
+   existen en Open-Meteo. Lo que los tumbaba era el 429 de cuota (ocho años
+   pedidos a la vez). Ahora se reintenta con espera creciente y, si aun así no
+   baja, vuelve `{error}` para que el barrido lo liste como «no disponible». */
+var REINTENTOS_OM=[2000,5000,12000];   /* ms entre intentos; el banco los acorta */
+function fetchYearDeclarado(loc,y,intento){
+  intento=intento||0;
+  return fetchOpenMeteoYear(loc,y).catch(function(e){
+    var msg=String(e&&e.message||e);
+    if(intento<REINTENTOS_OM.length){
+      return new Promise(function(res){setTimeout(res,REINTENTOS_OM[intento])})
+        .then(function(){return fetchYearDeclarado(loc,y,intento+1)});
+    }
+    return {error:msg,intentos:intento+1};
+  });
+}
+/* Separa lo que bajó de lo que no, con su motivo. Puro: lo prueba el banco. */
+function clasificaBarrido(list,years,simYear){
+  var res=[],caidos=[];
+  list.forEach(function(meteo,i){
+    var y=years[i];
+    if(!meteo){caidos.push({year:y,motivo:'no está en la fuente'});return;}
+    if(meteo.error){caidos.push({year:y,motivo:meteo.error+' tras '+meteo.intentos+' intentos'});return;}
+    if(meteo.length<8000){caidos.push({year:y,motivo:'serie incompleta ('+meteo.length+' h)'});return;}
+    res.push(simYear(meteo,y));
+  });
+  return {res:res,caidos:caidos};
 }
 function fetchOpenMeteoYear(loc,year){
   var u="https://archive-api.open-meteo.com/v1/archive?latitude="+loc.lat+"&longitude="+loc.lon+
@@ -729,14 +756,55 @@ var CONTROLS=[
  {k:'cons', n:'Conservador',                 d:'Objetivo 80 % · crítico 40 %: aparca antes, más margen',
   o:{strategy:true,socTgt:80,socCrit:40,fcDays:5,winter:false,defPos:DEFENSE_POS}}
 ];
-var CONTROL_COL={none:'#8C9AAB',std:'#36D399',winter:'#3aa0ff',plano:'#e0a52b',cons:'#c084fc'};
+var CONTROL_COL={none:'#8C9AAB',std:'#36D399',winter:'#3aa0ff',plano:'#e0a52b',cons:'#c084fc',lt:'#ff6b6b'};
+/* La comparativa varía la LÓGICA. Pero cuando el perfil evaluado no es
+   calefactado y existe su gemelo -LT, el problema del invierno —SOC a 0 % en
+   enero con las cinco lógicas— no lo arregla ninguna lógica: lo arregla el
+   calefactor. Esa alternativa es de EQUIPO, va en una columna más y se dice. */
+function controlesPara(prof){
+  var lista=CONTROLS.slice();
+  if(prof&&!prof.heated){
+    var lt=PROFILES.filter(function(p){return p.id===prof.id+'_LT'})[0];
+    var std=CONTROLS.filter(function(c){return c.k==='std'})[0];
+    if(lt&&std)lista.push({k:'lt',n:'Estándar · versión -LT',
+      d:'La estrategia estándar sobre el mismo equipo con batería calefactada ('+lt.id+'): alternativa de EQUIPO, no de lógica',
+      o:std.o,prof:lt});
+  }
+  return lista;
+}
+/* `soc0===null` = ESTADO ESTACIONARIO: cada lógica arranca en su propio
+   objetivo. El motivo está medido: con el deslizador del panel, la columna
+   «estándar» de Bellinzago 2014 iba de 403 h a 496 h (4,60 % a 5,66 %) según
+   dónde estuviera, más que la distancia entre estrategias, y el informe no
+   imprimía el valor. Las horas de más caían en enero, antes de la primera
+   carga completa: eran el transitorio del arranque, no el emplazamiento. */
+function socEstacionario(o){return Math.min(1,Math.max(0,(o.socTgt!=null?o.socTgt:100)/100))}
 function runControls(meteo,prof,loc,soc0,base){
-  return CONTROLS.map(function(c){
+  return controlesPara(prof).map(function(c){
     var o={};for(var k in base)o[k]=base[k];
     for(var k2 in c.o)o[k2]=c.o[k2];
-    var rows=simulate(meteo,prof,loc,soc0,o);
-    return {c:c,rows:rows,S:summarize(rows)};
+    var p=c.prof||prof, s0=soc0==null?socEstacionario(o):soc0;
+    var rows=simulate(meteo,p,loc,s0,o);
+    return {c:c,rows:rows,S:summarize(rows),soc0:s0,prof:p};
   });
+}
+/* El «más favorable» del informe. Antes ordenaba sólo por % no disponible, y
+   eso lo ganaba siempre «Sin gestión»: con crítico al 0 % nunca aparca a
+   propósito, así que su única indisponibilidad es la MUERTE —66 h agotada en
+   Bellinzago— y aun así salía recomendado. Ahora: sólo compiten los sistemas
+   de CONTROL (la columna -LT es otro equipo), se descartan los que agotan la
+   batería más que el mínimo del conjunto, y entre los que quedan manda la
+   disponibilidad y, a igualdad, la vida. */
+function eligeMejor(C){
+  if(!C||!C.length)return null;
+  var ctl=C.filter(function(x){return !x.c.prof});
+  if(!ctl.length)return null;
+  var minZero=Math.min.apply(null,ctl.map(function(x){return x.S.hZero}));
+  var cand=ctl.filter(function(x){return x.S.hZero<=minZero+1e-9});
+  var mejor=cand.slice().sort(function(a,b){
+    return (a.S.inactivePct-b.S.inactivePct)||(b.S.cyc.years-a.S.cyc.years)||(b.S.prodRelPct-a.S.prodRelPct)})[0];
+  return {mejor:mejor,minZero:minZero,
+    descartados:ctl.filter(function(x){return x.S.hZero>minZero+1e-9})};
 }
 
 /* ═══════════ Rainflow (ASTM simplificado) + modelo de ciclos LFP (11.5b) ═══════════ */
@@ -1270,7 +1338,7 @@ $('run').onclick=function(){
             async function next(){
               if(i>=years.length)return out;
               var batch=years.slice(i,i+8);i+=8;
-              var r=await Promise.all(batch.map(function(y){return fetchYearOrNull(loc,y)}));out.push.apply(out,r);
+              var r=await Promise.all(batch.map(function(y){return fetchYearDeclarado(loc,y)}));out.push.apply(out,r);
               return next();
             }
             return next();
@@ -1282,28 +1350,31 @@ $('run').onclick=function(){
         if(i>=years.length)return Promise.resolve(out);
         var batch=years.slice(i,i+8); i+=8;
         $('srcTag').textContent='Barrido '+yIni+'–'+yEnd+' · '+Math.min(i,years.length)+'/'+years.length+'…';
-        return Promise.all(batch.map(function(y){return fetchYearOrNull(loc,y)}))
+        return Promise.all(batch.map(function(y){return fetchYearDeclarado(loc,y)}))
           .then(function(r){out.push.apply(out,r);return next()});
       }
       return next();
     };
     job=fetchBatched().then(function(list){
-      var res=[];
-      list.forEach(function(meteo,i){
-        if(!meteo||meteo.length<8000)return;
-        var S=summarize(simulate(meteo,prof,loc,soc0,opts));
-        res.push({year:years[i],meteo:meteo,inact:S.inactivePct,lost:S.prodLostPct,
-                  socMin:S.socMin,hZero:S.hZero,hStow:S.hStow});
+      /* En el barrido el deslizador de SOC inicial NO manda: cada año y cada
+         lógica arrancan en su objetivo (ver socEstacionario). */
+      var s0=socEstacionario(opts), s0ref=socEstacionario(refOpts);
+      var cl=clasificaBarrido(list,years,function(meteo,y){
+        var S=summarize(simulate(meteo,prof,loc,s0,opts));
+        return {year:y,meteo:meteo,inact:S.inactivePct,lost:S.prodLostPct,
+                socMin:S.socMin,hZero:S.hZero,hStow:S.hStow};
       });
-      if(!res.length)throw new Error('Sin datos históricos (¿sin red?)');
+      var res=cl.res;
+      if(!res.length)throw new Error('Sin datos históricos (¿sin red?)'+(cl.caidos.length?' · '+cl.caidos[0].year+': '+cl.caidos[0].motivo:''));
       var rank=res.slice().sort(function(a,b){return b.inact-a.inact||b.lost-a.lost||a.socMin-b.socMin});
       var worst=rank[0];
       var wMeteo=applyStep(worst.meteo);           /* el barrido se evalúa horario; el detalle, al paso elegido */
-      var mng=simulate(wMeteo,prof,loc,soc0,opts);
-      var ref=simulate(wMeteo,prof,loc,soc0,refOpts);
-      var ctrlW=$('cmp').checked?runControls(wMeteo,prof,loc,soc0,opts):null;
+      var mng=simulate(wMeteo,prof,loc,s0,opts);
+      var ref=simulate(wMeteo,prof,loc,s0ref,refOpts);
+      var ctrlW=$('cmp').checked?runControls(wMeteo,prof,loc,null,opts):null;
       $('srcTag').textContent='Peor año '+worst.year+' · '+loc.n+STEP_NOTE;
-      LAST={meteo:wMeteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:{list:res,worst:worst.year},controls:ctrlW,
+      LAST={meteo:wMeteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,soc0:s0,socModo:'estacionario',
+        sweep:{list:res,worst:worst.year,caidos:cl.caidos,pedidos:years.length},controls:ctrlW,
         weatherContract:wMeteo.contract||null,weatherFallback:wMeteo.contractFallback||null};
       render(wMeteo,mng,ref,prof,loc,opts,LAST.sweep,null,ctrlW);
     });
@@ -1314,7 +1385,7 @@ $('run').onclick=function(){
       var mng=simulate(meteo,prof,loc,soc0,opts);
       var ref=simulate(meteo,prof,loc,soc0,refOpts);
       var ctrl=$('cmp').checked?runControls(meteo,prof,loc,soc0,opts):null;
-      LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,sweep:null,controls:ctrl,
+      LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,soc0:soc0,socModo:'panel',sweep:null,controls:ctrl,
         weatherContract:meteo.contract||null,weatherFallback:meteo.contractFallback||null};
       render(meteo,mng,ref,prof,loc,opts,null,null,ctrl);
       /* y, si hay motor, el balance de referencia lo firma él */
@@ -1545,8 +1616,9 @@ function buildReport(){
   /* — veredicto automático — */
   var okDisp=S.inactivePct<1.0, okProd=S.prodLostPct<0.1, okSoc=S.socMin>0.05;
   var apto=okDisp&&okProd&&okSoc;
-  var mejor=C?C.slice().sort(function(a,b){
-    return (a.S.inactivePct-b.S.inactivePct)||(b.S.prodRelPct-a.S.prodRelPct)})[0]:null;
+  var elec=eligeMejor(C), mejor=elec?elec.mejor:null;
+  var colLT=C?C.filter(function(x){return x.c.k==='lt'})[0]:null;
+  var colStd=C?C.filter(function(x){return x.c.k==='std'})[0]:null;
 
   var H='<div class="page">';
   /* PORTADA */
@@ -1572,7 +1644,16 @@ function buildReport(){
       : 'La configuración evaluada <b>presenta riesgo</b>: '+fmt(S.inactivePct,4)+' % de tiempo no disponible, '+
         fmt(S.prodLostPct,4)+' % de producción perdida y un SOC mínimo del '+fmt(S.socMin*100)+' %'+
         (S.hZero>0?', con '+fmt(S.hZero)+' h de batería completamente agotada':'')+'. Se recomienda revisar la capacidad, la potencia de carga o la estrategia de gestión.')+
-     (mejor?' De los sistemas de control evaluados, el más favorable en este emplazamiento es <b>'+mejor.c.n+'</b>.':'')+'</div>';
+     (mejor?' De los sistemas de control evaluados, el más favorable en este emplazamiento es <b>'+mejor.c.n+'</b>: '+
+       'entre los que menos horas dejan la batería agotada ('+fmt(elec.minZero)+' h), el de mayor disponibilidad y, a igualdad, mayor vida.'+
+       (elec.descartados.length?' Quedan descartados por agotar la batería: '+elec.descartados.map(function(x){
+         return x.c.n+' ('+fmt(x.S.hZero)+' h)'}).join(', ')+'.':''):'')+
+     (colLT&&colStd?(Math.abs(colLT.S.inactivePct-colStd.S.inactivePct)<5e-5&&colLT.S.hZero===colStd.S.hZero
+       ?' La versión calefactada del mismo equipo (<b>'+colLT.prof.id+'</b>, apartado 9) <b>no cambia el resultado</b> en este emplazamiento: '+
+        'el déficit de invierno es de irradiación, no de temperatura, y el calefactor no lo compensa.'
+       :' La versión calefactada del mismo equipo (<b>'+colLT.prof.id+'</b>, apartado 9) pasaría de '+
+       fmt(colStd.S.hZero)+' h a '+fmt(colLT.S.hZero)+' h con la batería agotada y de '+fmt(colStd.S.inactivePct,4)+' % a '+
+       fmt(colLT.S.inactivePct,4)+' % de tiempo no disponible con la misma estrategia estándar.'):'')+'</div>';
   H+='<div class="kpis">'+
      '<div class="kpi"><div class="l">Tiempo no disponible</div><div class="v">'+fmt(S.inactivePct,4)+' %</div><div class="s">'+fmt(S.hParked)+' h</div></div>'+
      '<div class="kpi"><div class="l">Producción perdida</div><div class="v">'+fmt(S.prodLostPct,4)+' %</div><div class="s">imputable a batería</div></div>'+
@@ -1625,7 +1706,10 @@ function buildReport(){
      ['Umbral mínimo de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
      ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA'}],
      ['Montaje de la fuente de carga',{v:opts.mountTilt!=null?('panel fijo a '+opts.mountTilt+'° orientado al ecuador'):'solidario al seguidor (plano del generador)'}],
-     ['Curva de carga',{v:'CC/CV — derate ×0,8 sobre 85 % SOC, ×0,5 sobre 90 %, ×0,2 sobre 95 %'}]
+     ['Curva de carga',{v:'CC/CV — derate ×0,8 sobre 85 % SOC, ×0,5 sobre 90 %, ×0,2 sobre 95 %'}],
+     ['SOC inicial',{v:LAST.socModo==='estacionario'
+        ?fmt((LAST.soc0||0)*100)+' % — el objetivo de la estrategia (estado estacionario); en el apartado 9 cada lógica arranca en el suyo'
+        :fmt((LAST.soc0||0)*100)+' % — valor del panel; el resultado del primer mes depende de él'}]
     ],['Parámetro','Valor']);
 
   /* 6. ESTRATEGIA */
@@ -1666,11 +1750,16 @@ function buildReport(){
     var v=sweep.list, mean=function(k){return v.reduce(function(a,r){return a+r[k]},0)/v.length};
     var std=function(k){var m=mean(k);return Math.sqrt(v.reduce(function(a,r){return a+(r[k]-m)*(r[k]-m)},0)/v.length)};
     H+='<h2 class="brk">8. Resultados año a año</h2>';
+    var caidos=sweep.caidos||[];
     H+='<p>Cada año meteorológico completo se simula con la configuración evaluada. El año de proyecto es el más desfavorable, '+
-       'y se acompaña de la media (año típico) y del percentil 97,5 % (media + 2σ), como en la metodología de referencia.</p>';
+       'y se acompaña de la media (año típico) y del percentil 97,5 % (media + 2σ), como en la metodología de referencia. '+
+       'Se pidieron <b>'+fmt(sweep.pedidos||(v.length+caidos.length))+'</b> años y se simularon <b>'+fmt(v.length)+'</b>'+
+       (caidos.length?'; los que no bajaron se listan como no disponibles y <b>no entran</b> en la media.':'.')+'</p>';
     var filas=v.map(function(r){return [String(r.year)+(r.year===sweep.worst?' (año de proyecto)':''),
       {v:fmt(r.inact,4),cls:r.year===sweep.worst?'bad':''},{v:fmt(r.lost,4)},{v:fmt(r.socMin*100)+' %'},{v:fmt(r.hZero)}];});
-    filas.push([{v:'<b>Media (año típico)</b>'},{v:'<b>'+fmt(mean('inact'),4)+'</b>'},{v:'<b>'+fmt(mean('lost'),4)+'</b>'},{v:'—'},{v:'—'}]);
+    caidos.forEach(function(c){filas.push([String(c.year)+' — no disponible',{v:c.motivo,cls:'wn'},{v:'—'},{v:'—'},{v:'—'}])});
+    filas.sort(function(a,b){return parseInt(typeof a[0]==='object'?'9999':a[0])-parseInt(typeof b[0]==='object'?'9999':b[0])});
+    filas.push([{v:'<b>Media (año típico, '+fmt(v.length)+' años)</b>'},{v:'<b>'+fmt(mean('inact'),4)+'</b>'},{v:'<b>'+fmt(mean('lost'),4)+'</b>'},{v:'—'},{v:'—'}]);
     filas.push([{v:'<b>Media + 2σ (97,5 %)</b>'},{v:'<b>'+fmt(mean('inact')+2*std('inact'),4)+'</b>'},{v:'<b>'+fmt(mean('lost')+2*std('lost'),4)+'</b>'},{v:'—'},{v:'—'}]);
     H+=tbl(filas,['Año','% no disponible','% producción perdida','SOC mínimo','h a cero']);
   }
@@ -1683,7 +1772,10 @@ function buildReport(){
        páginas, porque la fuente de carga —SP con panel dedicado o STRING colgado
        del generador— cambia el resultado más que ninguna de las cinco lógicas. */
     H+='<p>Todas las alternativas comparten el mismo equipo —<b>'+prof.n+'</b>—, '+
-       'emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión.</p>';
+       'emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión'+
+       (colLT?', salvo la última columna, que cambia el <b>equipo</b> y no la lógica: la estrategia estándar con la batería calefactada (<b>'+colLT.prof.id+'</b>)':'')+'. '+
+       (LAST.socModo==='estacionario'?'Cada columna arranca en el objetivo de carga de su propia lógica (estado estacionario).':
+        'Todas las columnas arrancan en el SOC inicial del panel ('+fmt((LAST.soc0||0)*100)+' %).')+'</p>';
     H+=tbl([['Descripción'].concat(C.map(function(x){return {v:x.c.d}}))].concat([
       ['% tiempo no disponible'].concat(C.map(function(x){return {v:fmt(x.S.inactivePct,4)}})),
       ['% producción perdida (batería)'].concat(C.map(function(x){return {v:fmt(x.S.prodLostPct,4)}})),
@@ -1785,7 +1877,10 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   /* — Barrido multi-año: tabla por año + estadística TMY ± 2σ (como el estudio) — */
   if(sweep){
     var cS=document.createElement('div');cS.className='card';
-    cS.innerHTML='<h2>🏆 Barrido multi-año — peor año: '+sweep.worst+'</h2><div class="sub">Un año simulado por fila con la configuración actual; el peor se elige por % tiempo no disponible (desempate: % producción perdida y SOC mínimo). Debajo, el detalle del peor año.</div>';
+    var caidosUI=sweep.caidos||[];
+    cS.innerHTML='<h2>🏆 Barrido multi-año — peor año: '+sweep.worst+'</h2><div class="sub">Un año simulado por fila con la configuración actual; el peor se elige por % tiempo no disponible (desempate: % producción perdida y SOC mínimo). '+
+      'Cada año arranca en el objetivo de la estrategia: el deslizador de SOC inicial no aplica al barrido. '+
+      (caidosUI.length?'<b>'+caidosUI.length+' año(s) no bajaron</b> y no entran en la media. ':'')+'Debajo, el detalle del peor año.</div>';
     var vals=sweep.list;
     var mean=function(k){return vals.reduce(function(a,r){return a+r[k]},0)/vals.length};
     var std=function(k){var m=mean(k);return Math.sqrt(vals.reduce(function(a,r){return a+(r[k]-m)*(r[k]-m)},0)/vals.length)};
@@ -1798,7 +1893,8 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
         '<td>'+fmt(r.lost,4)+'</td><td class="'+(r.socMin<0.15?'bad':'')+'">'+fmt(r.socMin*100)+'%</td>'+
         '<td class="'+(r.hZero>0?'bad':'')+'">'+fmt(r.hZero)+'</td><td>'+fmt(r.hStow)+'</td></tr>';
     });
-    tb+='<tr><td><b>Media (TMY)</b></td><td>'+fmt(mi,4)+'</td><td>'+fmt(ml,4)+'</td><td colspan="3"></td></tr>';
+    caidosUI.forEach(function(c){tb+='<tr><td>'+c.year+'</td><td class="wn" colspan="5">no disponible — '+c.motivo+'</td></tr>'});
+    tb+='<tr><td><b>Media (TMY, '+vals.length+' años)</b></td><td>'+fmt(mi,4)+'</td><td>'+fmt(ml,4)+'</td><td colspan="3"></td></tr>';
     tb+='<tr><td><b>TMY + 2σ (97,5 %)</b></td><td>'+fmt(mi+2*si,4)+'</td><td>'+fmt(ml+2*sl,4)+'</td><td colspan="3"></td></tr>';
     tb+='</table>';
     cS.insertAdjacentHTML('beforeend',tb);
@@ -1925,8 +2021,11 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   /* — Comparativa entre sistemas de control — */
   if(controls && controls.length){
     var cc=document.createElement('div');cc.className='card';
+    var hayLT=controls.some(function(x){return x.c.k==='lt'});
     cc.innerHTML='<h2>⚖️ Comparativa de sistemas de control</h2><div class="sub">Mismo equipo ('+prof.n+
-      '), mismo emplazamiento y misma meteo: sólo cambia la lógica de gestión de la batería.</div>';
+      '), mismo emplazamiento y misma meteo: sólo cambia la lógica de gestión de la batería'+
+      (hayLT?' — salvo la columna <b>-LT</b>, que cambia el equipo (batería calefactada) y no la lógica':'')+'. '+
+      (controls[0]&&controls[0].soc0!=null&&LAST&&LAST.socModo==='estacionario'?'Cada columna arranca en su propio objetivo de carga.':'')+'</div>';
     out.appendChild(cc);
     var gc=mkCanvas(cc,210), fc=frame(gc,0,100,mng,function(v){return fmt(v)+'%'});
     controls.forEach(function(x){

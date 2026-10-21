@@ -192,6 +192,85 @@ ok(cte.sinCanon.length === 0,
     'tecleados: ' + tecleados.join(', '));
 }
 
+/* ── 4) EL INFORME NO SE CONTRADICE (2026-10-21, Bellinzago) ──
+   Dos informes del mismo sitio, mismo equipo y mismo año salieron con la
+   columna «estándar» distinta (414 h / 412 h) porque el SOC inicial del panel
+   no se imprimía; a cada uno le faltaba un año distinto del barrido y los dos
+   existían (429 de cuota, tragado como `null`); los dos recomendaban «Sin
+   gestión» con 66 h de batería agotada; y ninguno enseñaba la versión -LT,
+   que es lo único que toca el invierno. Cuatro propiedades, las cuatro de
+   COMPORTAMIENTO: se ejecutan en la página, no se leen con una regex. */
+const inf = await pg.evaluate(async () => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const prof = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const lt = PROFILES.filter((p) => p.id === 'SP_45W_6Ah_LT')[0];
+  const base = { motorModel: 'curva', winter: false, strategy: true, socTgt: 80, socCrit: 30,
+    fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const meteo = synthMeteo(loc, 12, 350, 60);
+  const R = {};
+  /* a) estado estacionario: con soc0===null cada lógica arranca en SU objetivo;
+        con un número, todas en ese número. */
+  const est = runControls(meteo, prof, loc, null, base);
+  R.arranque = est.map((x) => ({ k: x.c.k, soc0: x.soc0, tgt: x.c.o.socTgt / 100, primero: x.rows[0].soc }));
+  R.panel = runControls(meteo, prof, loc, 0.05, base).map((x) => x.soc0);
+  /* b) la columna -LT existe para un perfil sin calefactor, apunta al gemelo,
+        y SIMULA con él: a −10 °C el estándar no carga (tMin 0) y la -LT sí. */
+  R.cols = est.map((x) => x.c.k);
+  const colLT = est.filter((x) => x.c.k === 'lt')[0];
+  R.ltProf = colLT ? colLT.prof.id : null;
+  R.colsDeLT = controlesPara(lt).map((c) => c.k);
+  const frio = meteo.map((m) => Object.assign({}, m, { temp: -10 }));
+  const enFrio = runControls(frio, prof, loc, null, base);
+  R.chgStdFrio = enFrio.filter((x) => x.c.k === 'std')[0].S.chg;
+  R.chgLTFrio = (enFrio.filter((x) => x.c.k === 'lt')[0] || { S: { chg: -1 } }).S.chg;
+  /* c) el «más favorable»: la tabla real de Bellinzago 2014, en miniatura. */
+  const fila = (k, prof, hZero, inact, years) => ({ c: { k, n: k, prof }, S: { hZero, inactivePct: inact, cyc: { years }, prodRelPct: 99 } });
+  const C = [fila('none', null, 66, 0.7534, 14.9), fila('std', null, 3, 4.7260, 15.7), fila('winter', null, 6, 4.0982, 15.2),
+    fila('plano', null, 0, 4.3950, 15.7), fila('cons', null, 0, 5.7648, 15.7), fila('lt', lt, 0, 1.0, 15.7)];
+  const e = eligeMejor(C);
+  R.mejor = e.mejor.c.k; R.minZero = e.minZero; R.descartados = e.descartados.map((x) => x.c.k);
+  R.mejorVacio = eligeMejor([]) === null && eligeMejor(null) === null;
+  /* d) el barrido separa lo que bajó de lo que no, con motivo. */
+  const cl = clasificaBarrido([meteo.concat(meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo), { error: 'HTTP 429', intentos: 4 }, null, meteo],
+    [2013, 2014, 2015, 2016], (m, y) => ({ year: y }));
+  R.barrido = { res: cl.res.map((r) => r.year), caidos: cl.caidos.map((c) => c.year + ':' + c.motivo) };
+  /* e) el 429 se reintenta y, si persiste, vuelve DECLARADO (no null). */
+  const fetchReal = window.fetch; const viejos = REINTENTOS_OM.slice();
+  REINTENTOS_OM.length = 0; REINTENTOS_OM.push(1, 1, 1);
+  const payload = { hourly: { time: ['2016-01-01T00:00', '2016-01-01T01:00', '2016-01-01T02:00'],
+    shortwave_radiation: [0, 0, 0], diffuse_radiation: [0, 0, 0], temperature_2m: [1, 1, 1], windspeed_10m: [2, 2, 2] } };
+  let llamadas = 0;
+  window.fetch = () => { llamadas++; return Promise.resolve(llamadas < 3
+    ? { ok: false, status: 429 } : { ok: true, status: 200, json: () => Promise.resolve(payload) }); };
+  const alTercero = await fetchYearDeclarado(loc, 2016);
+  R.alTercero = { llamadas, filas: alTercero ? alTercero.length : null, error: (alTercero && alTercero.error) || null, esNull: alTercero === null };
+  llamadas = 0; window.fetch = () => { llamadas++; return Promise.resolve({ ok: false, status: 429 }); };
+  const nunca = await fetchYearDeclarado(loc, 2018);
+  R.nunca = { llamadas, error: (nunca && nunca.error) || null, intentos: (nunca && nunca.intentos) || null, esNull: nunca === null };
+  window.fetch = fetchReal; REINTENTOS_OM.length = 0; viejos.forEach((v) => REINTENTOS_OM.push(v));
+  return R;
+});
+ok(inf.arranque.every((a) => Math.abs(a.soc0 - a.tgt) < 1e-9 && Math.abs(a.primero - a.tgt) < 0.1),
+  'con soc0=null cada lógica ARRANCA en su objetivo (' + inf.arranque.map((a) => a.k + ' ' + Math.round(a.tgt * 100) + '%').join(', ') + ')',
+  JSON.stringify(inf.arranque));
+ok(inf.panel.every((v) => v === 0.05), 'y con un número del panel, todas arrancan en él', inf.panel.join(','));
+ok(inf.cols.indexOf('lt') >= 0 && inf.ltProf === 'SP_45W_6Ah_LT',
+  'un perfil sin calefactor trae la columna -LT apuntando a su gemelo (' + inf.ltProf + ')', inf.cols.join(','));
+ok(inf.colsDeLT.indexOf('lt') < 0, 'y el propio perfil -LT no la trae (no hay gemelo del gemelo)', inf.colsDeLT.join(','));
+ok(inf.chgStdFrio === 0 && inf.chgLTFrio > 0,
+  'la columna -LT SIMULA con el perfil calefactado: a −10 °C el estándar capta 0 Wh y la -LT ' + inf.chgLTFrio.toFixed(0) + ' Wh',
+  'std ' + inf.chgStdFrio + ' · lt ' + inf.chgLTFrio);
+ok(inf.mejor === 'plano' && inf.minZero === 0 && inf.descartados.join(',') === 'none,std,winter',
+  'el «más favorable» descarta a los que agotan la batería, ignora la columna -LT y elige «plano» (0 h, 4,40 %)',
+  'mejor ' + inf.mejor + ' · minZero ' + inf.minZero + ' · descartados ' + inf.descartados.join(','));
+ok(inf.mejorVacio, 'y sin comparativa no inventa veredicto');
+ok(inf.barrido.res.join(',') === '2013' && inf.barrido.caidos.join(' | ') === '2014:HTTP 429 tras 4 intentos | 2015:no está en la fuente | 2016:serie incompleta (288 h)',
+  'el barrido LISTA los años que no bajaron, con motivo, en vez de saltarlos', JSON.stringify(inf.barrido));
+ok(inf.alTercero.llamadas === 3 && inf.alTercero.filas === 3 && !inf.alTercero.error,
+  'un 429 se reintenta: dos rechazos y al tercero baja', JSON.stringify(inf.alTercero));
+ok(inf.nunca.llamadas === 4 && inf.nunca.error === 'HTTP 429' && inf.nunca.intentos === 4 && !inf.nunca.esNull,
+  'y si persiste vuelve DECLARADO: {error:"HTTP 429", intentos:4}, nunca null', JSON.stringify(inf.nunca));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez y sus 19 canónicos salen del espejo'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo y el informe no se contradice'));
 process.exit(fallos ? 1 : 0);
