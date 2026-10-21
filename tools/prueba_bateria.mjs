@@ -86,6 +86,16 @@ await pg.goto(PAG);
 await pg.waitForTimeout(800);
 ok(rotos.length === 0, 'la página abre sin errores', rotos.slice(0, 3).join(' · '));
 
+/* EL ARRANQUE SE LEE AQUÍ, nada más abrir, y se afirma más abajo. Leerlo al
+   final no mide el arranque: mide lo que la última prueba dejó puesto. Un
+   mutante que cambiaba la elección inicial por un índice fijo no mataba nada
+   justamente por eso. */
+const ARRANQUE = await pg.evaluate(() => ({
+  prof: PROFILES[+$('prof').value].id,
+  panel: +$('panel').value,
+  tmin: +$('tmin').value,
+}));
+
 const r = await pg.evaluate(() => {
   const D = Math.PI / 180;
   /* ancla de pvlib: zen 55, azN 150, tilt 30 al ESTE, ghi 235.2237, dni 24.0644,
@@ -471,6 +481,55 @@ ok(puntaApunta.conCuarenta && puntaApunta.conCuarenta.chgW === 45 && puntaApunta
   'y volver al panel del modelo devuelve el perfil del catálogo, sin rastro de la combinación',
   JSON.stringify(puntaApunta.conCuarenta));
 
+/* ── 8) EL MODELO NOMBRA LA BATERÍA, NO LA PAREJA (2026-10-21) ──
+   Reportado por el mantenedor: «¿por qué pone 6Ah 45W si lo de 45W lo elegimos
+   después?». El catálogo listaba parejas panel+batería y el nombre las decía,
+   que con el panel ya elegible aparte sobra y encima duplicaba: SP_45W_6Ah y
+   SP_60W_6Ah son LA MISMA batería con otro panel. */
+const mod = await pg.evaluate(() => {
+  const R = {};
+  /* a) ningún modelo SP OFRECIDO lleva el panel en el nombre; STRING sí lleva su
+        regulador. Se mira lo ofrecido y no todo PROFILES: la variante oculta
+        (SP_60W_6Ah) SÍ nombra su panel, porque es una pareja de catálogo y no un
+        modelo, y exigirle lo contrario sería pedirle que mienta sobre lo que es. */
+  R.sp = PROFILES.filter((p) => !p.string && !p.variante).map((p) => p.n);
+  R.variantesNombranPanel = PROFILES.filter((p) => p.variante).map((p) => p.n);
+  R.str = PROFILES.filter((p) => p.string).map((p) => p.n);
+  /* b) el desplegable ofrece modelos, no parejas: una entrada por batería */
+  R.opciones = [].map.call($('prof').options, (o) => PROFILES[+o.value].id);
+  R.whsOfrecidos = R.opciones.map((id) => { const p = PROFILES.filter((q) => q.id === id)[0]; return p.string + '|' + p.wh + '|' + !!p.lt; });
+  R.duplicados = R.whsOfrecidos.length !== new Set(R.whsOfrecidos).size;
+  /* c) la variante oculta sigue en el catálogo, que es quien decide producto/estudio */
+  const seis = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  R.variante = { estaEnProfiles: PROFILES.some((p) => p.id === 'SP_60W_6Ah'),
+                 esProducto: enCatalogo(conPanel(seis, 60)),
+                 treintaEsEstudio: !enCatalogo(conPanel(seis, 30)) };
+  /* d) el arranque elige SP_45W_6Ah por id, no por un índice que se mueve */
+  R.nPerfiles = PROFILES.length;
+  /* e) el selector de panel marca cuáles son producto */
+  R.etiquetas = [].map.call($('panel').options, (o) => o.text);
+  return R;
+});
+ok(mod.sp.every((n) => !/panel\s*\d+\s*W/.test(n)) && mod.sp.some((n) => /6 Ah/.test(n)),
+  'ningún modelo SP ofrecido lleva el panel en el nombre: ' + mod.sp.join(' · '), mod.sp.join(' · '));
+ok(mod.variantesNombranPanel.length > 0 && mod.variantesNombranPanel.every((n) => /panel\s*\d+\s*W/.test(n)),
+  'y la variante oculta SÍ lo nombra, porque es una pareja de catálogo: ' + mod.variantesNombranPanel.join(' · '),
+  mod.variantesNombranPanel.join(' · '));
+ok(mod.str.every((n) => /regulador 60 W/.test(n)),
+  'y los STRING sí conservan su regulador, que no se elige aparte', mod.str.join(' · '));
+ok(!mod.duplicados && mod.opciones.indexOf('SP_60W_6Ah') < 0 && mod.opciones.length === mod.nPerfiles - 1,
+  'el desplegable ofrece una entrada por batería (' + mod.opciones.length + ' de ' + mod.nPerfiles + '): la pareja repetida SP_60W_6Ah se cae',
+  mod.opciones.join(', '));
+ok(mod.variante.estaEnProfiles && mod.variante.esProducto && mod.variante.treintaEsEstudio,
+  'pero sigue en el catálogo: SP 6 Ah + 60 W es PRODUCTO y + 30 W es ESTUDIO',
+  JSON.stringify(mod.variante));
+ok(ARRANQUE.prof === 'SP_45W_6Ah' && ARRANQUE.panel === 45 && ARRANQUE.tmin === 0,
+  'y la página ARRANCA en SP_45W_6Ah con su panel de serie (45 W) y su suelo de carga (0 °C), elegido por id y no por un índice que mover una entrada desplaza',
+  JSON.stringify(ARRANQUE));
+ok(/45 W — de serie/.test(mod.etiquetas.join('|')) && /60 W — de catálogo/.test(mod.etiquetas.join('|')) && /^30 W$/.test(mod.etiquetas[0]),
+  'y el selector de panel distingue de serie, de catálogo y a secas: ' + mod.etiquetas.join(' · '),
+  mod.etiquetas.join(' · '));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química y el panel es un eje propio'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio y el modelo nombra la batería'));
 process.exit(fallos ? 1 : 0);
