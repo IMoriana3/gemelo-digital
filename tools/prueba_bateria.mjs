@@ -373,6 +373,104 @@ ok(sincro.lt === -20 && sincro.ltString === -20 && sincro.sin === 0,
     'siguen: ' + prometen.join(' · '));
 }
 
+/* ── 7) EL PANEL ES UN EJE PROPIO (2026-10-21) ──
+   En una TCU self-powered `chgW` ES el pico del panel. Hasta hoy venía pegado
+   al perfil y sólo existían tres parejas de catálogo, así que estudiar «esta
+   batería con otro panel» exigía inventar una entrada. Ahora el panel se elige
+   aparte, y una pareja que NO está en el catálogo se declara como estudio para
+   que nadie cotice un equipo que no existe. */
+const pan = await pg.evaluate(() => {
+  const seis = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const lt = PROFILES.filter((p) => p.id === 'SP_45W_6Ah_LT')[0];
+  const str = PROFILES.filter((p) => p.string)[0];
+  const R = {};
+  /* a) cambia el panel y SOLO el panel */
+  const c30 = conPanel(seis, 30);
+  R.combina = { id: c30.id, chgW: c30.chgW, wh: c30.wh, base: c30.base.id, whIgual: c30.wh === seis.wh };
+  /* b) no toca lo que no debe: mismo vataje y perfiles STRING vuelven el original */
+  R.mismoW = conPanel(seis, 45) === seis;
+  R.string = conPanel(str, 90) === str;
+  /* c) el catálogo se pregunta por el equipo, no por el id construido */
+  R.cat = { real: enCatalogo(seis), c60: enCatalogo(conPanel(seis, 60)), c30: enCatalogo(c30), c90: enCatalogo(conPanel(seis, 90)) };
+  /* d) la columna -LT sigue el panel elegido, buscando el gemelo por el MODELO */
+  const cols = controlesPara(c30);
+  const col = cols.filter((c) => c.k === 'lt')[0];
+  R.colLT = col ? { id: col.prof.id, chgW: col.prof.chgW, wh: col.prof.wh } : null;
+  R.ltDirecto = controlesPara(conPanel(lt, 30)).map((c) => c.k).indexOf('lt');
+  /* e) el selector existe, trae el catálogo y arranca en el del modelo */
+  const idx = PROFILES.map((p, i) => [p.id, i]);
+  const pon = (id) => { $('prof').value = String(idx.filter((x) => x[0] === id)[0][1]); $('prof').onchange(); };
+  pon('SP_45W_6Ah');
+  R.selector = { ws: [].map.call($('panel').options, (o) => +o.value), valor: +$('panel').value, visible: $('panelFld').style.display !== 'none' };
+  pon('STRING_60W_6Ah');
+  R.selectorString = $('panelFld').style.display;
+  pon('SP_45W_6Ah');
+  /* f) más panel, más carga (igualdad de todo lo demás).
+        EL RÉGIMEN IMPORTA: con sol de sobra los cuatro paneles llenan la batería
+        y captan EXACTAMENTE lo mismo (457 Wh los cuatro, medido). Ahí la prueba
+        pasaría por casualidad en una y sólo una dirección: no mide nada. Se mide
+        con 85 % de nubes en invierno, que es donde el panel es el límite. */
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const meteo = synthMeteo(loc, 12, 350, 85);
+  const o = { motorModel: 'curva', winter: false, strategy: false, socTgt: 100, socCrit: 0, fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  R.carga = [30, 45, 60, 90].map((w) => +summarize(simulate(meteo, conPanel(seis, w), loc, 0.3, o)).chg.toFixed(0));
+  return R;
+});
+ok(pan.combina.chgW === 30 && pan.combina.id === 'SP_30W_6Ah' && pan.combina.whIgual && pan.combina.base === 'SP_45W_6Ah',
+  'elegir panel cambia el panel y SOLO el panel: SP_45W_6Ah + 30 W → ' + pan.combina.id + ', misma batería, y recuerda de qué modelo sale',
+  JSON.stringify(pan.combina));
+ok(pan.mismoW && pan.string,
+  'y no toca lo que no debe: el mismo vataje y los perfiles STRING vuelven el perfil original',
+  'mismoW ' + pan.mismoW + ' · string ' + pan.string);
+ok(pan.cat.real && pan.cat.c60 && !pan.cat.c30 && !pan.cat.c90,
+  'el catálogo distingue producto de estudio: 45 W y 60 W existen, 30 W y 90 W no',
+  JSON.stringify(pan.cat));
+ok(pan.colLT && pan.colLT.id === 'SP_30W_6Ah_LT' && pan.colLT.chgW === 30 && pan.colLT.wh === 166.4,
+  'la columna -LT sigue al panel elegido (' + (pan.colLT ? pan.colLT.id : '?') + '): el gemelo se busca por el MODELO, no por el id construido',
+  JSON.stringify(pan.colLT));
+ok(pan.ltDirecto < 0, 'y un perfil -LT con panel apartado sigue sin traer columna -LT (no hay gemelo del gemelo)');
+ok(pan.selector.visible && pan.selector.ws.join() === '30,45,60,90' && pan.selector.valor === 45,
+  'el selector trae el catálogo de paneles y arranca en el del modelo (45 W)', JSON.stringify(pan.selector));
+ok(pan.selectorString === 'none',
+  'y se esconde en STRING, donde chgW es el regulador del generador y no un panel', pan.selectorString);
+ok(pan.carga[0] < pan.carga[1] && pan.carga[1] < pan.carga[2] && pan.carga[2] < pan.carga[3],
+  'más panel, más carga captada: ' + pan.carga.join(' < ') + ' Wh para 30/45/60/90 W',
+  pan.carga.join(' · '));
+{
+  const bat5 = readFileSync(path.join(RAIZ, 'bateria.html'), 'utf8');
+  ok(bat5.includes('combinación de estudio, no de catálogo') && bat5.includes('no debe cotizarse como producto'),
+    'y el informe declara en portada y en el apartado 5 cuando la pareja es de estudio y no de catálogo');
+}
+
+/* Y DE PUNTA A PUNTA, porque lo de arriba prueba `conPanel` y NO que el selector
+   llegue a la simulación. Un mutante que quitaba `conPanel` del manejador de
+   «Simular» no mataba NADA: el selector habría quedado de adorno, que es
+   exactamente el defecto que este banco encontró esta mañana en el flag `winter`.
+   Se conduce la página de verdad —fuente sintética, sin red— y se lee el perfil
+   que la simulación guardó en LAST. */
+const puntaApunta = await pg.evaluate(async () => {
+  const idx = PROFILES.map((p, i) => [p.id, i]);
+  $('prof').value = String(idx.filter((x) => x[0] === 'SP_45W_6Ah')[0][1]);
+  $('prof').onchange();
+  $('src').value = 'synth'; if ($('src').onchange) $('src').onchange();
+  $('cmp').checked = false;
+  $('panel').value = '90'; $('panel').onchange();
+  $('run').click();
+  for (let i = 0; i < 200 && (!window.LAST || LAST.prof.chgW !== 90); i++) await new Promise((r) => setTimeout(r, 50));
+  const conNoventa = window.LAST ? { id: LAST.prof.id, chgW: LAST.prof.chgW, wh: LAST.prof.wh } : null;
+  $('panel').value = '45'; $('panel').onchange();
+  $('run').click();
+  for (let i = 0; i < 200 && (!window.LAST || LAST.prof.chgW !== 45); i++) await new Promise((r) => setTimeout(r, 50));
+  const conCuarenta = window.LAST ? { id: LAST.prof.id, chgW: LAST.prof.chgW, wh: LAST.prof.wh } : null;
+  return { conNoventa, conCuarenta };
+});
+ok(puntaApunta.conNoventa && puntaApunta.conNoventa.chgW === 90 && puntaApunta.conNoventa.id === 'SP_90W_6Ah' && puntaApunta.conNoventa.wh === 153.6,
+  'y el selector LLEGA a la simulación: con 90 W elegido, la corrida usa SP_90W_6Ah a 90 W con la batería de siempre',
+  JSON.stringify(puntaApunta.conNoventa));
+ok(puntaApunta.conCuarenta && puntaApunta.conCuarenta.chgW === 45 && puntaApunta.conCuarenta.id === 'SP_45W_6Ah',
+  'y volver al panel del modelo devuelve el perfil del catálogo, sin rastro de la combinación',
+  JSON.stringify(puntaApunta.conCuarenta));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol y la -LT es una química, no un calefactor'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química y el panel es un eje propio'));
 process.exit(fallos ? 1 : 0);
