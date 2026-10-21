@@ -613,6 +613,13 @@ function simulate(meteo,prof,loc,soc0,opts){
   var dtH=n>1?((+meteo[1].t)-(+meteo[0].t))/36e5:1;      /* paso en horas (uniforme) */
   var t0Day=Math.floor((+meteo[0].t)/864e5);
   var soc=soc0, parked=false, prevPos=null, stow=0;
+  /* Temperatura de la BATERÍA, no la ambiente: es la que decide el calefactor y
+     la que limita el C-rate. Hasta 2026-10-21 aquí se pasaba `m.temp` crudo —el
+     gemelo sí modelaba la inercia (sim/planta.js), así que la MISMA regla tenía
+     dos cabezas y la de este fichero era la equivocada—. Arranca en la primera
+     ambiente y no en un valor inventado: un transitorio de arranque falso sesga
+     las primeras horas de todo escenario corto. */
+  var tBat=meteo.length?meteo[0].temp:20;
   var lastFullDay=-1, nCalib=0, daysNoCalib=0;      /* calibración: última lograda, nº y peor racha */
   /* El abanderamiento lo lleva el módulo compartido (sim/viento.js), el mismo que usan el
      simulador de planta y terreno.html: una sola implementación para toda la casa. Lo que
@@ -672,9 +679,10 @@ function simulate(meteo,prof,loc,soc0,opts){
     var avgPos=(target+prevPos)/2;
     if(moveNow)prevPos=target;
 
+    tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
     /* — Consumo del paso: electrónica + motor + calefactor, todo en consumoTCU — */
     var cons=consumoTCU({dtH:dtH,dia:day,mov:deltaEff,pos:avgPos,
-                         motorModel:opts.motorModel,calefactada:prof.heated,tAmb:m.temp});
+                         motorModel:opts.motorModel,calefactada:prof.heated,tAmb:tBat});
     var motorWh=cons.motor, baseWh=cons.base, heatWh=cons.heat, tEff=cons.tEff, consWh=cons.total;
 
     /* — Carga: POA de la posición REAL (abanderado/defensa reduce), JEITA frío+calor, techo — */

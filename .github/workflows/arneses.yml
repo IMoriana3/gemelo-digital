@@ -124,6 +124,16 @@ jobs:
         working-directory: gemelo-digital
         run: node tools/carea_difusa.mjs
 
+      # La inercia térmica es UNA regla y la consumen DOS superficies: el gemelo
+      # (sim/planta.js) y bateria.html. Hasta 2026-10-21 la segunda decidía el
+      # calefactor con la AMBIENTE cruda mientras la primera usaba la de batería
+      # —y el comentario de planta.js ya decía cuál era la buena—. Entra en la
+      # puerta y no de vigilante porque lo que separa a las dos superficies no
+      # aparece en ningún diff de resultado: el escenario sigue corriendo.
+      - name: tools/carea_termica.mjs
+        working-directory: gemelo-digital
+        run: node tools/carea_termica.mjs
+
       # El careo del LAZO contra el núcleo compartido de cobertura-zigbee, que el
       # paso de arriba ya ha clonado POR EL PIN. Entra en la puerta ahora y no
       # antes porque el pin anterior (06b00aaa, del 9-sep) era ANTERIOR al propio
