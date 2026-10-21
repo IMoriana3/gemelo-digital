@@ -370,8 +370,8 @@ const sincro = await pg.evaluate(() => {
   const pon = (id) => { $('prof').value = String(idx.filter((x) => x[0] === id)[0][1]); $('prof').onchange(); return +$('tmin').value; };
   return { lt: pon('SP_45W_6Ah_LT'), sin: pon('SP_45W_6Ah'), ltString: pon('STRING_60W_6Ah_LT') };
 });
-ok(sincro.lt === -20 && sincro.ltString === -20 && sincro.sin === 0,
-  'elegir equipo escribe SU suelo de carga en el panel: −20 °C las -LT, 0 °C la estándar',
+ok(sincro.lt === -20 && sincro.ltString === -30 && sincro.sin === 0,
+  'elegir equipo escribe SU suelo de carga en el panel: −20 °C la SP LT, −30 °C la STRING LTH, 0 °C la estándar',
   JSON.stringify(sincro));
 
 {
@@ -530,6 +530,44 @@ ok(/45 W — de serie/.test(mod.etiquetas.join('|')) && /60 W — de catálogo/.
   'y el selector de panel distingue de serie, de catálogo y a secas: ' + mod.etiquetas.join(' · '),
   mod.etiquetas.join(' · '));
 
+/* ── 9) EL CATÁLOGO CONTRA LA FICHA SUNNER (2026-10-21) ──
+   El mantenedor: «la batería del string lt no es esa, mira cuál es». No lo era:
+   llevaba la del SP. Fuente: DS_TCU_SUNNER_ES_v9.0.4 y el estudio de vida. */
+const ficha = await pg.evaluate(() => {
+  const g = (id) => PROFILES.filter((p) => p.id === id)[0];
+  const r = (p) => ({ wh: p.wh, carga: p.tCarga.join('…'), descarga: p.tDescarga.join('…'),
+                      com: p.comercial || null, celda: p.celda || null, lt: !!p.lt });
+  return {
+    spST: r(g('SP_45W_6Ah')), spLT: r(g('SP_45W_6Ah_LT')),
+    strST: r(g('STRING_60W_6Ah')), strLTH: r(g('STRING_60W_6Ah_LT')),
+    str33: r(g('STRING_60W_3Ah')), sp3: r(g('SP_45W_3Ah')),
+    sp3SinFicha: !!g('SP_45W_3Ah').sinFicha,
+    todosConDescarga: PROFILES.every((p) => Array.isArray(p.tDescarga)),
+  };
+});
+ok(ficha.strLTH.wh === 153.6 && ficha.strLTH.carga === '-30…45' && ficha.strLTH.descarga === '-30…60' && ficha.strLTH.celda === '6000 mAh · 8S1P',
+  'la variante fría del STRING es la SUYA (STR 6AH LTH 150): 153,6 Wh, 6000 mAh 8S1P, carga −30…45 °C',
+  JSON.stringify(ficha.strLTH));
+ok(ficha.spLT.wh === 166.4 && ficha.spLT.carga === '-20…60' && ficha.spLT.celda === '6500 mAh · 8S2P',
+  'y la del SP sigue siendo la suya (SP 6,5AH LT 150): 166,4 Wh, 6500 mAh 8S2P, carga −20…60 °C',
+  JSON.stringify(ficha.spLT));
+ok(ficha.strLTH.wh !== ficha.spLT.wh && ficha.strLTH.carga !== ficha.spLT.carga,
+  'o sea: las dos variantes frías NO son la misma batería, ni en capacidad ni en rango',
+  JSON.stringify({ str: ficha.strLTH, sp: ficha.spLT }));
+ok(ficha.str33.wh === 84.48 && ficha.str33.celda === '3300 mAh · 8S1P',
+  'el STRING pequeño es de 3,3 Ah (3300 mAh → 84,48 Wh), no de 3 Ah', JSON.stringify(ficha.str33));
+ok(ficha.sp3SinFicha && !ficha.sp3.com,
+  'y el SP de 3 Ah queda marcado SIN contraparte en la ficha SUNNER, que no lista ningún SP de 3 Ah');
+ok(ficha.spST.com === 'SP 6AH ST 150' && ficha.strST.com === 'STR 6AH ST 150' && ficha.strLTH.com === 'STR 6AH LTH 150',
+  'cada perfil lleva su nombre comercial de la ficha, que nombra por batería y motor y no por panel',
+  JSON.stringify([ficha.spST.com, ficha.strST.com, ficha.strLTH.com]));
+ok(ficha.todosConDescarga, 'y todos declaran su rango de descarga, no sólo el de carga');
+{
+  const bat6 = readFileSync(path.join(RAIZ, 'bateria.html'), 'utf8');
+  ok(bat6.includes('no debe citarse como garantía') && bat6.includes('más de 10 años') && bat6.includes('7 años'),
+    'y el informe declara que su vida es CALCULADA y no la de la ficha (SUNNER: >10 años, 7 en caliente, ficha >6)');
+}
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio y el modelo nombra la batería'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el modelo nombra la batería y el catálogo cuadra con la ficha SUNNER'));
 process.exit(fallos ? 1 : 0);
