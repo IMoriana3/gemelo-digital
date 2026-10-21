@@ -197,7 +197,7 @@
     <div class="fld"><label>Tª mínima de carga (°C)</label>
       <input type="number" id="tmin" value="0" step="1"></div>
     <label class="sw"><input type="checkbox" id="cmp" checked>
-      <span>Comparar sistemas de control<small>Simula 5 estrategias sobre la misma meteo y las enfrenta; si el perfil no es calefactado, añade su versión -LT como columna de equipo</small></span></label>
+      <span>Comparar sistemas de control<small>Simula 4 lógicas de gestión sobre la misma meteo y las enfrenta; si el perfil no es calefactado, añade su versión -LT como columna de equipo</small></span></label>
     <label class="sw"><input type="checkbox" id="cliente">
       <span>Informe para el cliente<small>Quita la marca «uso interno» del informe. Sin marcar, el documento se rotula como trabajo interno de Factiun</small></span></label>
     <label class="sw"><input type="checkbox" id="winter">
@@ -762,15 +762,13 @@ var CONTROLS=[
   o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:DEFENSE_POS}},
  {k:'winter', n:'Estándar + winter mode',    d:'Objetivo 90 % · calibración 3 d (y nada más: no toca el movimiento)',
   o:{strategy:true,socTgt:90,socCrit:30,fcDays:3,winter:true,defPos:DEFENSE_POS}},
- {k:'plano', n:'Defensa en plano',           d:'Como la estándar, pero la defensa aparca a 0° en vez de a 55°',
-  o:{strategy:true,socTgt:80,socCrit:30,fcDays:5,winter:false,defPos:0}},
  {k:'cons', n:'Conservador',                 d:'Objetivo 80 % · crítico 40 %: aparca antes, más margen',
   o:{strategy:true,socTgt:80,socCrit:40,fcDays:5,winter:false,defPos:DEFENSE_POS}}
 ];
-var CONTROL_COL={none:'#8C9AAB',std:'#36D399',winter:'#3aa0ff',plano:'#e0a52b',cons:'#c084fc',lt:'#ff6b6b'};
+var CONTROL_COL={none:'#8C9AAB',std:'#36D399',winter:'#3aa0ff',cons:'#c084fc',lt:'#ff6b6b'};
 /* La comparativa varía la LÓGICA. Pero cuando el perfil evaluado no es
    calefactado y existe su gemelo -LT, el problema del invierno —SOC a 0 % en
-   enero con las cinco lógicas— no lo arregla ninguna lógica: lo arregla el
+   enero con las cuatro lógicas— no lo arregla ninguna lógica: lo arregla el
    calefactor. Esa alternativa es de EQUIPO, va en una columna más y se dice. */
 function controlesPara(prof){
   var lista=CONTROLS.slice();
@@ -1782,7 +1780,7 @@ function buildReport(){
     /* El EQUIPO va nombrado aquí, no dado por sabido: un lector que llega a esta
        tabla por el índice tiene que poder ver de qué TCU se habla sin subir cinco
        páginas, porque la fuente de carga —SP con panel dedicado o STRING colgado
-       del generador— cambia el resultado más que ninguna de las cinco lógicas. */
+       del generador— cambia el resultado más que ninguna de las cuatro lógicas. */
     H+='<p>Todas las alternativas comparten el mismo equipo —<b>'+prof.n+'</b>—, '+
        'emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión'+
        (colLT?', salvo la última columna, que cambia el <b>equipo</b> y no la lógica: la estrategia estándar con la batería calefactada (<b>'+colLT.prof.id+'</b>)':'')+'. '+

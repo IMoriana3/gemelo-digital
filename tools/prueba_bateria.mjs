@@ -225,8 +225,8 @@ const inf = await pg.evaluate(async () => {
   R.chgLTFrio = (enFrio.filter((x) => x.c.k === 'lt')[0] || { S: { chg: -1 } }).S.chg;
   /* c) el «más favorable»: la tabla real de Bellinzago 2014, en miniatura. */
   const fila = (k, prof, hZero, inact, years) => ({ c: { k, n: k, prof }, S: { hZero, inactivePct: inact, cyc: { years }, prodRelPct: 99 } });
-  const C = [fila('none', null, 66, 0.7534, 14.9), fila('std', null, 3, 4.7260, 15.7), fila('winter', null, 6, 4.0982, 15.2),
-    fila('plano', null, 0, 4.3950, 15.7), fila('cons', null, 0, 5.7648, 15.7), fila('lt', lt, 0, 1.0, 15.7)];
+  const C = [fila('none', null, 64, 0.7306, 14.9), fila('std', null, 3, 4.7260, 15.7), fila('winter', null, 6, 4.0982, 15.2),
+    fila('cons', null, 0, 5.7648, 15.7), fila('lt', lt, 0, 1.0, 15.7)];
   const e = eligeMejor(C);
   R.mejor = e.mejor.c.k; R.minZero = e.minZero; R.descartados = e.descartados.map((x) => x.c.k);
   R.mejorVacio = eligeMejor([]) === null && eligeMejor(null) === null;
@@ -254,14 +254,14 @@ ok(inf.arranque.every((a) => Math.abs(a.soc0 - a.tgt) < 1e-9 && Math.abs(a.prime
   'con soc0=null cada lógica ARRANCA en su objetivo (' + inf.arranque.map((a) => a.k + ' ' + Math.round(a.tgt * 100) + '%').join(', ') + ')',
   JSON.stringify(inf.arranque));
 ok(inf.panel.every((v) => v === 0.05), 'y con un número del panel, todas arrancan en él', inf.panel.join(','));
-ok(inf.cols.indexOf('lt') >= 0 && inf.ltProf === 'SP_45W_6Ah_LT',
-  'un perfil sin calefactor trae la columna -LT apuntando a su gemelo (' + inf.ltProf + ')', inf.cols.join(','));
+ok(inf.cols.join(',') === 'none,std,winter,cons,lt' && inf.ltProf === 'SP_45W_6Ah_LT',
+  'las columnas son none,std,winter,cons y, para un perfil sin calefactor, la -LT apuntando a su gemelo (' + inf.ltProf + '); «plano» ya no está', inf.cols.join(','));
 ok(inf.colsDeLT.indexOf('lt') < 0, 'y el propio perfil -LT no la trae (no hay gemelo del gemelo)', inf.colsDeLT.join(','));
 ok(inf.chgStdFrio === 0 && inf.chgLTFrio > 0,
   'la columna -LT SIMULA con el perfil calefactado: a −10 °C el estándar capta 0 Wh y la -LT ' + inf.chgLTFrio.toFixed(0) + ' Wh',
   'std ' + inf.chgStdFrio + ' · lt ' + inf.chgLTFrio);
-ok(inf.mejor === 'plano' && inf.minZero === 0 && inf.descartados.join(',') === 'none,std,winter',
-  'el «más favorable» descarta a los que agotan la batería, ignora la columna -LT y elige «plano» (0 h, 4,40 %)',
+ok(inf.mejor === 'cons' && inf.minZero === 0 && inf.descartados.join(',') === 'none,std,winter',
+  'el «más favorable» descarta a los que agotan la batería, ignora la columna -LT y elige «cons» (el único con 0 h)',
   'mejor ' + inf.mejor + ' · minZero ' + inf.minZero + ' · descartados ' + inf.descartados.join(','));
 ok(inf.mejorVacio, 'y sin comparativa no inventa veredicto');
 ok(inf.barrido.res.join(',') === '2013' && inf.barrido.caidos.join(' | ') === '2014:HTTP 429 tras 4 intentos | 2015:no está en la fuente | 2016:serie incompleta (288 h)',
