@@ -133,6 +133,9 @@
   </div>
   <div class="grp"><h3>Perfil de la TCU</h3>
     <div class="fld"><select id="prof"></select></div>
+    <div class="fld" id="panelFld"><label>Panel de la TCU</label>
+      <select id="panel"></select>
+      <div class="note" id="panelNota"></div></div>
     <div class="fld"><label>Montaje del panel / fuente de carga</label>
       <select id="mount">
         <option value="trk">Solidario al seguidor — montaje real (plano del generador)</option>
@@ -311,6 +314,37 @@ var MOTOR_V_MEAS=24.0;
    panel de 45 W de un SP. Ese es el motivo de que los modelos String salgan mucho mejor en los
    estudios de referencia. Se satura a partir de POA_STRING_FULL. */
 var POA_STRING_FULL=100;
+
+/* ═══════════ EL PANEL SE ELIGE APARTE DEL MODELO ═══════════
+   En una TCU self-powered `chgW` ES el pico del panel dedicado: la carga sale
+   de `chgW · min(POA/1000, 1)`. Hasta hoy el panel venía pegado al perfil, así
+   que estudiar «esta batería con otro panel» exigía inventar una entrada de
+   catálogo por combinación, y sólo existían tres: 45/3Ah, 45/6Ah y 60/6Ah.
+
+   Ahora el panel es un eje propio. La batería la pone el modelo y el panel lo
+   pones tú, y la combinación se declara como tal: una combinación que NO está
+   en el catálogo es un ESTUDIO, no un producto, y el informe lo dice con todas
+   las letras para que nadie cotice un equipo que no existe.
+
+   No aplica a STRING: ahí `chgW` es el regulador colgado del generador, no un
+   panel, y su curva satura desde muy poca luz (POA_STRING_FULL). */
+var PANELES=[30,45,60,90];
+function conPanel(prof,w){
+  if(!w||prof.string||w===prof.chgW)return prof;
+  var p={};for(var k in prof)p[k]=prof[k];
+  p.chgW=w;
+  p.id=prof.id.replace(/_(\d+)W_/,'_'+w+'W_');
+  p.n=prof.n.replace(/\b\d+(,\d+)?\s*W\b/,w+' W');
+  p.base=prof.base||prof;                      /* de qué entrada del catálogo sale */
+  p.panelPropio=false;                         /* el modelo NO trae este panel */
+  return p;
+}
+/* ¿existe esta combinación en el catálogo? Se pregunta por (tipo, panel, batería),
+   no por el id: el id de una combinación se construye y siempre «parece» real. */
+function enCatalogo(prof){
+  return PROFILES.some(function(q){
+    return q.id===prof.id && q.chgW===prof.chgW && q.wh===prof.wh;});
+}
 function motorW(ang){
   var a=Math.min(MOTOR_ANG[MOTOR_ANG.length-1],Math.abs(ang||0)), i=0;
   while(i<MOTOR_ANG.length-2 && MOTOR_ANG[i+1]<a) i++;
@@ -808,7 +842,9 @@ var CONTROL_COL={none:'#8C9AAB',std:'#36D399',winter:'#3aa0ff',cons:'#c084fc',lt
 function controlesPara(prof){
   var lista=CONTROLS.slice();
   if(prof&&!prof.lt){
-    var lt=PROFILES.filter(function(p){return p.id===prof.id+'_LT'})[0];
+    var base=prof.base||prof;                   /* el gemelo -LT es del MODELO, no del id construido */
+    var lt=PROFILES.filter(function(p){return p.id===base.id+'_LT'})[0];
+    if(lt)lt=conPanel(lt,prof.chgW);            /* y se compara con el MISMO panel */
     var std=CONTROLS.filter(function(c){return c.k==='std'})[0];
     if(lt&&std)lista.push({k:'lt',n:'Estándar · versión -LT',
       d:'La estrategia estándar con la batería de baja temperatura ('+lt.id+', carga hasta '+lt.tCarga[0]+' °C y '+fmt(lt.wh,1)+' Wh): alternativa de EQUIPO, no de lógica',
@@ -1192,7 +1228,32 @@ function sincronizaTmin(){
   var P=PROFILES[$('prof').value];
   if(P.tCarga)$('tmin').value=P.tCarga[0];
 }
-sincronizaTmin();profNote();$('prof').onchange=function(){sincronizaTmin();profNote();};
+/* El selector de panel: los del catálogo más el que trae el modelo, y arranca
+   SIEMPRE en el del modelo para que no cambiar nada no cambie nada. */
+function sincronizaPanel(){
+  var P=PROFILES[$('prof').value], sel=$('panel');
+  if(P.string){$('panelFld').style.display='none';return;}
+  $('panelFld').style.display='';
+  var ws=PANELES.slice(); if(ws.indexOf(P.chgW)<0)ws.push(P.chgW); ws.sort(function(a,b){return a-b});
+  sel.innerHTML='';
+  ws.forEach(function(w){
+    sel.add(new Option(w+' W'+(w===P.chgW?' — el del modelo':''),w));
+  });
+  sel.value=P.chgW;
+  notaPanel();
+}
+function notaPanel(){
+  var P=PROFILES[$('prof').value], w=+$('panel').value;
+  if(P.string)return;
+  var p=conPanel(P,w);
+  $('panelNota').innerHTML=(w===P.chgW)
+    ? 'Panel de serie del modelo. Combinación de <b>catálogo</b>.'
+    : 'Panel apartado del modelo ('+P.chgW+' W → '+w+' W). La batería no cambia: siguen siendo '+fmt(P.wh,1)+' Wh. '+
+      (enCatalogo(p)?'Combinación de <b>catálogo</b>.':'<b>Combinación de estudio</b>: esta pareja no está en el catálogo y el informe lo dice.');
+}
+sincronizaTmin();profNote();sincronizaPanel();
+$('prof').onchange=function(){sincronizaTmin();profNote();sincronizaPanel();};
+$('panel').onchange=notaPanel;
 [['tilt','tiltV','°'],['poaMin','poaMinV',' W/m²'],['days','daysV',''],['clouds','cloudsV','%'],['soc0','soc0V','%'],['socTgt','socTgtV','%'],
  ['socCrit','socCritV','%'],['fc','fcV',''],['doy','doyV',''],['sdays','sdaysV','']].forEach(function(a){
   $(a[0]).oninput=function(){$(a[1]).textContent=this.value+a[2]};
@@ -1354,7 +1415,7 @@ pintaParams();
 
 $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
-  var loc=getLoc(), prof=PROFILES[$('prof').value];
+  var loc=getLoc(), prof=conPanel(PROFILES[$('prof').value],+$('panel').value);
   var mm=$('motor').value; mm=(mm==='factiun'||mm==='curva')?mm:+mm;
   var opts={motorModel:mm, winter:$('winter').checked, strategy:true,
             socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
@@ -1650,6 +1711,7 @@ function buildReport(){
   var sitio=loc.n.replace(/^\d{5}\s*·\s*/,'');
   var fuente=$('srcTag').textContent||'—';
   var paraCliente=!!($('cliente')&&$('cliente').checked);
+  var deCatalogo=(typeof enCatalogo==='function')?enCatalogo(prof):true;
   var motorTxt=opts.motorModel==='curva'?'curva I(|θ|) medida (TCU 33 @24 V)':
                opts.motorModel==='factiun'?'ajuste Wh/° = 0,0503 + 0,000845·|θ|':
                opts.motorModel+' mA medios @25,6 V (estudio de disponibilidad)';
@@ -1679,7 +1741,8 @@ function buildReport(){
   H+='<div class="cover"><div class="brand">Factiun · Ingeniería de seguimiento solar</div>'+
      '<h1>Estudio de disponibilidad<br>de batería de la TCU</h1>'+
      '<div class="sub">'+sitio+'</div>'+
-     '<div class="meta">Proyecto: '+proyecto+'<br>Modelo de TCU: '+prof.id+' — '+fmt(prof.wh,1)+' Wh (25,6 V) · fuente de carga '+prof.chgW+' W<br>'+
+     '<div class="meta">Proyecto: '+proyecto+'<br>Modelo de TCU: '+prof.id+' — '+fmt(prof.wh,1)+' Wh (25,6 V) · fuente de carga '+prof.chgW+' W'+
+     (deCatalogo?'':' <b>(combinación de estudio, no de catálogo)</b>')+'<br>'+
      'Periodo simulado: '+f(d0)+' – '+f(d1)+' ('+fmt(dias)+' días, paso '+fmt(dtH*60)+' min)<br>'+
      'Origen de la meteorología: '+fuente+'<br>Fecha de emisión: '+fHoy+'</div>'+
      '<div class="conf">Documento generado automáticamente por el simulador de gestión de batería del Gemelo Digital TCU '+
@@ -1750,7 +1813,10 @@ function buildReport(){
   H+=tbl([['Modelo de TCU',{v:prof.id}],
      ['Capacidad nominal',{v:fmt(prof.wh,1)+' Wh ('+fmt(prof.wh/25.6,1)+' Ah a 25,6 V)'}],
      ['Química',{v:'LiFePO₄'}],
-     ['Fuente de carga',{v:fmt(prof.chgW)+' W'}],
+     ['Fuente de carga',{v:prof.string?fmt(prof.chgW)+' W (regulador del string)'
+        :fmt(prof.chgW)+' W de panel dedicado'+(prof.base?' — apartado del panel de serie del modelo, que son '+fmt(prof.base.chgW)+' W':' — panel de serie del modelo')}],
+     ['Combinación panel + batería',{v:deCatalogo?'de <b>catálogo</b>':'de <b>ESTUDIO</b>: esta pareja de panel y batería no figura en el catálogo de Factiun y no debe cotizarse como producto',
+        cls:deCatalogo?'':'wn'}],
      ['Variante de baja temperatura (-LT)',{v:prof.lt
         ?'sí — celda LiFePO₄ LT, <b>sin calefactor</b>: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'
         :'no — celda LiFePO₄ estándar: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C'}],
@@ -1827,7 +1893,7 @@ function buildReport(){
        tabla por el índice tiene que poder ver de qué TCU se habla sin subir cinco
        páginas, porque la fuente de carga —SP con panel dedicado o STRING colgado
        del generador— cambia el resultado más que ninguna de las cuatro lógicas. */
-    H+='<p>Todas las alternativas comparten el mismo equipo —<b>'+prof.n+'</b>—, '+
+    H+='<p>Todas las alternativas comparten el mismo equipo —<b>'+prof.n+'</b>, '+fmt(prof.chgW)+' W de fuente de carga—, '+
        'emplazamiento y serie meteorológica: la única diferencia es la lógica de gestión'+
        (colLT?', salvo la última columna, que cambia el <b>equipo</b> y no la lógica: la estrategia estándar con la batería de baja temperatura (<b>'+colLT.prof.id+'</b>)':'')+'. '+
        (LAST.socModo==='estacionario'?'Cada columna arranca en el objetivo de carga de su propia lógica (estado estacionario).':
