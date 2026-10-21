@@ -354,14 +354,28 @@ function motorW(ang){
 }
 var SLEW_DPS=FISICA.e.SLEW_DPS;                      /* velocidad real de giro (°/s) — misma que el gemelo */
 var PROFILES=[
- {id:"SP_45W_3Ah",       n:"SP · panel 45 W · 3 Ah (76,8 Wh)",       wh:76.8,  chgW:45, tCarga:[0,45]},
- {id:"SP_45W_6Ah",       n:"SP · panel 45 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:45, tCarga:[0,45]},
- {id:"SP_60W_6Ah",       n:"SP · panel 60 W · 6 Ah (153,6 Wh)",      wh:153.6, chgW:60, tCarga:[0,45]},
- {id:"STRING_60W_3Ah",   n:"STRING · regulador 60 W · 3 Ah",         wh:76.8,  chgW:60, string:true, tCarga:[0,45]},
- {id:"STRING_60W_6Ah",   n:"STRING · regulador 60 W · 6 Ah",         wh:153.6, chgW:60, string:true, tCarga:[0,45]},
- {id:"SP_45W_6Ah_LT",    n:"SP · 45 W · 6,5 Ah · LT (carga a −20 °C)",    wh:166.4, chgW:45, lt:true, tCarga:[-20,60], tDescarga:[-40,60]},
- {id:"STRING_60W_6Ah_LT",n:"STRING · 60 W · 6,5 Ah · LT (carga a −20 °C)",wh:166.4, chgW:60, lt:true, string:true, tCarga:[-20,60], tDescarga:[-40,60]}
+ {id:"SP_45W_3Ah",       n:"SP · 3 Ah (76,8 Wh)",                    wh:76.8,  chgW:45, tCarga:[0,45]},
+ {id:"SP_45W_6Ah",       n:"SP · 6 Ah (153,6 Wh)",                   wh:153.6, chgW:45, tCarga:[0,45]},
+ {id:"SP_60W_6Ah",       n:"SP · 6 Ah (153,6 Wh) · panel 60 W",      wh:153.6, chgW:60, tCarga:[0,45], variante:true},
+ {id:"STRING_60W_3Ah",   n:"STRING · 3 Ah · regulador 60 W",         wh:76.8,  chgW:60, string:true, tCarga:[0,45]},
+ {id:"STRING_60W_6Ah",   n:"STRING · 6 Ah · regulador 60 W",         wh:153.6, chgW:60, string:true, tCarga:[0,45]},
+ {id:"SP_45W_6Ah_LT",    n:"SP · 6,5 Ah · LT (carga a −20 °C)",      wh:166.4, chgW:45, lt:true, tCarga:[-20,60], tDescarga:[-40,60]},
+ {id:"STRING_60W_6Ah_LT",n:"STRING · 6,5 Ah · LT (−20 °C) · regulador 60 W",wh:166.4, chgW:60, lt:true, string:true, tCarga:[-20,60], tDescarga:[-40,60]}
 ];
+/* EL MODELO NOMBRA LA BATERÍA, NO LA PAREJA. Hasta que el panel fue un eje
+   propio, el catálogo listaba PAREJAS y el nombre las decía: «SP · panel 45 W ·
+   6 Ah». Con el panel elegible aparte eso sobra —el 45 W se elige después— y
+   además duplicaba: `SP_45W_6Ah` y `SP_60W_6Ah` son LA MISMA BATERÍA con otro
+   panel, así que el desplegable ofrecía dos veces el mismo equipo.
+
+   `variante:true` marca la entrada que NO es un modelo distinto sino la misma
+   batería con otro panel de catálogo. Se queda en PROFILES —`enCatalogo` la
+   necesita para saber que SP 6 Ah + 60 W es un producto y no un estudio— y se
+   cae del desplegable. Se llega a ella eligiendo SP · 6 Ah y panel 60 W, y el
+   informe la nombra `SP_60W_6Ah` igual que antes.
+
+   En STRING el vataje SÍ se queda en el nombre: ahí no es un panel, es el
+   regulador colgado del generador, y no se elige aparte. */
 /* LA -LT NO LLEVA CALEFACTOR, y hasta el 2026-10-21 este simulador decía que sí.
    Es OTRA QUÍMICA. De la ficha del equipo: carga de −20 a 60 °C contra 0 a 45 de
    la estándar, descarga de −40 a 60 contra −10 a 60, y 6500 mAh en 8S2P contra
@@ -1151,7 +1165,7 @@ function bandParked(g,f,rows,color,key){
     o.disabled=true; sel.insertBefore(o,sel.firstChild);
   }
 })();
-PROFILES.forEach(function(P,i){$('prof').add(new Option(P.n,i))});
+PROFILES.forEach(function(P,i){if(!P.variante)$('prof').add(new Option(P.n,i))});
 
 /* — Emplazamiento personalizado: Leaflet local + Nominatim (mismo patrón que index.html) — */
 var bmap=null, bmarker=null;
@@ -1208,7 +1222,9 @@ function getLoc(){
       lo=Math.max(-180,Math.min(180,+$('clon').value||0));
   return {n:($('cname').value||'Personalizado').trim(),lat:la,lon:lo};
 }
-$('prof').value=1;   /* SP_45W_6Ah por defecto */
+/* Por id y no por índice: ocultar una variante mueve los índices, y un número
+   suelto aquí elegiría otro equipo sin que nada lo dijera. */
+(function(){for(var i=0;i<PROFILES.length;i++)if(PROFILES[i].id==='SP_45W_6Ah'){$('prof').value=i;break;}})();
 (function(){var y=new Date().getFullYear();
   $('year').add(new Option('🏆 Peor año — barrido histórico','worst'));
   for(var k=y-1;k>=2010;k--)$('year').add(new Option(k,k));})();
@@ -1237,7 +1253,8 @@ function sincronizaPanel(){
   var ws=PANELES.slice(); if(ws.indexOf(P.chgW)<0)ws.push(P.chgW); ws.sort(function(a,b){return a-b});
   sel.innerHTML='';
   ws.forEach(function(w){
-    sel.add(new Option(w+' W'+(w===P.chgW?' — el del modelo':''),w));
+    var etiq=(w===P.chgW)?' — de serie':(enCatalogo(conPanel(P,w))?' — de catálogo':'');
+    sel.add(new Option(w+' W'+etiq,w));
   });
   sel.value=P.chgW;
   notaPanel();
@@ -1247,9 +1264,9 @@ function notaPanel(){
   if(P.string)return;
   var p=conPanel(P,w);
   $('panelNota').innerHTML=(w===P.chgW)
-    ? 'Panel de serie del modelo. Combinación de <b>catálogo</b>.'
-    : 'Panel apartado del modelo ('+P.chgW+' W → '+w+' W). La batería no cambia: siguen siendo '+fmt(P.wh,1)+' Wh. '+
-      (enCatalogo(p)?'Combinación de <b>catálogo</b>.':'<b>Combinación de estudio</b>: esta pareja no está en el catálogo y el informe lo dice.');
+    ? 'Panel de serie de este modelo. Combinación de <b>catálogo</b>.'
+    : 'Panel apartado del de serie ('+P.chgW+' W → '+w+' W). La batería no cambia: siguen siendo '+fmt(P.wh,1)+' Wh. '+
+      (enCatalogo(p)?'Combinación de <b>catálogo</b> — es el '+p.id+'.':'<b>Combinación de estudio</b>: esta pareja no está en el catálogo y el informe lo dice.');
 }
 sincronizaTmin();profNote();sincronizaPanel();
 $('prof').onchange=function(){sincronizaTmin();profNote();sincronizaPanel();};
