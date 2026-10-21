@@ -197,7 +197,9 @@
     <div class="fld"><label>Tª mínima de carga (°C)</label>
       <input type="number" id="tmin" value="0" step="1"></div>
     <label class="sw"><input type="checkbox" id="cmp" checked>
-      <span>Comparar sistemas de control<small>Simula 5 estrategias sobre la misma meteo y las enfrenta</small></span></label>
+      <span>Comparar sistemas de control<small>Simula 5 estrategias sobre la misma meteo y las enfrenta; si el perfil no es calefactado, añade su versión -LT como columna de equipo</small></span></label>
+    <label class="sw"><input type="checkbox" id="cliente">
+      <span>Informe para el cliente<small>Quita la marca «uso interno» del informe. Sin marcar, el documento se rotula como trabajo interno de Factiun</small></span></label>
     <label class="sw"><input type="checkbox" id="winter">
       <span>Winter mode<small>Política canónica y completa: objetivo 90 % y carga completa cada 3 días · calefactor auto en LT. No cambia el seguimiento</small></span></label>
   </div>
@@ -645,10 +647,18 @@ function simulate(meteo,prof,loc,soc0,opts){
     var target=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo))
                      :(parked?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
     if(prevPos==null)prevPos=target;
+    /* BATERÍA AGOTADA: la TCU no mueve nada. Antes, con SOC 0 % el seguidor
+       seguía al sol como si tal cosa —el motor «giraba» sin energía— y la
+       columna «Sin gestión» salía con 66 h muerta y 100 % de producción. Una
+       TCU muerta se queda donde estaba: ni sigue, ni aparca, ni abandera. La
+       pérdida de producción de esas horas se cuenta contra la posición en que
+       se quedó, no contra la de defensa. */
+    var muerta=soc<=0.001;
+    if(muerta)target=prevPos;
     /* Histéresis del lazo: en seguimiento sólo corrige si el error frente al sol ≥ 2,5°
        (estudio de disponibilidad). Se evalúa sobre el error REAL, antes de limitar el avance. */
-    var moveNow=(stow>0||parked)?Math.abs(target-prevPos)>0.01
-                                :Math.abs(target-prevPos)>=HYST_DEG;
+    var moveNow=muerta?false:(stow>0||parked)?Math.abs(target-prevPos)>0.01
+                                             :Math.abs(target-prevPos)>=HYST_DEG;
     /* El WINTER MODE NO TOCA EL MOVIMIENTO. Es techo de SOC (90 %) y calibración
        cada 3 días, y nada más — decisión del mantenedor, 2026-09-09. Aquí había un
        límite de 3 °/h que dejaba al seguidor a la zaga del sol; ver la nota en
@@ -718,11 +728,12 @@ function simulate(meteo,prof,loc,soc0,opts){
         var pIdeal=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi,N);
         poaReal=pIdeal>0?poaPot*(poaAt(target,sun.el,sun.az,bh,m.dhi,m.ghi,N)/pIdeal):0;
       }
-      if(parked && !stow){                        /* pérdida por batería; el abanderamiento no cuenta */
+      if((parked && !stow) || muerta){            /* pérdida por batería; el abanderamiento no cuenta */
         /* La fracción perdida se calcula SIEMPRE con el mismo modelo de transposición y se
-           aplica al POA potencial real: así no se mezcla el GlobEff medido con el calculado. */
+           aplica al POA potencial real: así no se mezcla el GlobEff medido con el calculado.
+           Con la batería agotada la posición perdida es donde se QUEDÓ, no la de defensa. */
         var poaTrkM=poaAt(trackPos,sun.el,sun.az,bh,m.dhi,m.ghi,N);
-        var poaDefM=poaAt(opts.defPos!=null?opts.defPos:DEFENSE_POS,sun.el,sun.az,bh,m.dhi,m.ghi,N);
+        var poaDefM=poaAt(muerta?target:(opts.defPos!=null?opts.defPos:DEFENSE_POS),sun.el,sun.az,bh,m.dhi,m.ghi,N);
         var fracLost=poaTrkM>0?Math.max(0,(poaTrkM-poaDefM)/poaTrkM):0;
         poaLost=poaPot*fracLost;
       }
@@ -1596,6 +1607,7 @@ function buildReport(){
   var proyecto=/^\d{5}/.test(loc.n)?loc.n.slice(0,5):'—';
   var sitio=loc.n.replace(/^\d{5}\s*·\s*/,'');
   var fuente=$('srcTag').textContent||'—';
+  var paraCliente=!!($('cliente')&&$('cliente').checked);
   var motorTxt=opts.motorModel==='curva'?'curva I(|θ|) medida (TCU 33 @24 V)':
                opts.motorModel==='factiun'?'ajuste Wh/° = 0,0503 + 0,000845·|θ|':
                opts.motorModel+' mA medios @25,6 V (estudio de disponibilidad)';
@@ -1630,7 +1642,7 @@ function buildReport(){
      'Origen de la meteorología: '+fuente+'<br>Fecha de emisión: '+fHoy+'</div>'+
      '<div class="conf">Documento generado automáticamente por el simulador de gestión de batería del Gemelo Digital TCU '+
      '(repositorio <b>gemelo-digital</b>, <i>bateria.html</i>). Reproducible: misma configuración y misma serie meteorológica '+
-     'devuelven los mismos resultados. Uso interno de Factiun.</div></div>';
+     'devuelven los mismos resultados. '+(paraCliente?'Documento elaborado por Factiun para el cliente.':'Uso interno de Factiun.')+'</div></div>';
 
   /* 1. OBJETO */
   H+='<h2>1. Objeto y conclusión</h2>';
@@ -1816,7 +1828,7 @@ function buildReport(){
      '<li>La suciedad y la nieve acumulada no penalizan la captación del panel de la TCU.</li>'+
      '<li>Los resultados dependen de la serie meteorológica empleada; para decisiones de compra conviene el barrido multianual del apartado 8.</li>'+
      '</ul>';
-  H+='<div class="conf">Factiun · documento de trabajo interno. Generado el '+fHoy+'.</div></div>';
+  H+='<div class="conf">'+(paraCliente?'Factiun · Ingeniería de seguimiento solar':'Factiun · documento de trabajo interno')+'. Generado el '+fHoy+'.</div></div>';
 
   var doc='<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'+
     '<title>Estudio de disponibilidad de batería TCU — '+sitio+'</title><style>'+REPORT_CSS+'</style></head><body>'+

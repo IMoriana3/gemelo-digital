@@ -271,6 +271,40 @@ ok(inf.alTercero.llamadas === 3 && inf.alTercero.filas === 3 && !inf.alTercero.e
 ok(inf.nunca.llamadas === 4 && inf.nunca.error === 'HTTP 429' && inf.nunca.intentos === 4 && !inf.nunca.esNull,
   'y si persiste vuelve DECLARADO: {error:"HTTP 429", intentos:4}, nunca null', JSON.stringify(inf.nunca));
 
+/* ── 5) UNA TCU MUERTA NO SIGUE AL SOL ──
+   «Sin gestión» salía con 66 h de batería agotada y 100 % de producción: con
+   SOC 0 % el seguidor seguía moviéndose sin energía. Se simula un perfil que
+   no puede cargar (tMin imposible) hasta que muere, y después de muerta la
+   posición tiene que quedarse clavada, el motor a 0 y la producción perdida
+   contada. Y el interruptor «para el cliente» cambia el rótulo del informe. */
+const muerta = await pg.evaluate(() => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const prof = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const meteo = synthMeteo(loc, 8, 170, 10);                     /* verano despejado: hay sol que perder */
+  const o = { motorModel: 'curva', winter: false, strategy: false, socTgt: 100, socCrit: 0, fcDays: 5, tMin: 99, poaMin: 0, mountTilt: null };
+  const rows = simulate(meteo, prof, loc, 0.03, o);
+  const i0 = rows.findIndex((r) => r.soc <= 0.001);
+  const despues = rows.slice(i0 + 1);
+  const S = summarize(rows);
+  return { i0, n: despues.length,
+    movTras: despues.reduce((a, r) => a + r.mov, 0),
+    posDistintas: new Set(despues.map((r) => Math.round(r.pos * 100))).size,
+    conSol: despues.filter((r) => r.poaPot > 0).length,
+    perdida: S.prodLostPct, rel: S.prodRelPct, hZero: S.hZero };
+});
+ok(muerta.i0 > 0 && muerta.n > 24, 'el banco llega a matar la batería (' + muerta.i0 + ' h) y la observa ' + muerta.n + ' h después', JSON.stringify(muerta));
+ok(muerta.movTras === 0 && muerta.posDistintas === 1,
+  'muerta, la TCU no mueve nada: motor 0° y una sola posición durante ' + muerta.n + ' h',
+  'mov ' + muerta.movTras + ' · posiciones ' + muerta.posDistintas);
+ok(muerta.conSol > 0 && muerta.perdida > 0 && muerta.rel < 100,
+  'y la producción de esas horas de sol se cuenta como perdida (' + muerta.perdida.toFixed(2) + ' %, relativa ' + muerta.rel.toFixed(2) + ' %)',
+  JSON.stringify(muerta));
+{
+  const bat3 = readFileSync(path.join(RAIZ, 'bateria.html'), 'utf8');
+  ok(bat3.includes('id="cliente"') && bat3.includes("paraCliente?'Documento elaborado por Factiun para el cliente.':'Uso interno de Factiun.'"),
+    'el informe lleva interruptor «para el cliente» y sin él se rotula como uso interno');
+}
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo y el informe no se contradice'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice y una TCU muerta no sigue al sol'));
 process.exit(fallos ? 1 : 0);
