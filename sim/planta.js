@@ -122,6 +122,8 @@ var K = {
   DEFENSE_POS: F.e.DEFENSE_POS, /* defensa por batería */
   SLEW_DPS: F.e.SLEW_DPS,       /* velocidad real de giro (°/s) */
   HYST_DEG: F.e.HYST_DEG,       /* deadband del lazo */
+  TAU_BAT_S: F.e.TAU_BAT_S,     /* inercia térmica de la batería (s) */
+  TAU_PCB_S: F.e.TAU_PCB_S,     /* ídem de la PCB, que va algo por encima */
   /* LA RED NO ES INSTANTÁNEA. La NCU es el maestro: sondea sus HSU y sus TCU por
      Zigbee, de uno en uno, y cada equipo solo sabe lo que le tocó en SU vuelta. Es
      UNA sola vuelta para todos —estuvo un rato aquí como dos ritmos, uno por tipo de
@@ -220,6 +222,8 @@ var PARAMS = [
   { k: 'DEFENSE_POS',   n: 'Defensa por batería',          u: '°',     d: 1, g: 'Geometría y movimiento', o: 'canon' },
   { k: 'SLEW_DPS',      n: 'Velocidad del actuador',       u: '°/s',   d: 3, g: 'Geometría y movimiento', o: 'canon' },
   { k: 'HYST_DEG',      n: 'Banda muerta del lazo',        u: '°',     d: 2, g: 'Geometría y movimiento', o: 'canon' },
+  { k: 'TAU_BAT_S',     n: 'Inercia térmica de la batería', u: 's',    d: 0, g: 'Batería', o: 'canon' },
+  { k: 'TAU_PCB_S',     n: 'Inercia térmica de la PCB',    u: 's',     d: 0, g: 'Batería', o: 'canon' },
   { k: 'VEL_SIN_CARGA', n: 'Velocidad del motor en vacío', u: '°/s',   d: 2, g: 'Geometría y movimiento', o: 'sim' },
 
   { k: 'POLEO_S',       n: 'Vuelta de poleo de la NCU',    u: 's',     d: 1, g: 'Red y poleo', o: 'sim' },
@@ -276,7 +280,8 @@ function tocados() {
 }
 
 /* las cuatro curvas, tal cual salen de bateria.html */
-var cRateSafeLFP = F.cRateSafeLFP, hotDerate = F.hotDerate, heaterW = F.heaterW, poaAt = F.poaAt;
+var cRateSafeLFP = F.cRateSafeLFP, hotDerate = F.hotDerate, heaterW = F.heaterW, poaAt = F.poaAt,
+    retardo1 = F.retardo1;
 /* y el consumo de un TCU en un paso, que es del módulo de gestión de batería */
 var consumoTCU = F.consumoTCU;
 
@@ -1030,7 +1035,7 @@ TCU.prototype.mide = function (dt) {
   var cero = s.desajuste - s.offsetCfg + s.deriva * (this.tPcb - 25);
   var crudo = this.anguloReal + cero + ruidoGauss(this.rnd, s.ruidoRms);
   s.crudo = Math.round(crudo * s.pulsosGrado) / s.pulsosGrado;   /* resolución del sensor */
-  s.filtrado += (s.crudo - s.filtrado) * Math.min(1, dt / s.tau);
+  s.filtrado = retardo1(s.filtrado, s.crudo, dt, s.tau);
   this.angulo = s.filtrado;
 };
 
@@ -1565,8 +1570,8 @@ TCU.prototype.energia = function (dt, ang, whMotor) {
 
   /* temperaturas: siguen a la ambiente con inercia; la PCB, un poco por encima */
   var tAmb = m.tAmb();
-  this.tBat += (tAmb - this.tBat) * Math.min(1, dt / 1800);
-  this.tPcb += (tAmb + (this.moviendo ? 6 : 2) - this.tPcb) * Math.min(1, dt / 600);
+  this.tBat = retardo1(this.tBat, tAmb, dt, K.TAU_BAT_S);
+  this.tPcb = retardo1(this.tPcb, tAmb + (this.moviendo ? 6 : 2), dt, K.TAU_PCB_S);
 
   /* la irradiancia ya la calculó cielo() al principio del paso */
   var ghi = this.sky.ghi, dhi = this.sky.dhi, bh = this.sky.bh, dia = this.sky.dia;
