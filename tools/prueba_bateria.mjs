@@ -192,6 +192,119 @@ ok(cte.sinCanon.length === 0,
     'tecleados: ' + tecleados.join(', '));
 }
 
+/* ── 4) EL INFORME NO SE CONTRADICE (2026-10-21, Bellinzago) ──
+   Dos informes del mismo sitio, mismo equipo y mismo año salieron con la
+   columna «estándar» distinta (414 h / 412 h) porque el SOC inicial del panel
+   no se imprimía; a cada uno le faltaba un año distinto del barrido y los dos
+   existían (429 de cuota, tragado como `null`); los dos recomendaban «Sin
+   gestión» con 66 h de batería agotada; y ninguno enseñaba la versión -LT,
+   que es lo único que toca el invierno. Cuatro propiedades, las cuatro de
+   COMPORTAMIENTO: se ejecutan en la página, no se leen con una regex. */
+const inf = await pg.evaluate(async () => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const prof = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const lt = PROFILES.filter((p) => p.id === 'SP_45W_6Ah_LT')[0];
+  const base = { motorModel: 'curva', winter: false, strategy: true, socTgt: 80, socCrit: 30,
+    fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const meteo = synthMeteo(loc, 12, 350, 60);
+  const R = {};
+  /* a) estado estacionario: con soc0===null cada lógica arranca en SU objetivo;
+        con un número, todas en ese número. */
+  const est = runControls(meteo, prof, loc, null, base);
+  R.arranque = est.map((x) => ({ k: x.c.k, soc0: x.soc0, tgt: x.c.o.socTgt / 100, primero: x.rows[0].soc }));
+  R.panel = runControls(meteo, prof, loc, 0.05, base).map((x) => x.soc0);
+  /* b) la columna -LT existe para un perfil sin calefactor, apunta al gemelo,
+        y SIMULA con él: a −10 °C el estándar no carga (tMin 0) y la -LT sí. */
+  R.cols = est.map((x) => x.c.k);
+  const colLT = est.filter((x) => x.c.k === 'lt')[0];
+  R.ltProf = colLT ? colLT.prof.id : null;
+  R.colsDeLT = controlesPara(lt).map((c) => c.k);
+  const frio = meteo.map((m) => Object.assign({}, m, { temp: -10 }));
+  const enFrio = runControls(frio, prof, loc, null, base);
+  R.chgStdFrio = enFrio.filter((x) => x.c.k === 'std')[0].S.chg;
+  R.chgLTFrio = (enFrio.filter((x) => x.c.k === 'lt')[0] || { S: { chg: -1 } }).S.chg;
+  /* c) el «más favorable»: la tabla real de Bellinzago 2014, en miniatura. */
+  const fila = (k, prof, hZero, inact, years) => ({ c: { k, n: k, prof }, S: { hZero, inactivePct: inact, cyc: { years }, prodRelPct: 99 } });
+  const C = [fila('none', null, 64, 0.7306, 14.9), fila('std', null, 3, 4.7260, 15.7), fila('winter', null, 6, 4.0982, 15.2),
+    fila('cons', null, 0, 5.7648, 15.7), fila('lt', lt, 0, 1.0, 15.7)];
+  const e = eligeMejor(C);
+  R.mejor = e.mejor.c.k; R.minZero = e.minZero; R.descartados = e.descartados.map((x) => x.c.k);
+  R.mejorVacio = eligeMejor([]) === null && eligeMejor(null) === null;
+  /* d) el barrido separa lo que bajó de lo que no, con motivo. */
+  const cl = clasificaBarrido([meteo.concat(meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo), { error: 'HTTP 429', intentos: 4 }, null, meteo],
+    [2013, 2014, 2015, 2016], (m, y) => ({ year: y }));
+  R.barrido = { res: cl.res.map((r) => r.year), caidos: cl.caidos.map((c) => c.year + ':' + c.motivo) };
+  /* e) el 429 se reintenta y, si persiste, vuelve DECLARADO (no null). */
+  const fetchReal = window.fetch; const viejos = REINTENTOS_OM.slice();
+  REINTENTOS_OM.length = 0; REINTENTOS_OM.push(1, 1, 1);
+  const payload = { hourly: { time: ['2016-01-01T00:00', '2016-01-01T01:00', '2016-01-01T02:00'],
+    shortwave_radiation: [0, 0, 0], diffuse_radiation: [0, 0, 0], temperature_2m: [1, 1, 1], windspeed_10m: [2, 2, 2] } };
+  let llamadas = 0;
+  window.fetch = () => { llamadas++; return Promise.resolve(llamadas < 3
+    ? { ok: false, status: 429 } : { ok: true, status: 200, json: () => Promise.resolve(payload) }); };
+  const alTercero = await fetchYearDeclarado(loc, 2016);
+  R.alTercero = { llamadas, filas: alTercero ? alTercero.length : null, error: (alTercero && alTercero.error) || null, esNull: alTercero === null };
+  llamadas = 0; window.fetch = () => { llamadas++; return Promise.resolve({ ok: false, status: 429 }); };
+  const nunca = await fetchYearDeclarado(loc, 2018);
+  R.nunca = { llamadas, error: (nunca && nunca.error) || null, intentos: (nunca && nunca.intentos) || null, esNull: nunca === null };
+  window.fetch = fetchReal; REINTENTOS_OM.length = 0; viejos.forEach((v) => REINTENTOS_OM.push(v));
+  return R;
+});
+ok(inf.arranque.every((a) => Math.abs(a.soc0 - a.tgt) < 1e-9 && Math.abs(a.primero - a.tgt) < 0.1),
+  'con soc0=null cada lógica ARRANCA en su objetivo (' + inf.arranque.map((a) => a.k + ' ' + Math.round(a.tgt * 100) + '%').join(', ') + ')',
+  JSON.stringify(inf.arranque));
+ok(inf.panel.every((v) => v === 0.05), 'y con un número del panel, todas arrancan en él', inf.panel.join(','));
+ok(inf.cols.join(',') === 'none,std,winter,cons,lt' && inf.ltProf === 'SP_45W_6Ah_LT',
+  'las columnas son none,std,winter,cons y, para un perfil sin calefactor, la -LT apuntando a su gemelo (' + inf.ltProf + '); «plano» ya no está', inf.cols.join(','));
+ok(inf.colsDeLT.indexOf('lt') < 0, 'y el propio perfil -LT no la trae (no hay gemelo del gemelo)', inf.colsDeLT.join(','));
+ok(inf.chgStdFrio === 0 && inf.chgLTFrio > 0,
+  'la columna -LT SIMULA con el perfil calefactado: a −10 °C el estándar capta 0 Wh y la -LT ' + inf.chgLTFrio.toFixed(0) + ' Wh',
+  'std ' + inf.chgStdFrio + ' · lt ' + inf.chgLTFrio);
+ok(inf.mejor === 'cons' && inf.minZero === 0 && inf.descartados.join(',') === 'none,std,winter',
+  'el «más favorable» descarta a los que agotan la batería, ignora la columna -LT y elige «cons» (el único con 0 h)',
+  'mejor ' + inf.mejor + ' · minZero ' + inf.minZero + ' · descartados ' + inf.descartados.join(','));
+ok(inf.mejorVacio, 'y sin comparativa no inventa veredicto');
+ok(inf.barrido.res.join(',') === '2013' && inf.barrido.caidos.join(' | ') === '2014:HTTP 429 tras 4 intentos | 2015:no está en la fuente | 2016:serie incompleta (288 h)',
+  'el barrido LISTA los años que no bajaron, con motivo, en vez de saltarlos', JSON.stringify(inf.barrido));
+ok(inf.alTercero.llamadas === 3 && inf.alTercero.filas === 3 && !inf.alTercero.error,
+  'un 429 se reintenta: dos rechazos y al tercero baja', JSON.stringify(inf.alTercero));
+ok(inf.nunca.llamadas === 4 && inf.nunca.error === 'HTTP 429' && inf.nunca.intentos === 4 && !inf.nunca.esNull,
+  'y si persiste vuelve DECLARADO: {error:"HTTP 429", intentos:4}, nunca null', JSON.stringify(inf.nunca));
+
+/* ── 5) UNA TCU MUERTA NO SIGUE AL SOL ──
+   «Sin gestión» salía con 66 h de batería agotada y 100 % de producción: con
+   SOC 0 % el seguidor seguía moviéndose sin energía. Se simula un perfil que
+   no puede cargar (tMin imposible) hasta que muere, y después de muerta la
+   posición tiene que quedarse clavada, el motor a 0 y la producción perdida
+   contada. Y el interruptor «para el cliente» cambia el rótulo del informe. */
+const muerta = await pg.evaluate(() => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const prof = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const meteo = synthMeteo(loc, 8, 170, 10);                     /* verano despejado: hay sol que perder */
+  const o = { motorModel: 'curva', winter: false, strategy: false, socTgt: 100, socCrit: 0, fcDays: 5, tMin: 99, poaMin: 0, mountTilt: null };
+  const rows = simulate(meteo, prof, loc, 0.03, o);
+  const i0 = rows.findIndex((r) => r.soc <= 0.001);
+  const despues = rows.slice(i0 + 1);
+  const S = summarize(rows);
+  return { i0, n: despues.length,
+    movTras: despues.reduce((a, r) => a + r.mov, 0),
+    posDistintas: new Set(despues.map((r) => Math.round(r.pos * 100))).size,
+    conSol: despues.filter((r) => r.poaPot > 0).length,
+    perdida: S.prodLostPct, rel: S.prodRelPct, hZero: S.hZero };
+});
+ok(muerta.i0 > 0 && muerta.n > 24, 'el banco llega a matar la batería (' + muerta.i0 + ' h) y la observa ' + muerta.n + ' h después', JSON.stringify(muerta));
+ok(muerta.movTras === 0 && muerta.posDistintas === 1,
+  'muerta, la TCU no mueve nada: motor 0° y una sola posición durante ' + muerta.n + ' h',
+  'mov ' + muerta.movTras + ' · posiciones ' + muerta.posDistintas);
+ok(muerta.conSol > 0 && muerta.perdida > 0 && muerta.rel < 100,
+  'y la producción de esas horas de sol se cuenta como perdida (' + muerta.perdida.toFixed(2) + ' %, relativa ' + muerta.rel.toFixed(2) + ' %)',
+  JSON.stringify(muerta));
+{
+  const bat3 = readFileSync(path.join(RAIZ, 'bateria.html'), 'utf8');
+  ok(bat3.includes('id="cliente"') && bat3.includes("paraCliente?'Documento elaborado por Factiun para el cliente.':'Uso interno de Factiun.'"),
+    'el informe lleva interruptor «para el cliente» y sin él se rotula como uso interno');
+}
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez y sus 19 canónicos salen del espejo'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice y una TCU muerta no sigue al sol'));
 process.exit(fallos ? 1 : 0);
