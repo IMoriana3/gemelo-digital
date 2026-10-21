@@ -11,7 +11,9 @@
 #   2. resuelve el fichero en el clon de `proyectos` que haya al lado —el del
 #      PIN si el repo lo clona por pin, que es lo que lo hace verificable
 #      desde fuera y no sólo legible—;
-#   3. si no hay clon, lo trae con `--depth 1` (proyectos es PÚBLICO: 2 s).
+#   3. si no hay clon, lo trae con `--depth 1`. `proyectos` es PRIVADO desde el
+#      2026-10-20: hace falta LECTURA_TOKEN en el entorno (con lectura sobre
+#      ese repo); sin él no se intenta y sale con 2.
 #
 # CÓDIGOS, la convención de siempre:
 #   0  hay enlace Y el documento existe en el pin
@@ -53,9 +55,16 @@ for c in ../proyectos ../Proyectos; do
   fi
 done
 
-# ── 3 · sin clon al lado: se trae, y si no se puede, rc = 2 ──────────────
+# ── 3 · sin clon al lado: se trae CON TOKEN, y si no se puede, rc = 2 ────
+# El token va en la cabecera de la petición, no en la URL ni en el clon.
+if [ -z "${LECTURA_TOKEN:-}" ]; then
+  echo "SIN COMPROBAR: no hay clon de proyectos al lado y sin LECTURA_TOKEN no se puede traer (es privado)."
+  echo "El enlace puede estar bien o roto. Esto NO es un verde."
+  exit 2
+fi
+cabecera="$(printf 'x-access-token:%s' "$LECTURA_TOKEN" | base64 -w0)"
 tmp=$(mktemp -d)
-if git clone --depth 1 -q https://github.com/IMoriana3/proyectos.git "$tmp/p" 2>/dev/null; then
+if git -c "http.extraHeader=Authorization: basic $cabecera" clone --depth 1 -q https://github.com/IMoriana3/proyectos.git "$tmp/p" 2>/dev/null; then
   if [ -f "$tmp/p/$DOC" ]; then
     echo "el documento existe en proyectos (clonado al vuelo)"
     rm -rf "$tmp"; exit 0
