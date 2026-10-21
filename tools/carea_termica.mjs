@@ -73,12 +73,23 @@ for (const f of SUPERFICIES) {
   if (hits.length && VERBOSO) console.log('     ' + hits.join(' · '));
 }
 
-/* ── 3 · el calefactor de bateria.html decide con la BATERÍA ──────────── */
+/* ── 3 · bateria.html entra en consumoTCU con la temperatura de la BATERÍA ──
+   El patrón de abajo exigía `calefactada:prof.heated,` pegado a `tAmb:tBat`.
+   Eso metía DOS propiedades en una: que el flag del calefactor saliera del
+   perfil, y que la temperatura pasada fuera la de la batería. La guarda sólo
+   dice la segunda, y el 2026-10-21 la primera dejó de existir: la variante -LT
+   resultó ser otra química, no una batería calentada, así que `calefactada`
+   salió de la llamada. Al irse, esta guarda se cayó sin que la inercia térmica
+   —lo que de verdad vigila— hubiera cambiado nada.
+
+   Se estrecha el patrón a lo que la frase afirma. No se retira ni se ablanda:
+   sigue exigiendo que la llamada lleve `tAmb:tBat` y que `tAmb:m.temp` no
+   aparezca en ninguna parte, que es el error que este arnés nació para cazar. */
 const BAT = readFileSync(join(RAIZ, 'bateria.html'), 'utf8');
 ok('bateria.html integra la inercia con FISICA.retardo1',
    /FISICA\.retardo1\(\s*tBat\s*,\s*m\.temp/.test(BAT));
 ok('bateria.html pasa tBat —no m.temp— a consumoTCU',
-   /calefactada:prof\.heated,\s*tAmb:tBat/.test(BAT) && !/tAmb:m\.temp/.test(BAT));
+   /consumoTCU\(\{[\s\S]{0,200}?tAmb:\s*tBat/.test(BAT) && !/tAmb:\s*m\.temp/.test(BAT));
 
 /* ── veredicto ────────────────────────────────────────────────────────── */
 if (fallos.length) {
