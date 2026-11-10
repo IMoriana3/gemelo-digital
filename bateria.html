@@ -99,6 +99,27 @@
 /* Mapa base: OSM estándar (sin clave) y oscurecido por CSS. CARTO pasó a exigir API key
    (2026-10) y el marcador de imagen necesitaba lib/images, que no está en el repo. */
 .osm-oscuro{filter:invert(1) hue-rotate(180deg) brightness(.82) contrast(.9) saturate(.6)}
+
+/* ═══ PIEL «SALA DE CONTROL» (2026-11-10) — la de producción por string y bt3d ═══
+   Por cascada, sin tocar un id: grafito más profundo, tarjetas de 14 px, cifras
+   grandes en monoespaciada y el ámbar para lo que importa. Las gráficas se
+   pintan como antes; la del SOC gana un relleno bajo la curva con estrategia. */
+:root{--bg:#080B10;--panel:#0B1017;--card:#10161F;--card2:#121923;--line:#1E2836;--line2:#2A3646;--tx:#E6EDF3;--tx2:#B7C2CF;--tx3:#8E9BAB;--accent:#F5A524}
+nav{background:#0B1017;height:56px}
+.side{background:var(--panel)}
+.content{padding:18px 22px}
+.grp h3{color:var(--tx3)}
+.fld select,.fld input[type=number]{border-radius:8px;min-height:34px}
+.btn{border-radius:10px;color:#1A1206;min-height:40px}
+.btn.sec{border-radius:10px}
+.chips{grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:16px}
+.chip{border-radius:12px;padding:12px 14px;background:var(--card)}
+.chip .lab{font-size:12px;color:var(--tx3);margin-bottom:4px}
+.chip .v{font-size:22px;letter-spacing:-.02em}
+.chip .sub{font-size:10.5px;margin-top:3px;line-height:1.35}
+.card{border-radius:14px;padding:14px 18px;margin-bottom:16px}
+.card h2{font:600 16px var(--display);letter-spacing:0}
+table.cmp th{color:var(--tx3)}
 </style>
 </head>
 <body>
@@ -1121,6 +1142,15 @@ function frame(g,yMin,yMax,rows,yFmt){
   }
   return {X:X,Y:Y};
 }
+/* relleno bajo una curva, del color de la curva a transparente (piel 2026-11-10) */
+function area(g,f,rows,key,color,base){
+  var x=g.x,y0=f.Y(base==null?0:base);x.save();x.beginPath();
+  rows.forEach(function(r,i){var v=typeof key==='function'?key(r):r[key];
+    if(i===0)x.moveTo(f.X(i),f.Y(v));else x.lineTo(f.X(i),f.Y(v));});
+  x.lineTo(f.X(rows.length-1),y0);x.lineTo(f.X(0),y0);x.closePath();
+  var gr=x.createLinearGradient(0,CH.pad.t,0,y0);gr.addColorStop(0,color+'55');gr.addColorStop(1,color+'00');
+  x.fillStyle=gr;x.fill();x.restore();
+}
 function line(g,f,rows,key,color,wpx){
   var x=g.x;x.strokeStyle=color;x.lineWidth=wpx||1.6;x.beginPath();
   rows.forEach(function(r,i){var v=typeof key==='function'?key(r):r[key];
@@ -2082,6 +2112,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   bandParked(g1,f1,mng,'rgba(226,87,76,.12)',function(r){return r.parked&&!r.stow});
   hline(g1,f1,opts.socTgt,'#37b87c',true,'objetivo '+opts.socTgt+'%');
   hline(g1,f1,opts.socCrit,'#e2574c',true,'crítico '+opts.socCrit+'%');
+  area(g1,f1,mng,function(r){return r.soc*100},'#36D399',0);
   line(g1,f1,ref,function(r){return r.soc*100},'#7F8EA1',1);
   line(g1,f1,mng,function(r){return r.soc*100},'#36D399',LONG?1.1:2);
   g1.x.fillStyle='#e0a52b';                       /* ✦ calibraciones (carga al 100 %) logradas */
