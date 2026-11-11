@@ -782,7 +782,11 @@ function simulate(meteo,prof,loc,soc0,opts){
        azimut absoluto 0-360 (0 N · 90 E · 180 S · 270 O) */
     var ab=AB.paso(dtH*3600,m.wind,trackPos,180+sun.az/D2R);
     stow=ab.estado;
-    var target=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo))
+    /* Lo que la bandera PIDE se guarda aparte de lo que el eje HACE: son la misma
+       cifra salvo cuando la TCU no puede moverse, que es justo el caso que el cruce
+       de viento con batería tiene que poder ver (`cruceVientoBateria`). */
+    var stowObj=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo)):null;
+    var target=stow>0?stowObj
                      :(parked?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
     if(prevPos==null)prevPos=target;
     /* BATERÍA AGOTADA: la TCU no mueve nada. Antes, con SOC 0 % el seguidor
@@ -886,7 +890,10 @@ function simulate(meteo,prof,loc,soc0,opts){
 
     rows.push({t:m.t,ghi:m.ghi,temp:m.temp,tCell:tEff,wind:m.wind,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
                heat:heatWh,net:chgEff-consWh,pos:target,parked:parked,stow:stow>0,mov:deltaEff,
-               poaPot:poaPot,poaLost:poaLost,poaReal:poaReal,cal:calibNow,fullWin:!!fullDay,cRate:cRateNow});
+               poaPot:poaPot,poaLost:poaLost,poaReal:poaReal,cal:calibNow,fullWin:!!fullDay,cRate:cRateNow,
+               /* para el cruce de viento con batería: nivel de bandera (0/1/2), lado fijado,
+                  ángulo pedido y si la TCU entró en el paso sin energía. `pos` es lo que hizo. */
+               stowLvl:stow,stowLado:ab.lado,stowObj:stowObj,dead:muerta});
   }
   rows.nCalib=nCalib; rows.daysNoCalib=daysNoCalib;
   return rows;
@@ -1102,6 +1109,172 @@ function summarize(rows){
        histograma, así que las dos cosas ya no pueden contar cosas distintas. */
     cyc:cyclesAnalysis(rows,_rf), rf:_rf, cal:calibStats(rows)
   };
+}
+/* ═══════════ Viento × batería: ¿puede abanderar cuando hace falta? ═══════════
+   Las dos mitades ya estaban en esta página y nadie las cruzaba. `simulate`
+   abandera por viento y deja la TCU clavada donde esté si la batería se agota
+   (`muerta`); `summarize` cuenta las horas abanderado y las horas a SOC 0. Lo que
+   no decía ninguna es cuántas de las horas de viento coinciden con una TCU que no
+   puede moverse — que es la pregunta de un homologador: «¿con qué probabilidad no
+   abandera por batería baja cuando hay viento?».
+
+   NO DECIDE NADA: lee las filas que `simulate` ya ha producido. Si mañana cambia
+   la regla de la TCU muerta o la del abanderamiento, esto cuenta lo nuevo sin
+   tocarse. Por eso las filas llevan `stowLvl`, `stowLado`, `stowObj` y `dead`:
+   lo que se pidió y por qué no se hizo, anotado por quien lo decidió.
+
+   QUÉ ES «CUBIERTO». El eje cubre la bandera si está del lado fijado al abanderar
+   y con al menos el ángulo del nivel —30° en parcial, 55° en total—, con 1° de
+   tolerancia. En parcial vale cualquier punto del sector, no el ángulo exacto que
+   pide el seguimiento: el sector ES la bandera.
+
+   Y se separan dos cosas que no pesan igual. Una TCU que murió aparcada en
+   defensa está a 55°: puede quedar del lado contrario al pedido, pero inclinada.
+   Una que murió de noche está en plano. La segunda es la que le importa a la
+   estructura, y va en su propia cifra (`hMuertaBajoAngulo`). */
+var CRUCE_TOL_DEG=1;
+/* Energía de motor para llevar el eje de `desde` a `hasta`, con el MISMO modelo de
+   motor de la simulación (`consumoTCU`) e integrada grado a grado. No es una
+   segunda física: es la de la casa preguntada por una maniobra entera.
+   Se integra, y no se usa el punto medio, porque con la curva medida el consumo
+   depende de |θ| y una travesía de −55° a +55° tiene el punto medio en 0°, que es
+   donde el motor menos pide. */
+function energiaManiobraWh(desde,hasta,motorModel){
+  var d=Math.abs(hasta-desde);
+  if(!(d>0.01))return 0;
+  var n=Math.max(1,Math.ceil(d)), paso=(hasta-desde)/n, e=0;
+  for(var i=0;i<n;i++)
+    e+=consumoTCU({dtH:1,dia:false,mov:Math.abs(paso),pos:desde+paso*(i+0.5),motorModel:motorModel,tAmb:20}).motor;
+  return e;
+}
+function cruceVientoBateria(rows,capWh,motorModel){
+  var n=rows.length, dtH=n>1?((+rows[1].t)-(+rows[0].t))/36e5:1;
+  /* La reserva de referencia es la peor maniobra posible: de tope a tope. */
+  var reserva=energiaManiobraWh(-AXIS_MAX,AXIS_MAX,motorModel);
+  var X={pasoH:dtH, tolDeg:CRUCE_TOL_DEG, reservaWh:reserva, reservaSoc:capWh>0?reserva/capWh:0,
+         /* a paso grueso el viaje cabe en un paso y el tránsito no se puede ver */
+         veTransito:SLEW_DPS*3600*dtH<AXIS_MAX,
+         hViento:0, hVientoT2:0, hFuera:0, hFueraMuerta:0, hMuertaBajoAngulo:0, hFueraTransito:0,
+         episodios:0, epMuertaAlEmpezar:0, epSinEnergia:0, epBajoReserva:0, epFuera:0,
+         socMinAlEmpezar:null, margenMinWh:null, peorEpisodio:null, vientoMaxFuera:null};
+  var enEp=false, epContado=false;
+  for(var i=0;i<n;i++){
+    var r=rows[i], lvl=r.stowLvl||0;
+    if(lvl===0)enEp=false;
+    else if(!enEp){
+      /* EMPIEZA un episodio: con qué llega la batería y qué le cuesta SU maniobra.
+         El SOC es el de ANTES del paso, que es con el que `simulate` decide. */
+      enEp=true; epContado=false; X.episodios++;
+      var socAntes=i>0?rows[i-1].soc:Math.max(0,Math.min(1,r.soc-(capWh>0?r.net/capWh:0)));
+      var posAntes=i>0?rows[i-1].pos:r.pos;
+      var hay=socAntes*capWh, pide=energiaManiobraWh(posAntes,r.stowObj,motorModel);
+      if(r.dead)X.epMuertaAlEmpezar++;
+      if(pide>1e-6&&hay<pide)X.epSinEnergia++;
+      if(hay<reserva)X.epBajoReserva++;
+      if(X.socMinAlEmpezar==null||socAntes<X.socMinAlEmpezar){
+        X.socMinAlEmpezar=socAntes; X.margenMinWh=hay-reserva;
+        X.peorEpisodio={t:r.t,soc:socAntes,hayWh:hay,pideWh:pide,viento:r.wind,desde:posAntes,hasta:r.stowObj};
+      }
+    }
+    if(lvl>0&&r.wind>=WIND_T1){
+      X.hViento+=dtH; if(r.wind>=WIND_T2)X.hVientoT2+=dtH;
+      var lim=(lvl===2?AXIS_MAX:PARTIAL_STOW_DEG), lado=r.stowLado||0;
+      if(!((lado*r.pos)>=lim-CRUCE_TOL_DEG)){
+        X.hFuera+=dtH;
+        if(r.dead){X.hFueraMuerta+=dtH; if(Math.abs(r.pos)<lim-CRUCE_TOL_DEG)X.hMuertaBajoAngulo+=dtH;}
+        else X.hFueraTransito+=dtH;
+        if(!epContado){epContado=true;X.epFuera++;}
+        if(!X.vientoMaxFuera||r.wind>X.vientoMaxFuera.viento)
+          X.vientoMaxFuera={t:r.t,viento:r.wind,pos:r.pos,pide:lado*lim,muerta:!!r.dead};
+      }
+    }
+  }
+  return X;
+}
+/* LAS FILAS DEL CRUCE SE ESCRIBEN UNA VEZ. Las pintan la tarjeta de pantalla y el
+   informe: dos listas con las mismas once filas se separarían a la primera
+   corrección. Devuelve [rótulo, función(X) → {v, cls}]. */
+function horasTxt(v){return fmt(v,(Math.abs(v-Math.round(v))<1e-9)?0:2)+' h'}
+function filasCruce(){
+  var n=function(v,cls){return {v:String(v),cls:cls||''}};
+  return [
+    ['Horas con viento de abanderamiento', function(X){return n(horasTxt(X.hViento))}],
+    ['… con el eje fuera de la bandera pedida', function(X){return n(horasTxt(X.hFuera),X.hFueraMuerta>0?'bad':(X.hFuera>0?'wn':'ok'))}],
+    ['… porque la TCU no tiene energía', function(X){return n(horasTxt(X.hFueraMuerta),X.hFueraMuerta>0?'bad':'ok')}],
+    ['… y además con menos inclinación de la pedida', function(X){return n(horasTxt(X.hMuertaBajoAngulo),X.hMuertaBajoAngulo>0?'bad':'ok')}],
+    /* A paso grueso el viaje entero cabe dentro de un paso y el tránsito no existe en
+       las filas: un «0 h» ahí sería una cifra sin medida detrás. Va una raya, y el
+       porqué lo dice `limitesCruceTxt`. */
+    ['… porque el eje va de camino', function(X){return X.veTransito?n(horasTxt(X.hFueraTransito),X.hFueraTransito>0?'wn':'ok'):n('—')}],
+    ['Episodios de viento', function(X){return n(fmt(X.episodios))}],
+    ['… que empiezan con la TCU sin energía', function(X){return n(fmt(X.epMuertaAlEmpezar),X.epMuertaAlEmpezar>0?'bad':'ok')}],
+    ['… sin energía para su propia maniobra', function(X){return n(fmt(X.epSinEnergia),X.epSinEnergia>0?'bad':'ok')}],
+    ['… por debajo de la reserva de una maniobra completa', function(X){return n(fmt(X.epBajoReserva),X.epBajoReserva>0?'wn':'ok')}],
+    ['SOC más bajo al empezar un episodio', function(X){return X.socMinAlEmpezar==null?n('—'):n(fmt(X.socMinAlEmpezar*100,1)+' %',X.socMinAlEmpezar<X.reservaSoc?'bad':'')}],
+    ['Margen sobre la reserva en ese episodio', function(X){return X.margenMinWh==null?n('—'):n((X.margenMinWh>=0?'+':'−')+fmt(Math.abs(X.margenMinWh),1)+' Wh',X.margenMinWh<0?'bad':'')}]
+  ];
+}
+/* Las columnas del cruce: lo simulado, su referencia y, si se pidió la comparativa,
+   cada sistema de control con SU batería (la columna -LT trae otra capacidad). */
+function columnasCruce(mng,ref,prof,opts,controls){
+  var cols=[{n:'Configuración evaluada',X:cruceVientoBateria(mng,prof.wh,opts.motorModel)},
+            {n:'Sin estrategia (referencia)',X:cruceVientoBateria(ref,prof.wh,opts.motorModel)}];
+  (controls||[]).forEach(function(x){
+    var p=x.prof||x.c.prof||prof;
+    cols.push({n:x.c.n,k:x.c.k,X:cruceVientoBateria(x.rows,p.wh,opts.motorModel)});
+  });
+  return cols;
+}
+function fechaHoraTxt(t){return t.getUTCDate()+' '+MES[t.getUTCMonth()]+' '+('0'+t.getUTCHours()).slice(-2)+'h'}
+/* Lo que el cruce NO es, dicho donde se lee la cifra. Lo usan la tarjeta y el informe. */
+function limitesCruceTxt(X){
+  return 'Lee las filas de la simulación y no decide nada. '+
+    'La <b>reserva</b> es la energía de motor de una maniobra de tope a tope (−'+fmt(AXIS_MAX)+'° → +'+fmt(AXIS_MAX)+'°) con el modelo de motor elegido: '+
+    '<b>'+fmt(X.reservaWh,1)+' Wh, el '+fmt(X.reservaSoc*100,1)+' % de la batería</b>. Es <b>sin viento</b>: el par que el viento opone al motor no está modelado, '+
+    'así que la reserva real es mayor y el margen de la tabla es un techo. '+
+    'El viento es la <b>media</b> de la serie meteorológica, no la racha: en planta abandera la racha y habrá más episodios que aquí. '+
+    'La batería se deja bajar hasta el 0 %, y el corte por subtensión llega antes. '+
+    '«Fuera de la bandera» cuenta el lado y el ángulo; la fila de la inclinación cuenta solo el ángulo, que es lo que una TCU agotada en plano no tiene y una agotada en defensa sí.'+
+    (X.veTransito?'':' Con paso de '+fmt(X.pasoH*60)+' min el viaje del eje cabe dentro de un paso y <b>el tránsito no se puede ver</b>: por eso su fila lleva una raya y no un cero. Se ve con paso de 1 min.');
+}
+function cardCruce(mng,ref,prof,opts,controls,sweep){
+  var cols=columnasCruce(mng,ref,prof,opts,controls), X0=cols[0].X;
+  var c=document.createElement('div');c.className='card';c.id='cruce';
+  var peor=cols.reduce(function(a,b){return b.X.hFueraMuerta>a.X.hFueraMuerta?b:a});
+  var titular;
+  if(!X0.hViento) titular='En este periodo el viento no llega al umbral de abanderamiento: no hay nada que cruzar.';
+  else if(X0.hFueraMuerta>0) titular='<b style="color:var(--danger)">'+horasTxt(X0.hFueraMuerta)+' de viento con la TCU sin energía para abanderar</b> en la configuración evaluada, de '+horasTxt(X0.hViento)+' de viento.';
+  else titular='La configuración evaluada llega con energía a los <b>'+fmt(X0.episodios)+'</b> episodios de viento del periodo'+
+    (X0.socMinAlEmpezar!=null?': el peor empieza al '+fmt(X0.socMinAlEmpezar*100,1)+' % de SOC, '+fmt(Math.max(0,X0.margenMinWh),1)+' Wh por encima de la reserva':'')+'.'+
+    (peor.X.hFueraMuerta>0?' No todas las columnas pueden decir lo mismo.':'');
+  c.innerHTML='<h2>🌬️ Viento × batería — ¿puede abanderar cuando hace falta?</h2><div class="sub">'+titular+'</div>';
+  var th='<div style="overflow-x:auto"><table class="cmp" id="cruceTbl"><tr><th>Cruce</th>'+cols.map(function(x){
+    return '<th'+(x.k?' style="color:'+CONTROL_COL[x.k]+'"':'')+'>'+x.n+'</th>';}).join('')+'</tr>';
+  filasCruce().forEach(function(f){
+    th+='<tr><td>'+f[0]+'</td>'+cols.map(function(x){var z=f[1](x.X);
+      return '<td class="'+z.cls+'">'+z.v+'</td>';}).join('')+'</tr>';
+  });
+  th+='</table></div>';
+  /* El peor momento, con nombre y apellidos: una cifra de horas no dice cuándo. */
+  var det='', vistos={}, orden=[];
+  cols.forEach(function(x){
+    var m=x.X.vientoMaxFuera; if(!m||!m.muerta)return;
+    /* dos columnas con el mismo peor momento se dicen una vez, con los dos nombres */
+    var txt='El viento más fuerte con la TCU sin energía: '+fmt(m.viento*3.6)+' km/h el '+fechaHoraTxt(m.t)+
+            ', con el eje a '+fmt(m.pos,1)+'° cuando la bandera pedía '+fmt(m.pide)+'°.';
+    if(!vistos[txt]){vistos[txt]=[];orden.push(txt);}
+    vistos[txt].push(x.n);
+  });
+  orden.forEach(function(txt){det+='<div class="note cruce-peor"><b>'+vistos[txt].join(' · ')+'.</b> '+txt+'</div>';});
+  var barr='';
+  if(sweep&&sweep.list&&sweep.list.length&&sweep.list[0].hWindDead!=null){
+    var con=sweep.list.filter(function(r){return r.hWindDead>0});
+    barr='<div class="note" id="cruceBarrido"><b>Barrido multianual.</b> En <b>'+fmt(con.length)+' de '+fmt(sweep.list.length)+'</b> años simulados hay horas de viento con la TCU sin energía'+
+      (con.length?' (hasta '+horasTxt(Math.max.apply(null,con.map(function(r){return r.hWindDead})))+' en '+
+        con.slice().sort(function(a,b){return b.hWindDead-a.hWindDead})[0].year+')':'')+'. Es la frecuencia que esta página puede dar; no es una probabilidad de proyecto.</div>';
+  }
+  c.insertAdjacentHTML('beforeend',th+det+barr+'<div class="note" id="cruceLimites"><b>Qué mira y qué no.</b> '+limitesCruceTxt(X0)+'</div>');
+  return c;
 }
 function aggDaily(rows){
   var dtH=rows.length>1?((+rows[1].t)-(+rows[0].t))/36e5:1;
@@ -1566,9 +1739,11 @@ $('run').onclick=function(){
          lógica arrancan en su objetivo (ver socEstacionario). */
       var s0=socEstacionario(opts), s0ref=socEstacionario(refOpts);
       var cl=clasificaBarrido(list,years,function(meteo,y){
-        var S=summarize(simulate(meteo,prof,loc,s0,opts));
+        var filasY=simulate(meteo,prof,loc,s0,opts), S=summarize(filasY);
+        var XY=cruceVientoBateria(filasY,prof.wh,opts.motorModel);
         return {year:y,meteo:meteo,inact:S.inactivePct,lost:S.prodLostPct,
-                socMin:S.socMin,hZero:S.hZero,hStow:S.hStow};
+                socMin:S.socMin,hZero:S.hZero,hStow:S.hStow,
+                hWind:XY.hViento,hWindDead:XY.hFueraMuerta,epNoE:XY.epSinEnergia};
       });
       var res=cl.res;
       if(!res.length)throw new Error('Sin datos históricos (¿sin red?)'+(cl.caidos.length?' · '+cl.caidos[0].year+': '+cl.caidos[0].motivo:''));
@@ -1959,6 +2134,16 @@ function buildReport(){
     ['Consumo de electrónica',{v:fmt(S.base)+' Wh'},{v:fmt(R.base)+' Wh'}]
    ],['Métrica','Configuración evaluada','Sin gestión (referencia)']);
   if(fig.pos)H+='<img class="fig" src="'+fig.pos+'"><div class="cap">Figura 4 — Recorrido del seguidor.</div>';
+  /* 7 bis. VIENTO × BATERÍA: las mismas filas que la tarjeta de pantalla (filasCruce). */
+  var colsX=columnasCruce(mng,ref,prof,opts,null), XS=colsX[0].X;
+  H+='<h3>Abanderamiento por viento con la batería baja</h3>'+
+     '<p>El abanderamiento es la maniobra de protección de la estructura y la ejecuta la TCU con su propia batería. '+
+     'Se cruzan las horas con viento por encima del umbral con el estado de la batería en ese momento: '+
+     'cuántas coinciden con una TCU sin energía para moverse, y con qué reserva empieza cada episodio.</p>';
+  H+=tbl(filasCruce().map(function(f){
+        return [f[0]].concat(colsX.map(function(x){return f[1](x.X)}));
+      }),['Cruce','Configuración evaluada','Sin gestión (referencia)']);
+  H+='<div class="note">'+limitesCruceTxt(XS)+'</div>';
 
   /* 8. BARRIDO MULTIANUAL */
   if(sweep&&sweep.list&&sweep.list.length){
@@ -1971,12 +2156,18 @@ function buildReport(){
        'Se pidieron <b>'+fmt(sweep.pedidos||(v.length+caidos.length))+'</b> años y se simularon <b>'+fmt(v.length)+'</b>'+
        (caidos.length?'; los que no bajaron se listan como no disponibles y <b>no entran</b> en la media.':'.')+'</p>';
     var filas=v.map(function(r){return [String(r.year)+(r.year===sweep.worst?' (año de proyecto)':''),
-      {v:fmt(r.inact,4),cls:r.year===sweep.worst?'bad':''},{v:fmt(r.lost,4)},{v:fmt(r.socMin*100)+' %'},{v:fmt(r.hZero)}];});
-    caidos.forEach(function(c){filas.push([String(c.year)+' — no disponible',{v:c.motivo,cls:'wn'},{v:'—'},{v:'—'},{v:'—'}])});
+      {v:fmt(r.inact,4),cls:r.year===sweep.worst?'bad':''},{v:fmt(r.lost,4)},{v:fmt(r.socMin*100)+' %'},{v:fmt(r.hZero)},
+      {v:r.hWindDead!=null?fmt(r.hWindDead):'—',cls:r.hWindDead>0?'bad':''}];});
+    caidos.forEach(function(c){filas.push([String(c.year)+' — no disponible',{v:c.motivo,cls:'wn'},{v:'—'},{v:'—'},{v:'—'},{v:'—'}])});
     filas.sort(function(a,b){return parseInt(typeof a[0]==='object'?'9999':a[0])-parseInt(typeof b[0]==='object'?'9999':b[0])});
-    filas.push([{v:'<b>Media (año típico, '+fmt(v.length)+' años)</b>'},{v:'<b>'+fmt(mean('inact'),4)+'</b>'},{v:'<b>'+fmt(mean('lost'),4)+'</b>'},{v:'—'},{v:'—'}]);
-    filas.push([{v:'<b>Media + 2σ (97,5 %)</b>'},{v:'<b>'+fmt(mean('inact')+2*std('inact'),4)+'</b>'},{v:'<b>'+fmt(mean('lost')+2*std('lost'),4)+'</b>'},{v:'—'},{v:'—'}]);
-    H+=tbl(filas,['Año','% no disponible','% producción perdida','SOC mínimo','h a cero']);
+    filas.push([{v:'<b>Media (año típico, '+fmt(v.length)+' años)</b>'},{v:'<b>'+fmt(mean('inact'),4)+'</b>'},{v:'<b>'+fmt(mean('lost'),4)+'</b>'},{v:'—'},{v:'—'},{v:'—'}]);
+    filas.push([{v:'<b>Media + 2σ (97,5 %)</b>'},{v:'<b>'+fmt(mean('inact')+2*std('inact'),4)+'</b>'},{v:'<b>'+fmt(mean('lost')+2*std('lost'),4)+'</b>'},{v:'—'},{v:'—'},{v:'—'}]);
+    H+=tbl(filas,['Año','% no disponible','% producción perdida','SOC mínimo','h a cero','h de viento sin energía']);
+    if(v[0].hWindDead!=null){
+      var conViento=v.filter(function(r){return r.hWindDead>0}).length;
+      H+='<p>En <b>'+fmt(conViento)+' de '+fmt(v.length)+'</b> años simulados hay horas con viento de abanderamiento y la TCU sin energía para moverse. '+
+         'Es una frecuencia sobre la serie histórica y con viento medio horario, no una probabilidad de proyecto.</p>';
+    }
   }
 
   /* 9. SISTEMAS DE CONTROL */
@@ -1997,6 +2188,12 @@ function buildReport(){
       ['Producción relativa al seguimiento'].concat(C.map(function(x){return {v:fmt(x.S.prodRelPct,2)+' %'}})),
       ['SOC mínimo'].concat(C.map(function(x){return {v:fmt(x.S.socMin*100)+' %'}})),
       ['Horas con batería agotada'].concat(C.map(function(x){return {v:fmt(x.S.hZero)}})),
+      ['Horas de viento con la TCU sin energía'].concat(C.map(function(x){
+        var X=cruceVientoBateria(x.rows,(x.prof||x.c.prof||prof).wh,opts.motorModel);
+        return {v:horasTxt(X.hFueraMuerta),cls:X.hFueraMuerta>0?'bad':''}})),
+      ['SOC más bajo al empezar un episodio de viento'].concat(C.map(function(x){
+        var X=cruceVientoBateria(x.rows,(x.prof||x.c.prof||prof).wh,opts.motorModel);
+        return {v:X.socMinAlEmpezar==null?'—':fmt(X.socMinAlEmpezar*100,1)+' %',cls:(X.socMinAlEmpezar!=null&&X.socMinAlEmpezar<X.reservaSoc)?'bad':''}})),
       ['Consumo de motor (Wh)'].concat(C.map(function(x){return {v:fmt(x.S.motor)}})),
       ['Cargas completas logradas'].concat(C.map(function(x){return {v:fmt(x.S.cal.n)}})),
       ['Ciclos rainflow'].concat(C.map(function(x){return {v:fmt(x.S.rf.total)}})),
@@ -2030,6 +2227,7 @@ function buildReport(){
      '<li><b>El límite superior de carga de la -LT (60 °C) no se modela</b>: se le aplica el derate JEITA de la celda estándar (recorte desde 35 °C, nulo a 45 °C), que para la -LT es conservador. Y el límite de DESCARGA no se modela en ninguna de las dos variantes: la batería entrega por debajo de su mínimo (−10 °C la estándar, −40 °C la -LT) como si nada. Importa en emplazamientos muy fríos.</li>'+
      '<li><b>No se valora el efecto del viento sobre el consumo del motor.</b> El viento interviene únicamente para disparar el abanderamiento; el par adicional que opone sobre la estructura, y por tanto la corriente extra que exige al motor, no se modelan. El consumo simulado es en consecuencia un <b>límite inferior</b> en emplazamientos ventosos: la metodología de referencia declara 2 m/s como velocidad de viento de referencia para ese efecto, que aquí no se aplica. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
      '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
+     '<li><b>El cruce de viento con batería es de energía, no de fuerza.</b> Dice si la TCU llega con carga a cada episodio de viento y cuántas horas de viento la encuentran agotada; no dice si el motor puede con el par del viento ni si la estructura aguanta en la posición en que se quedó. El viento es la media de la serie, no la racha, y la reserva de maniobra se calcula sin viento: las dos cosas juegan a favor del resultado, así que se lee como un mínimo de episodios y un máximo de margen.</li>'+
      '<li>La suciedad y la nieve acumulada no penalizan la captación del panel de la TCU.</li>'+
      '<li>Los resultados dependen de la serie meteorológica empleada; para decisiones de compra conviene el barrido multianual del apartado 8.</li>'+
      '</ul>';
@@ -2142,7 +2340,12 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
          'carga '+fmt(S.chg)+' / consumo '+fmt(S.base+S.motor+S.heatWh))+
     chip('Cargas completas',fmt(S.cal.n),S.cal.worstGap>2*opts.fcDays?'warn':'ok',
          'peor racha sin calibrar: '+fmt(S.cal.worstGap)+' d (objetivo '+opts.fcDays+')')+
-    chip('Abanderamiento',fmt(S.hStow)+' h',S.hStow>0?'warn':'ok','viento ≥40/60 km/h (B2)')+
+    /* Antes este chip sólo sabía de viento. Con horas de viento y la TCU sin energía
+       no es un aviso: es lo peor que le puede pasar a la página, y va en rojo. */
+    (function(){var X=cruceVientoBateria(mng,prof.wh,opts.motorModel);
+      return X.hFueraMuerta>0
+        ? chip('Abanderamiento',fmt(S.hStow)+' h','bad',horasTxt(X.hFueraMuerta)+' de viento sin energía para abanderar')
+        : chip('Abanderamiento',fmt(S.hStow)+' h',S.hStow>0?'warn':'ok','viento ≥40/60 km/h (B2)');})()+
     /* El chip del calefactor se fue con el calefactor: ningún perfil lo lleva. */
     chip('Rainflow',fmt(S.rf.total)+' ciclos','', '≥30% DoD: '+fmt(S.rf.dod30)+' · ≥60%: '+fmt(S.rf.dod60))+
     chip('Vida estimada',fmt(S.cyc.years,1)+' años',S.cyc.years<10?'warn':'ok',
@@ -2178,17 +2381,18 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
     var mean=function(k){return vals.reduce(function(a,r){return a+r[k]},0)/vals.length};
     var std=function(k){var m=mean(k);return Math.sqrt(vals.reduce(function(a,r){return a+(r[k]-m)*(r[k]-m)},0)/vals.length)};
     var mi=mean('inact'), si=std('inact'), ml=mean('lost'), sl=std('lost');
-    var tb='<table class="cmp"><tr><th>Año</th><th>% no disponible</th><th>% prod. perdida</th><th>SOC mín</th><th>h SOC=0</th><th>h abanderado</th></tr>';
+    var tb='<table class="cmp"><tr><th>Año</th><th>% no disponible</th><th>% prod. perdida</th><th>SOC mín</th><th>h SOC=0</th><th>h abanderado</th><th>h viento sin energía</th></tr>';
     vals.forEach(function(r){
       var w=r.year===sweep.worst;
       tb+='<tr'+(w?' style="outline:1px solid var(--danger)"':'')+'><td>'+(w?'🏆 ':'')+r.year+'</td>'+
         '<td class="'+(r.inact>0.5?'bad':(r.inact>0.05?'wn':''))+'">'+fmt(r.inact,4)+'</td>'+
         '<td>'+fmt(r.lost,4)+'</td><td class="'+(r.socMin<0.15?'bad':'')+'">'+fmt(r.socMin*100)+'%</td>'+
-        '<td class="'+(r.hZero>0?'bad':'')+'">'+fmt(r.hZero)+'</td><td>'+fmt(r.hStow)+'</td></tr>';
+        '<td class="'+(r.hZero>0?'bad':'')+'">'+fmt(r.hZero)+'</td><td>'+fmt(r.hStow)+'</td>'+
+        '<td class="'+(r.hWindDead>0?'bad':'')+'">'+(r.hWindDead!=null?fmt(r.hWindDead):'—')+'</td></tr>';
     });
-    caidosUI.forEach(function(c){tb+='<tr><td>'+c.year+'</td><td class="wn" colspan="5">no disponible — '+c.motivo+'</td></tr>'});
-    tb+='<tr><td><b>Media (TMY, '+vals.length+' años)</b></td><td>'+fmt(mi,4)+'</td><td>'+fmt(ml,4)+'</td><td colspan="3"></td></tr>';
-    tb+='<tr><td><b>TMY + 2σ (97,5 %)</b></td><td>'+fmt(mi+2*si,4)+'</td><td>'+fmt(ml+2*sl,4)+'</td><td colspan="3"></td></tr>';
+    caidosUI.forEach(function(c){tb+='<tr><td>'+c.year+'</td><td class="wn" colspan="6">no disponible — '+c.motivo+'</td></tr>'});
+    tb+='<tr><td><b>Media (TMY, '+vals.length+' años)</b></td><td>'+fmt(mi,4)+'</td><td>'+fmt(ml,4)+'</td><td colspan="4"></td></tr>';
+    tb+='<tr><td><b>TMY + 2σ (97,5 %)</b></td><td>'+fmt(mi+2*si,4)+'</td><td>'+fmt(ml+2*sl,4)+'</td><td colspan="4"></td></tr>';
     tb+='</table>';
     cS.insertAdjacentHTML('beforeend',tb);
     out.appendChild(cS);
@@ -2361,6 +2565,9 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
     cc.insertAdjacentHTML('beforeend',th+'</table><div class="note">★ mejor valor de la fila. '+
       'La producción perdida cuenta sólo la causada por batería: el abanderamiento por viento es inevitable y no se imputa.</div>');
   }
+
+  /* — Viento × batería: el cruce que faltaba entre las horas abanderado y las horas a SOC 0 — */
+  out.appendChild(cardCruce(mng,ref,prof,opts,controls,sweep));
 
   /* — Comparativa con/sin estrategia — */
   var c5=document.createElement('div');c5.className='card';
