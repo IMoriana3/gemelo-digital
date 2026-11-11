@@ -742,7 +742,17 @@ const cruce = await pg.evaluate(async () => {
       .map((tr) => [tr.children[0].textContent.trim().slice(0, 4), tr.children[5].textContent.trim(), tr.children[5].className]),
     barridoFrase: /En\s+1 de 2\s+años simulados/.test(dp.body.textContent),
     ctlFila: [...dp.querySelectorAll('td')].some((x) => x.textContent.trim() === 'Horas de viento con la TCU sin energía'),
-    limite: /es de energía, no de fuerza/.test(dp.body.textContent) };
+    limite: /es de energía, no de fuerza/.test(dp.body.textContent),
+    /* LO MEDIDO VA ETIQUETADO. Todo nodo del informe que cite una cifra medida lleva la etiqueta dentro. */
+    etiquetas: [...dp.querySelectorAll('.tag-medido')].map((x) => x.textContent),
+    medidosSinEtiqueta: [...dp.querySelectorAll('div.note, li, p, td')].filter((x) => /7,95 Wh|469 J\/°|474 J\/°|1,52 Wh/.test(x.textContent) && !x.querySelector('.tag-medido')).length,
+    medidosConEtiqueta: [...dp.querySelectorAll('div.note, li')].filter((x) => /7,95 Wh|474 J\/°/.test(x.textContent) && x.querySelector('.tag-medido')).length };
+  const cm = document.querySelector('#cruceMedido');
+  R.medido = { M: MEDIDO_EL_BURGO, etiqueta: MEDIDO_EL_BURGO.etiqueta,
+    tarjeta: cm ? cm.textContent : '', tag: cm && cm.firstElementChild ? [cm.firstElementChild.className, cm.firstElementChild.textContent] : null,
+    reservaTxt: fmt(enPantalla ? cruceVientoBateria(rowsB, prof.wh, o.motorModel).reservaWh : 0, 1),
+    sueltos: [...document.querySelectorAll('#out .note, #out .sub, #out td, #out .chip')].filter((x) => /7,95 Wh|469 J\/°|1,52 Wh/.test(x.textContent) && !x.querySelector('.tag-medido')).length,
+    suelta: (() => { try { return /tag-medido/.test(notaMedido('x')) && notaMedido('x').indexOf(MEDIDO_EL_BURGO.etiqueta) < notaMedido('x').indexOf(' x'); } catch (e) { return false; } })() };
   window.LAST = null;
 
   /* l) EL BARRIDO DE PUNTA A PUNTA, sin red. Lo de arriba pinta la columna con una
@@ -886,6 +896,20 @@ ok(X.ltPantalla === X.ltConLaSuya && X.ltConLaSuya !== X.ltConLaDeSerie && X.ltW
 ok(!X.informe.err && X.informe.largo > 5000, 'el informe se genera con el cruce dentro', X.informe.err);
 ok(X.informe.filas.length === 12 && JSON.stringify(X.informe.filas) === JSON.stringify(X.informe.pantalla.map((f, i) => (i === 0 ? ['Cruce', 'Configuración evaluada', 'Sin gestión (referencia)'] : f))),
   'y sus once filas son las de la pantalla, cifra por cifra', JSON.stringify(X.informe.filas.slice(0, 4)) + ' vs ' + JSON.stringify(X.informe.pantalla.slice(0, 4)));
+/* — m) lo medido en planta va etiquetado — */
+const MD = X.medido;
+ok(/^Medido · El Burgo I · logs de NCU · 26\/05–04\/10\/2026$/.test(MD.etiqueta) && MD.M.programa === 'tools/logs_ncu/abanderamientos_reales.py',
+  'las cifras medidas dicen planta, fuente y periodo, y de qué programa salen', MD.etiqueta);
+ok([MD.M.mismoLado, MD.M.cruce, MD.M.vuelta, MD.M.lado, MD.M.socInicio].every((x) => x.n > 0) && MD.M.alarmas === 377 && MD.M.activaciones === 17075,
+  'y cada una lleva su n: una mediana sin n no es una medida', JSON.stringify(MD.M).slice(0, 200));
+ok(MD.tag && MD.tag[0] === 'tag-medido' && MD.tag[1] === MD.etiqueta && MD.suelta,
+  'en la tarjeta, lo medido EMPIEZA por la etiqueta', JSON.stringify(MD.tag));
+ok(/7,95 Wh de mediana y 10,1 Wh en el percentil 95/.test(MD.tarjeta) && /448 maniobras/.test(MD.tarjeta) && /1,52 Wh de mediana y 2,72 Wh/.test(MD.tarjeta) && /8716 maniobras/.test(MD.tarjeta)
+  && MD.tarjeta.indexOf(MD.reservaTxt + ' Wh según el modelo') > 0 && /95,4 %/.test(MD.tarjeta) && /menos del 32 % de SOC/.test(MD.tarjeta),
+  'y pone lo medido al lado de lo que el modelo supone: ' + MD.reservaTxt + ' Wh de reserva frente a 7,95 Wh de mediana en planta', MD.tarjeta.slice(0, 260));
+ok(MD.sueltos === 0, 'ninguna cifra medida anda suelta por la pantalla sin su etiqueta', String(MD.sueltos));
+ok(X.informe.etiquetas.length === 2 && X.informe.etiquetas.every((e) => e === MD.etiqueta) && X.informe.medidosConEtiqueta === 2 && X.informe.medidosSinEtiqueta === 0,
+  'ni por el informe: dos notas medidas, las dos etiquetadas, y ninguna cifra medida fuera de ellas', JSON.stringify([X.informe.etiquetas.length, X.informe.medidosConEtiqueta, X.informe.medidosSinEtiqueta]));
 /* — l) barrido de punta a punta — */
 const B = X.barrido, bA = B.lista.filter((x) => x.y === B.yA)[0], bB = B.lista.filter((x) => x.y === B.yA + 1)[0];
 ok(B.hay && B.pedidos.join() === [B.yA, B.yA + 1].join() && bA && bB,
