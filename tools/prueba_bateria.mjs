@@ -609,6 +609,323 @@ ok(mapa.clase.join() === 'bad,wn,ok',
 ok(mapa.strPans.length === 1 && mapa.strPans[0] === 60 && mapa.strFilas >= 5,
   'en STRING el mapa no tiene eje de panel: una columna, la del regulador', JSON.stringify(mapa.strPans));
 
+/* ── VIENTO × BATERÍA: ¿PUEDE ABANDERAR CUANDO HACE FALTA? (2026-11-11) ──
+   La página abanderaba por viento y dejaba clavada la TCU agotada, y contaba por
+   separado las horas abanderado y las horas a SOC 0. Lo que no contaba nadie es
+   cuántas horas de viento coinciden con una TCU que no puede moverse.
+
+   Las series van HECHAS A MANO, con la respuesta sabida antes de correr: noche
+   cerrada y `tMin` imposible (no carga nunca), el seguimiento impuesto por `phi`
+   y el lado del sol por `az`. Así cada cifra se puede escribir en el margen:
+   un pulso de tres horas son tres horas.
+
+   LO QUE ESTE BLOQUE NO COMPRUEBA: que la reserva de maniobra sea la real (es
+   la del modelo de motor, sin viento), que el viento medio de la serie se
+   parezca a la racha que abandera en planta, ni que la regla «la TCU agotada se
+   queda donde estaba» sea la del firmware. Comprueba que el cruce CUENTA BIEN
+   lo que la simulación ya decidió. */
+const cruce = await pg.evaluate(async () => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const prof = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const o = { motorModel: 'curva', winter: false, strategy: false, socTgt: 100, socCrit: 0, fcDays: 5, tMin: 99, poaMin: 0, mountTilt: null };
+  const serie = (n, dtMin, f) => Array.from({ length: n }, (_, i) => Object.assign(
+    { t: new Date(Date.UTC(2024, 0, 10, 0, 0) + i * dtMin * 60000), ghi: 0, dhi: 0, temp: 10, wind: 0, phi: 0, el: -0.3, az: -1 }, f(i)));
+  const corre = (m, soc0) => { const rows = simulate(m, prof, loc, soc0, o); return { rows, X: cruceVientoBateria(rows, prof.wh, 'curva') }; };
+  const total = (i) => (i >= 10 && i <= 12 ? { wind: 20 } : {});       /* 72 km/h: bandera total */
+  const parcial = (i) => (i >= 10 && i <= 12 ? { wind: 12 } : {});     /* 43 km/h: sector parcial */
+  const R = { cap: prof.wh, slew: SLEW_DPS, t1: WIND_T1, t2: WIND_T2 };
+
+  /* la reserva: formas cerradas de los modelos que las tienen */
+  R.eFactiun = energiaManiobraWh(-55, 55, 'factiun'); R.k0 = FISICA.e.K0; R.k1 = FISICA.e.K1;
+  R.e2500 = energiaManiobraWh(-55, 55, 2500); R.vNom = FISICA.vNom;
+  R.eCurva = energiaManiobraWh(-55, 55, 'curva');
+  R.eCurvaMitades = energiaManiobraWh(-55, 0, 'curva') + energiaManiobraWh(0, 55, 'curva');
+  R.eCurvaIda = energiaManiobraWh(0, 55, 'curva'); R.eCurvaVuelta = energiaManiobraWh(0, -55, 'curva');
+  R.eNada = energiaManiobraWh(30, 30, 'curva');
+  R.ePuntoMedio = FISICA.motorW(0) * (110 / SLEW_DPS / 3600);          /* lo que saldría sin integrar */
+  R.eCanonBifila = FISICA.motorManiobraWh(110, 'bifila');              /* el ajuste de 8 barridos reales */
+
+  /* a) batería sana, pulso de viento total */
+  const a = corre(serie(24, 60, total), 0.5);
+  R.a = a.X; R.aSocAntes = a.rows[9].soc; R.aSocDespues = a.rows[10].soc;
+  R.aCoherente = a.rows.every((r) => r.stow === (r.stowLvl > 0) && (r.stowLvl > 0 ? r.pos === r.stowObj : r.stowObj === null) && r.dead === false);
+  R.aCola = a.rows[13].stowLvl > 0 && a.rows[13].wind < WIND_T1;       /* la hora de histéresis: abanderado sin viento */
+  /* b) agotada en plano, y una cuarta hora de viento entre los dos umbrales */
+  R.b = corre(serie(24, 60, (i) => (i === 13 ? { wind: 12 } : total(i))), 0).X;
+  /* c) agotada a +55° (como en defensa) y la bandera pide el otro lado · c2) pide ese mismo lado */
+  R.c = corre(serie(24, 60, (i) => Object.assign({ phi: 55 }, total(i))), 0).X;
+  R.c2 = corre(serie(24, 60, (i) => Object.assign({ phi: 55, az: 1 }, total(i))), 0).X;
+  /* d) parcial: viva en el sector · d2) agotada DENTRO del sector, en otro ángulo · d3) agotada fuera */
+  R.d = corre(serie(24, 60, (i) => Object.assign({ phi: 42, az: 1 }, parcial(i))), 0.5).X;
+  R.d2 = corre(serie(24, 60, (i) => Object.assign({ phi: i < 10 ? 50 : 35, az: 1 }, parcial(i))), 0).X;
+  R.d3 = corre(serie(24, 60, (i) => Object.assign({ phi: 10, az: 1 }, parcial(i))), 0).X;
+  /* e) paso de 1 min: el viaje se ve */
+  const e = corre(serie(120, 1, (i) => (i >= 30 && i <= 59 ? { wind: 20 } : {})), 0.5);
+  R.e = e.X; R.ePos = e.rows.slice(30, 37).map((r) => Math.round(r.pos * 10) / 10);
+  /* f) viva, pero con menos energía de la que cuesta su maniobra */
+  const f = corre(serie(24, 60, (i) => (i >= 2 && i <= 4 ? { wind: 20 } : {})), 0.02);
+  R.f = f.X; R.fSocAntes = f.rows[1].soc; R.fPos = f.rows[2].pos; R.fSoc = f.rows[2].soc; R.fMotor = f.rows[2].motor;
+  R.fPide = energiaManiobraWh(0, -55, 'curva');
+  /* g) dos episodios separados, y uno que ya está en marcha en la primera fila */
+  R.g = corre(serie(48, 60, (i) => ((i <= 1 || (i >= 20 && i <= 21) || (i >= 40 && i <= 41)) ? { wind: 20 } : {})), 0.5).X;
+  /* h) sin viento no hay nada que cruzar */
+  R.h = corre(serie(24, 60, () => ({})), 0).X;
+
+  /* i) contra el resumen que ya había: un año sintético, las cinco columnas */
+  const base = { motorModel: 'curva', winter: false, strategy: true, socTgt: 80, socCrit: 30, fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const anio = synthMeteo(loc, 365, 1, 55);
+  const ctl = runControls(anio, prof, loc, null, base);
+  R.anio = ctl.map((x) => { const X = cruceVientoBateria(x.rows, x.prof.wh, 'curva');
+    return { k: x.c.k, hStow: x.S.hStow, hZero: x.S.hZero, hViento: X.hViento, hT2: X.hVientoT2, muerta: X.hFueraMuerta, bajo: X.hMuertaBajoAngulo,
+      ep: X.episodios, sinE: X.epSinEnergia, reservaSoc: X.reservaSoc, cap: x.prof.wh,
+      aMano: x.rows.filter((r) => r.wind >= WIND_T1 && r.soc <= 0.001 && r.dead).length }; });
+
+  /* j) PANTALLA. Se pinta de verdad, con la agotada como configuración evaluada. */
+  const mB = serie(24, 60, (i) => (i === 13 ? { wind: 12 } : total(i)));
+  const rowsB = simulate(mB, prof, loc, 0, o), rowsA = simulate(mB, prof, loc, 0.5, o);
+  const lee = () => {
+    const c = document.querySelectorAll('#cruce');
+    const t = document.querySelector('#cruceTbl');
+    const filas = t ? [...t.querySelectorAll('tr')].map((tr) => [...tr.children].map((td) => td.textContent.trim())) : [];
+    const clases = t ? [...t.querySelectorAll('tr')].map((tr) => [...tr.children].map((td) => td.className)) : [];
+    const chipAb = [...document.querySelectorAll('.chip')].filter((x) => /Abanderamiento/.test(x.textContent))[0];
+    return { n: c.length, sub: c[0] ? c[0].querySelector('.sub').textContent : '', filas, clases,
+      chip: chipAb ? { cls: chipAb.querySelector('.v').className, txt: chipAb.textContent } : null,
+      peor: [...document.querySelectorAll('#cruce .cruce-peor')].map((x) => x.textContent),
+      limites: (document.querySelector('#cruceLimites') || { textContent: '' }).textContent,
+      barrido: (document.querySelector('#cruceBarrido') || { textContent: '' }).textContent,
+      thBarrido: [...document.querySelectorAll('#out table.cmp th')].map((x) => x.textContent).filter((x) => /viento sin energía/.test(x)).length };
+  };
+  window.LAST = null;
+  render(mB, rowsB, rowsA, prof, loc, o, null, null, null);
+  R.pAgotada = lee();
+  render(mB, rowsA, rowsB, prof, loc, o, null, null, null);
+  R.pSana = lee();
+  /* paso fino: la fila del tránsito lleva cifra y el aviso desaparece */
+  const mE = serie(120, 1, (i) => (i >= 30 && i <= 59 ? { wind: 20 } : {}));
+  const rowsE = simulate(mE, prof, loc, 0.5, o);
+  render(mE, rowsE, rowsE, prof, loc, o, null, null, null);
+  R.pFino = lee();
+  /* con comparativa y con barrido: las columnas son las de la comparativa, y la frecuencia se dice */
+  const corto = synthMeteo(loc, 12, 350, 60);
+  const ctlC = runControls(corto, prof, loc, null, base);
+  const sw = { list: [{ year: 2013, inact: 0, lost: 0, socMin: 0.5, hZero: 0, hStow: 3, hWind: 3, hWindDead: 0, epNoE: 0 },
+                      { year: 2014, inact: 1, lost: 0, socMin: 0, hZero: 9, hStow: 5, hWind: 5, hWindDead: 4, epNoE: 1 }], worst: 2014, caidos: [], pedidos: 2 };
+  render(corto, ctlC[1].rows, ctlC[0].rows, prof, loc, base, sw, null, ctlC);
+  R.pCtl = lee(); R.ctlNombres = ctlC.map((x) => x.c.n);
+  /* la columna -LT, en pantalla, con SU batería: el margen sale de 166,4 Wh y no de 153,6 */
+  const colLTc = ctlC.filter((x) => x.c.k === 'lt')[0], iLT = ctlC.indexOf(colLTc);
+  const margen = filasCruce()[10][1];
+  R.ltPantalla = R.pCtl.filas[11][3 + iLT];
+  R.ltConLaSuya = margen(cruceVientoBateria(colLTc.rows, colLTc.prof.wh, 'curva')).v;
+  R.ltConLaDeSerie = margen(cruceVientoBateria(colLTc.rows, prof.wh, 'curva')).v;
+  R.ltWh = [colLTc.prof.wh, prof.wh];
+
+  /* k) INFORME: dice lo mismo que la pantalla, con las mismas filas */
+  window.LAST = { meteo: mB, mng: rowsB, ref: rowsA, prof, loc, opts: o, soc0: 0, socModo: 'panel', sweep: sw, controls: ctlC };
+  render(mB, rowsB, rowsA, prof, loc, o, sw, null, ctlC);
+  const enPantalla = lee();
+  const abre = window.open; let doc = '';
+  window.open = () => ({ document: { write: (d) => { doc += d; }, close: () => {} } });
+  let errInforme = '';
+  try { buildReport(); } catch (err) { errInforme = String(err); }
+  window.open = abre;
+  const dp = new DOMParser().parseFromString(doc, 'text/html');
+  const h3 = [...dp.querySelectorAll('h3')].filter((x) => /batería baja/.test(x.textContent))[0];
+  let tabla = h3; while (tabla && tabla.tagName !== 'TABLE') tabla = tabla.nextElementSibling;
+  const filasInf = tabla ? [...tabla.querySelectorAll('tr')].map((tr) => [...tr.children].map((td) => td.textContent.trim())) : [];
+  R.informe = { err: errInforme, largo: doc.length, filas: filasInf,
+    pantalla: enPantalla.filas.map((f) => f.slice(0, 3)),
+    barridoCol: [...dp.querySelectorAll('th')].some((x) => /h de viento sin energía/.test(x.textContent)),
+    /* y la cifra de cada año, no sólo el rótulo: un mutante que dejaba la columna a rayas no mataba nada */
+    barridoCeldas: [...dp.querySelectorAll('tr')].filter((tr) => /^201[34]/.test(tr.children[0].textContent.trim()) && tr.children.length === 6)
+      .map((tr) => [tr.children[0].textContent.trim().slice(0, 4), tr.children[5].textContent.trim(), tr.children[5].className]),
+    barridoFrase: /En\s+1 de 2\s+años simulados/.test(dp.body.textContent),
+    ctlFila: [...dp.querySelectorAll('td')].some((x) => x.textContent.trim() === 'Horas de viento con la TCU sin energía'),
+    limite: /es de energía, no de fuerza/.test(dp.body.textContent),
+    /* LO MEDIDO VA ETIQUETADO. Todo nodo del informe que cite una cifra medida lleva la etiqueta dentro. */
+    etiquetas: [...dp.querySelectorAll('.tag-medido')].map((x) => x.textContent),
+    medidosSinEtiqueta: [...dp.querySelectorAll('div.note, li, p, td')].filter((x) => /7,95 Wh|469 J\/°|474 J\/°|1,52 Wh/.test(x.textContent) && !x.querySelector('.tag-medido')).length,
+    medidosConEtiqueta: [...dp.querySelectorAll('div.note, li')].filter((x) => /7,95 Wh|474 J\/°/.test(x.textContent) && x.querySelector('.tag-medido')).length };
+  const cm = document.querySelector('#cruceMedido');
+  R.medido = { M: MEDIDO_EL_BURGO, etiqueta: MEDIDO_EL_BURGO.etiqueta,
+    tarjeta: cm ? cm.textContent : '', tag: cm && cm.firstElementChild ? [cm.firstElementChild.className, cm.firstElementChild.textContent] : null,
+    reservaTxt: fmt(enPantalla ? cruceVientoBateria(rowsB, prof.wh, o.motorModel).reservaWh : 0, 1),
+    sueltos: [...document.querySelectorAll('#out .note, #out .sub, #out td, #out .chip')].filter((x) => /7,95 Wh|469 J\/°|1,52 Wh/.test(x.textContent) && !x.querySelector('.tag-medido')).length,
+    suelta: (() => { try { return /tag-medido/.test(notaMedido('x')) && notaMedido('x').indexOf(MEDIDO_EL_BURGO.etiqueta) < notaMedido('x').indexOf(' x'); } catch (e) { return false; } })() };
+  window.LAST = null;
+
+  /* l) EL BARRIDO DE PUNTA A PUNTA, sin red. Lo de arriba pinta la columna con una
+        lista fabricada: prueba la tabla y NO que el manejador de «Simular» rellene la
+        cifra. Se conduce la página con la descarga sustituida por dos años hechos a
+        mano —noche y −30 °C todo el año, así que la batería se agota con cualquier
+        lógica— y sólo el primero tiene viento: doce pulsos de 3 h, uno al mes. */
+  const yEnd = new Date().getFullYear() - 1, yA = yEnd - 1;
+  const fetchReal = window.fetch; const pedidos = [];
+  window.fetch = (u) => {
+    const y = +(/start_date=(\d{4})/.exec(String(u)) || [])[1]; pedidos.push(y);
+    const time = [], cero = [], temp = [], wind = [];
+    for (let d = new Date(Date.UTC(y, 0, 1)); d.getUTCFullYear() === y; d = new Date(+d + 3600e3)) {
+      time.push(d.toISOString().slice(0, 16)); cero.push(0); temp.push(-30);
+      wind.push(y === yA && d.getUTCDate() === 20 && d.getUTCHours() >= 10 && d.getUTCHours() <= 12 ? 20 : 0);
+    }
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ hourly: { time, shortwave_radiation: cero, diffuse_radiation: cero, temperature_2m: temp, windspeed_10m: wind } }) });
+  };
+  $('src').value = 'archive'; if ($('src').onchange) $('src').onchange();
+  $('year').value = 'worst'; if ($('year').onchange) $('year').onchange();
+  $('sweepFrom').value = String(yA);
+  $('cmp').checked = false;
+  $('run').click();
+  for (let i = 0; i < 600 && !(window.LAST && LAST.sweep); i++) await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 200));
+  window.fetch = fetchReal;
+  const tSw = [...document.querySelectorAll('#out table.cmp')].filter((t) => /h viento sin energía/.test(t.textContent))[0];
+  R.barrido = { yA, pedidos, hay: !!(window.LAST && LAST.sweep),
+    lista: window.LAST && LAST.sweep ? LAST.sweep.list.map((x) => ({ y: x.year, hWind: x.hWind, hWindDead: x.hWindDead, epNoE: x.epNoE, hZero: x.hZero })) : [],
+    frase: (document.querySelector('#cruceBarrido') || { textContent: '' }).textContent,
+    celdas: tSw ? [...tSw.querySelectorAll('tr')].slice(1, 3).map((tr) => { const td = tr.children[tr.children.length - 1]; return [tr.children[0].textContent.replace(/[^0-9]/g, ''), td.textContent.trim(), td.className]; }) : [] };
+  return R;
+});
+const cerca = (a, b, tol) => Math.abs(a - b) <= (tol == null ? 1e-9 : tol);
+const X = cruce;
+/* — la reserva — */
+ok(cerca(X.eFactiun, 110 * X.k0 + X.k1 * 55 * 55, 1e-9),
+  'viento×batería: la maniobra de tope a tope con el ajuste lineal da su forma cerrada, 110·K0 + K1·55² = ' + X.eFactiun.toFixed(3) + ' Wh', String(X.eFactiun));
+ok(cerca(X.e2500, 2.5 * X.vNom * (110 / X.slew / 3600), 1e-9),
+  'y con consumo medio de 2500 mA, I·V·t del viaje = ' + X.e2500.toFixed(3) + ' Wh', String(X.e2500));
+ok(cerca(X.eCurva, X.eCurvaMitades, 1e-9) && cerca(X.eCurvaIda, X.eCurvaVuelta, 1e-12) && X.eNada === 0,
+  'es aditiva, simétrica y no cobra una maniobra que no ocurre', [X.eCurva, X.eCurvaMitades, X.eCurvaIda, X.eCurvaVuelta, X.eNada].join(' · '));
+ok(X.eCurva > X.ePuntoMedio * 1.3,
+  'y se INTEGRA: con la curva medida, cobrar el viaje al ángulo del punto medio (0°) daría ' + X.ePuntoMedio.toFixed(2) + ' Wh en vez de ' + X.eCurva.toFixed(2),
+  X.eCurva + ' vs ' + X.ePuntoMedio);
+ok(Math.abs(X.eCurva - X.eCanonBifila) / X.eCanonBifila < 0.05,
+  'cuadra con el ajuste de barridos reales del espejo (bífila, 110°: ' + X.eCanonBifila.toFixed(2) + ' Wh) a menos del 5 %', X.eCurva + ' vs ' + X.eCanonBifila);
+ok(cerca(X.a.reservaWh, X.eCurva) && cerca(X.a.reservaSoc, X.eCurva / X.cap),
+  'la reserva del cruce ES esa maniobra: ' + X.eCurva.toFixed(2) + ' Wh, el ' + (100 * X.eCurva / X.cap).toFixed(1) + ' % de la batería');
+/* — a) sana — */
+ok(X.a.hViento === 3 && X.a.hVientoT2 === 3 && X.aCola,
+  'batería sana, pulso de 3 h: 3 h de viento — la hora de histéresis sigue abanderada y NO cuenta como viento', JSON.stringify([X.a.hViento, X.a.hVientoT2, X.aCola]));
+ok(X.a.hFuera === 0 && X.a.hFueraMuerta === 0 && X.a.epFuera === 0 && X.a.vientoMaxFuera === null,
+  'y el eje no está fuera de la bandera ni una', JSON.stringify(X.a));
+ok(X.a.episodios === 1 && X.a.epMuertaAlEmpezar === 0 && X.a.epSinEnergia === 0 && X.a.epBajoReserva === 0,
+  'un episodio, y llega con energía', JSON.stringify(X.a));
+ok(cerca(X.a.socMinAlEmpezar, X.aSocAntes) && !cerca(X.aSocAntes, X.aSocDespues, 1e-3) && cerca(X.a.margenMinWh, X.aSocAntes * X.cap - X.eCurva),
+  'el SOC del episodio es el de ANTES de la maniobra (' + (100 * X.aSocAntes).toFixed(2) + ' %), no el de después (' + (100 * X.aSocDespues).toFixed(2) + ' %), y el margen sale de él',
+  JSON.stringify([X.a.socMinAlEmpezar, X.aSocAntes, X.aSocDespues, X.a.margenMinWh]));
+ok(X.a.peorEpisodio.desde === 0 && X.a.peorEpisodio.hasta === -55 && cerca(X.a.peorEpisodio.pideWh, X.eCurvaIda),
+  'y sabe qué maniobra le toca: de 0° a −55°, media travesía', JSON.stringify(X.a.peorEpisodio));
+ok(X.aCoherente, 'las filas dicen lo mismo por los dos caminos: `stow` ⇔ nivel > 0, y con la TCU viva el eje está donde la bandera pide');
+/* — b) agotada en plano — */
+ok(X.b.hViento === 4 && X.b.hVientoT2 === 3,
+  'agotada: 4 h de viento, 3 de ellas sobre el segundo umbral', JSON.stringify([X.b.hViento, X.b.hVientoT2]));
+ok(X.b.hFuera === 4 && X.b.hFueraMuerta === 4 && X.b.hMuertaBajoAngulo === 4 && X.b.hFueraTransito === 0,
+  'las 4 con el eje fuera de la bandera, las 4 por TCU sin energía y las 4 en plano', JSON.stringify(X.b));
+ok(X.b.episodios === 1 && X.b.epMuertaAlEmpezar === 1 && X.b.epSinEnergia === 1 && X.b.epBajoReserva === 1 && X.b.epFuera === 1,
+  'un episodio, que empieza sin energía y no puede con su maniobra', JSON.stringify(X.b));
+ok(X.b.socMinAlEmpezar === 0 && cerca(X.b.margenMinWh, -X.eCurva),
+  'y el margen es la reserva entera en negativo');
+ok(X.b.vientoMaxFuera && X.b.vientoMaxFuera.viento === 20 && X.b.vientoMaxFuera.pos === 0 && X.b.vientoMaxFuera.pide === -55 && X.b.vientoMaxFuera.muerta === true
+  && new Date(X.b.vientoMaxFuera.t).toISOString() === '2024-01-10T10:00:00.000Z',
+  'el peor momento tiene fecha y posición: 72 km/h a las 10 h, eje a 0° y la bandera pidiendo −55°', JSON.stringify(X.b.vientoMaxFuera));
+/* — c) el lado — */
+ok(X.c.hFueraMuerta === 3 && X.c.hMuertaBajoAngulo === 0,
+  'agotada a +55° y la bandera pide −55°: fuera de la bandera 3 h, pero inclinada — la segunda cifra se queda en 0', JSON.stringify([X.c.hFueraMuerta, X.c.hMuertaBajoAngulo]));
+ok(cerca(X.c.peorEpisodio.pideWh, X.eCurva),
+  'y su maniobra es la peor posible, la travesía entera');
+ok(X.c2.hFuera === 0 && X.c2.epMuertaAlEmpezar === 1 && X.c2.epSinEnergia === 0 && X.c2.epBajoReserva === 1,
+  'si la bandera pide el lado en que murió, está cubierta de casualidad: 0 h fuera, pero el episodio empieza sin energía y se dice', JSON.stringify(X.c2));
+/* — d) parcial — */
+ok(X.d.hViento === 3 && X.d.hVientoT2 === 0 && X.d.hFuera === 0,
+  'viento entre umbrales: sector parcial, cubierto');
+ok(X.d2.hFuera === 0 && X.d2.epMuertaAlEmpezar === 1,
+  'el sector ES la bandera: agotada a 50° cuando el seguimiento pide 35° sigue dentro, y no cuenta como fuera', JSON.stringify(X.d2));
+ok(X.d3.hFuera === 3 && X.d3.hMuertaBajoAngulo === 3,
+  'agotada a 10° con el sector empezando en 30°: fuera las 3 h', JSON.stringify(X.d3));
+/* — e) paso fino — */
+ok(X.ePos.join() === '-10.2,-20.4,-30.6,-40.8,-51,-55,-55',
+  'a paso de 1 min el eje tarda seis pasos en llegar a −55°', X.ePos.join());
+ok(X.e.veTransito === true && cerca(X.e.hFueraTransito, 5 / 60, 1e-9) && X.e.hFueraMuerta === 0 && cerca(X.e.hFuera, 5 / 60, 1e-9) && cerca(X.e.hViento, 0.5, 1e-9),
+  'y los cinco minutos de camino son tránsito, no batería (a −51° todavía no cubre: la tolerancia es 1°, no 5°)', JSON.stringify(X.e));
+ok(X.a.veTransito === false,
+  'a paso de 60 min el cruce declara que el tránsito no se puede ver');
+/* — f) a crédito — */
+ok(X.f.epSinEnergia === 1 && X.f.epMuertaAlEmpezar === 0 && X.f.epBajoReserva === 1 && X.fSocAntes > 0.001 && X.fSocAntes * X.cap < X.fPide,
+  'viva pero con ' + (X.fSocAntes * X.cap).toFixed(2) + ' Wh para una maniobra de ' + X.fPide.toFixed(2) + ' Wh: el episodio sale como «sin energía para su maniobra»', JSON.stringify(X.f));
+ok(X.fPos === -55 && X.fSoc === 0 && X.f.hFuera === 0,
+  'y es el episodio quien lo delata: a paso horario la simulación da la maniobra por hecha (eje a −55°, SOC a 0) y las horas fuera salen a 0',
+  JSON.stringify([X.fPos, X.fSoc, X.fMotor, X.f.hFuera]));
+/* — g) h) recuento — */
+ok(X.g.episodios === 3 && X.g.hViento === 6,
+  'los episodios se cuentan por tramo, no por hora: tres pulsos de 2 h son 3 episodios y 6 h (uno ya en marcha en la primera fila)', JSON.stringify([X.g.episodios, X.g.hViento]));
+ok(X.h.hViento === 0 && X.h.episodios === 0 && X.h.socMinAlEmpezar === null && X.h.margenMinWh === null && X.h.hFueraMuerta === 0,
+  'sin viento no hay cruce: ni episodios ni SOC de episodio, aunque la batería esté agotada todo el periodo', JSON.stringify(X.h));
+/* — i) contra el resumen — */
+ok(X.anio.length === 5 && X.anio.every((c) => c.hViento > 0 && c.hViento <= c.hStow && c.hT2 <= c.hViento && c.muerta <= c.hZero && c.bajo <= c.muerta),
+  'en un año entero las cifras encajan con el resumen que ya había: viento ≤ abanderado, sin energía ≤ horas a SOC 0', JSON.stringify(X.anio));
+ok(X.anio.every((c) => c.muerta === c.aMano || c.muerta <= c.aMano),
+  'y las horas sin energía nunca superan las que salen contando a mano viento y batería agotada', JSON.stringify(X.anio.map((c) => [c.muerta, c.aMano])));
+ok(X.anio.filter((c) => c.k === 'lt')[0].reservaSoc < X.anio.filter((c) => c.k === 'std')[0].reservaSoc,
+  'la columna -LT se cruza con SU batería: la misma maniobra es menos porcentaje de 166,4 Wh que de 153,6');
+/* — j) pantalla — */
+const pA = X.pAgotada, pS = X.pSana;
+ok(pA.n === 1 && pA.filas.length === 12 && pA.filas[0].length === 3,
+  'en pantalla hay UNA tarjeta, con once filas y dos columnas cuando no hay comparativa', JSON.stringify([pA.n, pA.filas.length, pA.filas[0]]));
+ok(/4 h de viento con la TCU sin energía/.test(pA.sub) && pA.filas[3][1] === '4 h' && pA.clases[3][1] === 'bad' && pA.filas[3][2] === '0 h' && pA.clases[3][2] === 'ok',
+  'el titular y la fila dicen las 4 h, en rojo la agotada y en verde la sana', pA.sub + ' · ' + JSON.stringify(pA.filas[3]));
+ok(pA.chip && /bad/.test(pA.chip.cls) && /sin energía para abanderar/.test(pA.chip.txt),
+  'y la cifra de abanderamiento de arriba deja de ser ciega a la batería: en rojo y con el motivo', JSON.stringify(pA.chip));
+ok(pS.chip && !/bad/.test(pS.chip.cls) && /B2/.test(pS.chip.txt) && /llega con energía/.test(pS.sub) && /No todas las columnas/.test(pS.sub),
+  'con la sana como evaluada, la cifra vuelve a su texto y el titular avisa de que la otra columna no llega', JSON.stringify([pS.chip, pS.sub]));
+ok(pA.peor.length === 1 && /72 km\/h/.test(pA.peor[0]) && /10 ene 10h/.test(pA.peor[0]) && /0,0°/.test(pA.peor[0]) && /-55°/.test(pA.peor[0]),
+  'el peor momento se dice con viento, fecha, posición y lo que pedía la bandera', pA.peor.join(' | '));
+ok(/sin viento/.test(pA.limites) && /no la racha/.test(pA.limites) && /9,2 Wh/.test(pA.limites) && /6,0 %/.test(pA.limites) && /subtensión/.test(pA.limites),
+  'y los límites van escritos donde se lee la cifra: sin viento, viento medio y no racha, y la reserva con su número', pA.limites.slice(0, 200));
+ok(pA.filas[5][1] === '—' && /no se puede ver/.test(pA.limites),
+  'a paso horario la fila del tránsito lleva una raya y no un cero, y se explica');
+ok(X.pFino.filas[5][1] === '0,08 h' && X.pFino.clases[5][1] === 'wn' && !/no se puede ver/.test(X.pFino.limites),
+  'a paso de 1 min lleva su cifra (0,08 h) y el aviso desaparece', JSON.stringify(X.pFino.filas[5]));
+ok(X.pCtl.filas[0].length === 3 + X.ctlNombres.length && X.ctlNombres.every((n) => X.pCtl.filas[0].indexOf(n) >= 0),
+  'con la comparativa, cada sistema de control tiene su columna', JSON.stringify(X.pCtl.filas[0]));
+ok(/1 de 2/.test(X.pCtl.barrido) && /2014/.test(X.pCtl.barrido) && /no es una probabilidad de proyecto/.test(X.pCtl.barrido) && X.pCtl.thBarrido === 1,
+  'y con el barrido, la frecuencia entre años se dice (1 de 2, el peor 2014) y la tabla del barrido gana su columna', X.pCtl.barrido);
+ok(pA.barrido === '', 'sin barrido no se inventa frecuencia');
+ok(X.ltPantalla === X.ltConLaSuya && X.ltConLaSuya !== X.ltConLaDeSerie && X.ltWh[0] !== X.ltWh[1],
+  'la columna -LT se cruza en pantalla con SU batería (' + X.ltWh[0] + ' Wh): su margen es ' + X.ltPantalla + ' y no ' + X.ltConLaDeSerie,
+  JSON.stringify([X.ltPantalla, X.ltConLaSuya, X.ltConLaDeSerie]));
+/* — k) informe — */
+ok(!X.informe.err && X.informe.largo > 5000, 'el informe se genera con el cruce dentro', X.informe.err);
+ok(X.informe.filas.length === 12 && JSON.stringify(X.informe.filas) === JSON.stringify(X.informe.pantalla.map((f, i) => (i === 0 ? ['Cruce', 'Configuración evaluada', 'Sin gestión (referencia)'] : f))),
+  'y sus once filas son las de la pantalla, cifra por cifra', JSON.stringify(X.informe.filas.slice(0, 4)) + ' vs ' + JSON.stringify(X.informe.pantalla.slice(0, 4)));
+/* — m) lo medido en planta va etiquetado — */
+const MD = X.medido;
+ok(/^Medido · El Burgo I · logs de NCU · 26\/05–04\/10\/2026$/.test(MD.etiqueta) && MD.M.programa === 'tools/logs_ncu/abanderamientos_reales.py',
+  'las cifras medidas dicen planta, fuente y periodo, y de qué programa salen', MD.etiqueta);
+ok([MD.M.mismoLado, MD.M.cruce, MD.M.vuelta, MD.M.lado, MD.M.socInicio].every((x) => x.n > 0) && MD.M.alarmas === 377 && MD.M.activaciones === 17075,
+  'y cada una lleva su n: una mediana sin n no es una medida', JSON.stringify(MD.M).slice(0, 200));
+ok(MD.tag && MD.tag[0] === 'tag-medido' && MD.tag[1] === MD.etiqueta && MD.suelta,
+  'en la tarjeta, lo medido EMPIEZA por la etiqueta', JSON.stringify(MD.tag));
+ok(/7,95 Wh de mediana y 10,1 Wh en el percentil 95/.test(MD.tarjeta) && /448 maniobras/.test(MD.tarjeta) && /1,52 Wh de mediana y 2,72 Wh/.test(MD.tarjeta) && /8716 maniobras/.test(MD.tarjeta)
+  && MD.tarjeta.indexOf(MD.reservaTxt + ' Wh según el modelo') > 0 && /95,4 %/.test(MD.tarjeta) && /menos del 32 % de SOC/.test(MD.tarjeta),
+  'y pone lo medido al lado de lo que el modelo supone: ' + MD.reservaTxt + ' Wh de reserva frente a 7,95 Wh de mediana en planta', MD.tarjeta.slice(0, 260));
+ok(MD.sueltos === 0, 'ninguna cifra medida anda suelta por la pantalla sin su etiqueta', String(MD.sueltos));
+ok(X.informe.etiquetas.length === 2 && X.informe.etiquetas.every((e) => e === MD.etiqueta) && X.informe.medidosConEtiqueta === 2 && X.informe.medidosSinEtiqueta === 0,
+  'ni por el informe: dos notas medidas, las dos etiquetadas, y ninguna cifra medida fuera de ellas', JSON.stringify([X.informe.etiquetas.length, X.informe.medidosConEtiqueta, X.informe.medidosSinEtiqueta]));
+/* — l) barrido de punta a punta — */
+const B = X.barrido, bA = B.lista.filter((x) => x.y === B.yA)[0], bB = B.lista.filter((x) => x.y === B.yA + 1)[0];
+ok(B.hay && B.pedidos.join() === [B.yA, B.yA + 1].join() && bA && bB,
+  'el barrido corre de punta a punta sin red, con dos años hechos a mano', JSON.stringify(B).slice(0, 300));
+ok(bA && bA.hWind === 36 && bA.hWindDead === 36 && bA.epNoE === 12 && bB && bB.hWind === 0 && bB.hWindDead === 0 && bB.epNoE === 0,
+  'y es el manejador de «Simular» quien rellena la cifra de cada año: 12 pulsos de 3 h con la batería agotada son 36 h; el año sin viento, 0', JSON.stringify(B.lista));
+ok(/1 de 2/.test(B.frase) && new RegExp('hasta 36 h en ' + B.yA).test(B.frase),
+  'la tarjeta lo resume como frecuencia: 1 de 2 años, hasta 36 h en ' + B.yA, B.frase);
+ok(B.celdas.length === 2 && B.celdas.filter((c) => +c[0] === B.yA)[0][1] === '36' && /bad/.test(B.celdas.filter((c) => +c[0] === B.yA)[0][2])
+  && B.celdas.filter((c) => +c[0] === B.yA + 1)[0][1] === '0' && !/bad/.test(B.celdas.filter((c) => +c[0] === B.yA + 1)[0][2]),
+  'y la tabla del barrido lo lleva en su columna, en rojo el año que lo tiene', JSON.stringify(B.celdas));
+ok(JSON.stringify(X.informe.barridoCeldas) === JSON.stringify([['2013', '0', ''], ['2014', '4', 'bad']]),
+  'en el informe, la tabla año a año lleva la cifra de cada año: 0 en 2013 y 4 h, en rojo, en 2014', JSON.stringify(X.informe.barridoCeldas));
+ok(X.informe.barridoCol && X.informe.barridoFrase && X.informe.ctlFila && X.informe.limite,
+  'lleva la columna del barrido con su frase, la fila en la comparativa de controles y el límite declarado', JSON.stringify(X.informe).slice(0, 300));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería y el catálogo cuadra con la ficha SUNNER'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER y el viento se cruza con la batería'));
 process.exit(fallos ? 1 : 0);

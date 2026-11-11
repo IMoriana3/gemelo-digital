@@ -1,3 +1,6 @@
 node_modules/
 package-lock.json
 package.json
+
+# salida de tools/logs_ncu: lleva datos de planta y no se versiona
+salida_logs_ncu/
