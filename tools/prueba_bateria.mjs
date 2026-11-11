@@ -568,6 +568,47 @@ ok(ficha.todosConDescarga, 'y todos declaran su rango de descarga, no sólo el d
     'y el informe declara que su vida es CALCULADA y no la de la ficha (SUNNER: >10 años, 7 en caliente, ficha >6)');
 }
 
+/* MAPA DE DIMENSIONADO (capacidad × panel). Lo que tiene que cumplir para que
+   sirva de algo: (a) la celda de lo simulado ES lo simulado — misma simulate,
+   misma meteo; (b) más batería o más panel nunca da MÁS días a SOC 0 (sin
+   estrategia, que es donde la física manda sola); (c) cambiar capacidad cambia
+   SÓLO la capacidad; (d) en STRING no hay eje de panel. */
+const mapa = await pg.evaluate(() => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const seis = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const str = PROFILES.filter((p) => p.id === 'STRING_60W_6Ah')[0];
+  const meteo = synthMeteo(loc, 30, 340, 85);
+  const o = { motorModel: 'curva', winter: false, strategy: false, socTgt: 100, socCrit: 0, fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const M = mapaDimensionado(meteo, seis, loc, 0.5, o);
+  const i = M.caps.findIndex((c) => Math.abs(c - seis.wh) < 0.01), j = M.pans.indexOf(seis.chgW);
+  const rows = simulate(meteo, seis, loc, 0.5, o), S = summarize(rows);
+  const d = M.cel.map((r) => r.map((x) => x.dias));
+  let monoCap = true, monoPan = true;
+  for (let a = 1; a < d.length; a++) for (let b = 0; b < d[a].length; b++) if (d[a][b] > d[a - 1][b]) monoCap = false;
+  for (let a = 0; a < d.length; a++) for (let b = 1; b < d[a].length; b++) if (d[a][b] > d[a][b - 1]) monoPan = false;
+  const cc = conCapacidad(seis, 307.2);
+  const MS = mapaDimensionado(synthMeteo(loc, 7, 340, 85), str, loc, 0.5, o);
+  const dset = new Set(rows.filter((r) => r.soc <= 0.001).map((r) => Math.floor(+r.t / 864e5)));
+  return { yo: M.cel[i][j], dias: dset.size, clase: [claseMapa({ dias: 0, inact: 50 }), claseMapa({ dias: 1, inact: 0 }), claseMapa({ dias: 0, inact: 0 })], inact: S.inactivePct, hZero: S.hZero, d,
+    i, j, monoCap, monoPan, hayCero: d.flat().some((v) => v > 0), hayLibre: d.flat().some((v) => v === 0),
+    cc: { wh: cc.wh, chgW: cc.chgW, base: cc.base.id }, catYo: M.cel[i][j].cat,
+    strPans: MS.pans, strFilas: MS.cel.length };
+});
+ok(mapa.yo.dias === mapa.dias && mapa.yo.inact === mapa.inact && mapa.yo.hZero === mapa.hZero,
+  'mapa de dimensionado: la celda de lo simulado ES lo simulado (' + mapa.dias + ' d a SOC 0, ' + mapa.inact.toFixed(2) + ' %)', JSON.stringify(mapa.yo));
+ok(mapa.monoCap && mapa.monoPan && mapa.hayCero && mapa.hayLibre,
+  'y más batería o más panel nunca dan MÁS días a SOC 0 (en un régimen que tiene celdas a 0 y con días a 0)', JSON.stringify(mapa.d));
+/* Monótono no basta: un mapa que ignorase un eje sería monótono (filas iguales).
+   Los dos ejes tienen que MOVER la cifra en este régimen. */
+ok(mapa.d[0][mapa.j] > mapa.d.at(-1)[mapa.j] && mapa.d[mapa.i][0] > mapa.d[mapa.i].at(-1),
+  'y los dos ejes la mueven: con el panel de serie, de la batería menor a la mayor; con la de serie, del panel menor al mayor', JSON.stringify(mapa.d));
+ok(mapa.cc.wh === 307.2 && mapa.cc.chgW === 45 && mapa.cc.base === 'SP_45W_6Ah' && mapa.catYo,
+  'cambiar la capacidad cambia SÓLO la capacidad, y la combinación del catálogo se reconoce como tal', JSON.stringify(mapa.cc));
+ok(mapa.clase.join() === 'bad,wn,ok',
+  'el color lo pone la peor cifra: 0 días pero 50 % no disponible NO es verde (la TCU se salva aparcando)', mapa.clase.join());
+ok(mapa.strPans.length === 1 && mapa.strPans[0] === 60 && mapa.strFilas >= 5,
+  'en STRING el mapa no tiene eje de panel: una columna, la del regulador', JSON.stringify(mapa.strPans));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el modelo nombra la batería y el catálogo cuadra con la ficha SUNNER'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería y el catálogo cuadra con la ficha SUNNER'));
 process.exit(fallos ? 1 : 0);

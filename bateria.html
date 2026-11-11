@@ -92,6 +92,16 @@
   table.cmp td:first-child,table.cmp th:first-child{text-align:left;color:var(--tx2)}
   table.cmp td{font-family:var(--mono)}
   table.cmp td.ok{color:var(--ok)} table.cmp td.bad{color:var(--danger)} table.cmp td.wn{color:var(--warn)}
+  table.mapa{width:100%;border-collapse:separate;border-spacing:3px;font-family:var(--mono);font-size:12.5px;margin-top:8px}
+  table.mapa th{color:var(--tx3);font:600 11px var(--mono);padding:4px 6px;text-align:center}
+  table.mapa th.cap{text-align:right;white-space:nowrap}
+  table.mapa td{padding:7px 4px;text-align:center;border-radius:6px;background:var(--line);color:var(--tx2);line-height:1.15}
+  table.mapa td small{display:block;font-size:10px;opacity:.75}
+  table.mapa td.ok{background:rgba(91,191,138,.18);color:var(--ok)}
+  table.mapa td.wn{background:rgba(242,201,76,.16);color:var(--warn)}
+  table.mapa td.bad{background:rgba(232,72,88,.18);color:var(--danger)}
+  table.mapa td.yo{outline:2px solid var(--accent);outline-offset:-2px}
+  table.mapa td.cat{font-weight:700}
   .leg{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--tx2);margin-top:6px}
   .leg i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
   .empty{color:var(--tx3);font-size:13px;padding:30px;text-align:center}
@@ -2033,6 +2043,82 @@ function buildReport(){
   w.document.write(doc); w.document.close();
 }
 
+/* ═══════════ MAPA DE DIMENSIONADO (capacidad × panel) ═══════════
+   La pregunta de quien dimensiona no es «¿aguanta ESTE equipo?» sino «¿cuánto
+   margen me da subir un escalón de batería o de panel?». Se responde con la
+   MISMA simulate() y la MISMA meteo y lógica que el resultado de arriba: sólo
+   cambian wh (capacidad) y chgW (panel). Una celda = un año (o los días que
+   haya) completo. Métrica: días con algún instante a SOC = 0 — el día en que la
+   TCU se queda sin energía para moverse, que es lo que se paga. En STRING no
+   hay eje de panel (chgW es el regulador, ver conPanel). */
+var MAPA_AH=[3,4.5,6,9,12], MAPA_V=25.6;
+function conCapacidad(prof,wh){
+  if(Math.abs(wh-prof.wh)<1e-9)return prof;
+  var p={};for(var k in prof)p[k]=prof[k];
+  p.wh=wh; p.base=prof.base||prof; p.capPropia=false;
+  return p;
+}
+function diasSocCero(rows){
+  var d={};rows.forEach(function(r){if(r.soc<=0.001)d[Math.floor((+r.t)/864e5)]=1;});
+  return Object.keys(d).length;
+}
+function ejesMapa(prof){
+  var caps=MAPA_AH.map(function(a){return +(a*MAPA_V).toFixed(2)});
+  if(caps.every(function(c){return Math.abs(c-prof.wh)>0.01}))caps.push(prof.wh);
+  caps.sort(function(a,b){return a-b});
+  var pans=prof.string?[prof.chgW]:PANELES.slice();
+  if(pans.indexOf(prof.chgW)<0){pans.push(prof.chgW);pans.sort(function(a,b){return a-b});}
+  return {caps:caps,pans:pans};
+}
+function celdaMapa(meteo,prof,loc,soc0,opts,wh,w){
+  var base=prof.base||prof;
+  var p=conCapacidad(prof.string?prof:conPanel(base,w),wh);
+  var rows=simulate(meteo,p,loc,soc0,opts), S=summarize(rows);
+  return {wh:wh,w:w,dias:diasSocCero(rows),hZero:S.hZero,inact:S.inactivePct,socMin:S.socMin,
+          cat:PROFILES.some(function(q){return q.chgW===p.chgW&&Math.abs(q.wh-p.wh)<0.01&&!!q.string===!!p.string&&!!q.lt===!!p.lt})};
+}
+function mapaDimensionado(meteo,prof,loc,soc0,opts){
+  var E=ejesMapa(prof), cel=E.caps.map(function(c){
+    return E.pans.map(function(w){return celdaMapa(meteo,prof,loc,soc0,opts,c,w)});});
+  return {caps:E.caps,pans:E.pans,cel:cel};
+}
+/* El color lo pone lo PEOR de las dos cifras: con estrategia, la TCU se defiende
+   aparcando antes de llegar a 0, así que «0 días» con un 86 % no disponible NO es
+   verde — es una batería que se salva a costa de no seguir. Umbrales = chip de arriba. */
+function claseMapa(x){return (x.dias>2||x.inact>1)?'bad':((x.dias>0||x.inact>0.1)?'wn':'ok')}
+function pintaMapa(card,M,prof){
+  var tb='<table class="mapa"><thead><tr><th class="cap">batería \\ panel</th>'+
+    M.pans.map(function(w){return '<th>'+(prof.string?'regulador ':'')+w+' W</th>'}).join('')+'</tr></thead><tbody>';
+  M.caps.forEach(function(c,i){
+    tb+='<tr><th class="cap">'+fmt(c/MAPA_V,1)+' Ah · '+fmt(c)+' Wh</th>';
+    M.pans.forEach(function(w,j){var x=M.cel[i]&&M.cel[i][j];
+      if(!x){tb+='<td>…</td>';return;}
+      var yo=Math.abs(c-prof.wh)<0.01&&w===prof.chgW;
+      tb+='<td class="'+claseMapa(x)+(yo?' yo':'')+(x.cat?' cat':'')+'" title="'+fmt(x.hZero)+' h a SOC 0 · '+fmt(x.inact,3)+' % no disponible · SOC mín '+fmt(x.socMin*100)+' %">'+
+          fmt(x.dias)+' d<small>'+fmt(x.inact,2)+' %</small></td>';});
+    tb+='</tr>';});
+  tb+='</tbody></table>';
+  card.querySelector('.mapaTb').innerHTML=tb;
+}
+function cardMapa(meteo,prof,loc,soc0,opts){
+  var E=ejesMapa(prof), n=E.caps.length*E.pans.length;
+  var c=document.createElement('div');c.className='card';c.id='cardMapa';
+  c.innerHTML='<h2>Mapa de dimensionado — días con SOC = 0</h2><div class="sub">Misma meteo, misma lógica y mismo SOC inicial que arriba; cambian sólo la batería'+
+    (prof.string?'':' y el panel')+'. Cada celda: días con algún instante a SOC 0 y, debajo, % de tiempo no disponible (en defensa o sin energía); el color lo pone la peor de las dos. Recuadro naranja: lo simulado arriba; negrita: combinación de catálogo.</div>'+
+    '<button class="btn" id="btnMapa" style="margin-top:8px;width:auto;padding:8px 16px">▦ Calcular mapa ('+n+' simulaciones)</button><div class="mapaTb"></div>';
+  c.querySelector('#btnMapa').onclick=function(){
+    var b=this;b.disabled=true;
+    var M={caps:E.caps,pans:E.pans,cel:E.caps.map(function(){return []})}, k=0;
+    (function paso(){
+      if(k>=n){b.textContent='✓ Mapa calculado';if(LAST)LAST.mapa=M;return;}
+      var i=Math.floor(k/E.pans.length), j=k%E.pans.length;
+      M.cel[i][j]=celdaMapa(meteo,prof,loc,soc0,opts,E.caps[i],E.pans[j]);
+      k++; b.textContent='⏳ '+k+' / '+n; pintaMapa(c,M,prof); setTimeout(paso,0);
+    })();
+  };
+  return c;
+}
+
 function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   var S=summarize(mng), R=summarize(ref);
   var out=$('out');out.innerHTML='';
@@ -2114,6 +2200,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
     ' · paso '+fmt(dtH*60)+' min · estrategia de gestión de SOC (objetivo '+opts.socTgt+'% · crítico '+opts.socCrit+'% · carga completa cada '+opts.fcDays+' días, reintentando a diario)'+
     (opts.winter?' · winter mode':'')+'</div>';
   out.appendChild(c1);
+  out.appendChild(cardMapa(meteo,prof,loc,(LAST&&LAST.soc0!=null)?LAST.soc0:socEstacionario(opts),opts));
   var g1=mkCanvas(c1,210), f1=frame(g1,0,100,mng,function(v){return fmt(v)+'%'});
   bandParked(g1,f1,mng,'rgba(58,160,255,.10)',function(r){return r.stow});
   bandParked(g1,f1,mng,'rgba(226,87,76,.12)',function(r){return r.parked&&!r.stow});
