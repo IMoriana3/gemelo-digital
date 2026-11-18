@@ -238,6 +238,8 @@ table.cmp th{color:var(--tx3)}
       <input type="range" id="fc" min="1" max="15" step="1" value="5"></div>
     <div class="fld"><label>Tª mínima de carga (°C)</label>
       <input type="number" id="tmin" value="0" step="1"></div>
+    <label class="sw"><input type="checkbox" id="aged" checked>
+      <span>Batería envejecida: se evalúa al 80 % de su capacidad nominal (final de vida)</span></label>
     <label class="sw"><input type="checkbox" id="cmp" checked>
       <span>Comparar sistemas de control<small>Simula 4 lógicas de gestión sobre la misma meteo y las enfrenta; si el perfil no es de baja temperatura, añade su versión -LT como columna de equipo</small></span></label>
     <label class="sw"><input type="checkbox" id="cliente">
@@ -737,13 +739,45 @@ function resample(meteo,stepMin){
   return out;
 }
 
+/* ═══════════ RESERVA PARA LLEGAR A SEGURIDAD · BATERÍA AL FINAL DE VIDA (2026-11-18) ═══════════
+   Las dos se toman del informe de Track N Co para Casalmaggiore (BAA-2611-0004 y -0005),
+   que en esto era mejor que el nuestro.
+
+   LA RESERVA es la energía que cuesta llevar el seguidor desde la peor posición hasta la
+   de seguridad. Por debajo de ella, una TCU que se queda sin batería puede quedarse
+   varada en un ángulo de riesgo, que es justo lo que preguntó el mantenedor en
+   Bellinzago. El criterio deja de ser «no llegar a 0 %» y pasa a ser «no bajar nunca de
+   lo que cuesta ponerse a salvo».
+   Con la defensa FIJA en +55° (DEFENSE_POS), la peor maniobra sale de −55°: 110°. La TC
+   de Track N Co va al final de carrera más cercano y le bastan 55°; si la nuestra hiciera
+   lo mismo la reserva sería la mitad, pero eso es firmware y aquí no se supone.
+   Se cobra con el MISMO modelo de motor que la simulación, y ×K_STOW_MOTOR porque la
+   maniobra a seguridad puede tocar con viento.
+
+   EL FINAL DE VIDA: la batería se evalúa al 80 % de su capacidad nominal, que es el
+   umbral de fin de vida del propio modelo de degradación. Si la configuración cumple así,
+   cumple durante toda la vida de la batería; si sólo cumple nueva, eso hay que saberlo. */
+var K_STOW_MOTOR=2;   /* corriente con viento ×2: supuesto de Track N Co sobre el TRX, sin medida propia */
+var SOH_FIN_VIDA=0.80;
+function motorRecorridoWh(motorModel,desde,hasta){
+  var wh=0, s=desde<hasta?1:-1;
+  for(var p=desde; s>0?p<hasta:p>hasta; p+=s)
+    wh+=consumoTCU({dtH:1,dia:true,mov:1,pos:p+s/2,motorModel:motorModel,tAmb:20}).motor;
+  return wh;
+}
+function reservaWh(motorModel){return K_STOW_MOTOR*motorRecorridoWh(motorModel,-AXIS_MAX,DEFENSE_POS);}
+/* «Un día de invierno de operación»: lo que la TCU tiene que haber recuperado por encima
+   de la reserva para salir del modo seguridad. 24 h de electrónica y un barrido completo. */
+function diaOperacionWh(motorModel){return 24*IDLE_W+motorRecorridoWh(motorModel,-AXIS_MAX,AXIS_MAX);}
+
 /* ═══════════ SIMULADOR — estrategia oficial de SOC + winter mode canónico ═══════════
    opts: {motorModel:'factiun'|mA(number), winter, socTgt, socCrit, fcDays, tMin, strategy:bool} */
 function simulate(meteo,prof,loc,soc0,opts){
-  var latR=loc.lat*D2R, capWh=prof.wh, n=meteo.length;
+  var latR=loc.lat*D2R, capWh=prof.wh*(opts.soh!=null?opts.soh:1), n=meteo.length;
   var dtH=n>1?((+meteo[1].t)-(+meteo[0].t))/36e5:1;      /* paso en horas (uniforme) */
   var t0Day=Math.floor((+meteo[0].t)/864e5);
   var soc=soc0, parked=false, prevPos=null, stow=0;
+  var eRes=reservaWh(opts.motorModel), eDia=diaOperacionWh(opts.motorModel), seguridad=false;
   /* Temperatura de la BATERÍA, no la ambiente: es la que decide el calefactor y
      la que limita el C-rate. Hasta 2026-10-21 aquí se pasaba `m.temp` crudo —el
      gemelo sí modelaba la inercia (sim/planta.js), así que la MISMA regla tenía
@@ -770,9 +804,12 @@ function simulate(meteo,prof,loc,soc0,opts){
     var day=(m.poa!=null?m.poa:m.ghi)>10;
 
     /* — CASO 3 (estrategia): SOC < crítico → defensa, tracker no disponible — */
+    /* Del MODO SEGURIDAD (ver más abajo) se sale aquí, al principio de la hora: con la
+       reserva MÁS un día de invierno de operación. Y mientras dure no se desaparca. */
     if(opts.strategy){
+      if(seguridad && soc*capWh>=eRes+eDia) seguridad=false;
       if(!parked && soc<opts.socCrit/100) parked=true;
-      else if(parked && soc>=opts.socCrit/100+0.02) parked=false;   /* rearme +2% anti-rebote */
+      else if(parked && !seguridad && soc>=opts.socCrit/100+0.02) parked=false;   /* rearme +2% anti-rebote */
     }
 
     /* — Posición: abanderamiento > defensa por batería > seguimiento (PhiAng real si hay CSV) — */
@@ -782,8 +819,14 @@ function simulate(meteo,prof,loc,soc0,opts){
        azimut absoluto 0-360 (0 N · 90 E · 180 S · 270 O) */
     var ab=AB.paso(dtH*3600,m.wind,trackPos,180+sun.az/D2R);
     stow=ab.estado;
+    tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
+    /* La hora se PLANIFICA antes de comprometerla —posición, movimiento y consumo—, porque
+       el modo seguridad necesita saber lo que costaría para decidir si se la puede permitir.
+       `planifica` no toca `prevPos`: eso sólo lo hace el plan elegido. */
+    var muerta=soc<=0.001;
+    function planifica(aparcado){
     var target=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo))
-                     :(parked?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
+                     :(aparcado?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
     if(prevPos==null)prevPos=target;
     /* BATERÍA AGOTADA: la TCU no mueve nada. Antes, con SOC 0 % el seguidor
        seguía al sol como si tal cosa —el motor «giraba» sin energía— y la
@@ -791,11 +834,10 @@ function simulate(meteo,prof,loc,soc0,opts){
        TCU muerta se queda donde estaba: ni sigue, ni aparca, ni abandera. La
        pérdida de producción de esas horas se cuenta contra la posición en que
        se quedó, no contra la de defensa. */
-    var muerta=soc<=0.001;
     if(muerta)target=prevPos;
     /* Histéresis del lazo: en seguimiento sólo corrige si el error frente al sol ≥ 2,5°
        (estudio de disponibilidad). Se evalúa sobre el error REAL, antes de limitar el avance. */
-    var moveNow=muerta?false:(stow>0||parked)?Math.abs(target-prevPos)>0.01
+    var moveNow=muerta?false:(stow>0||aparcado)?Math.abs(target-prevPos)>0.01
                                              :Math.abs(target-prevPos)>=HYST_DEG;
     /* El WINTER MODE NO TOCA EL MOVIMIENTO. Es techo de SOC (90 %) y calibración
        cada 3 días, y nada más — decisión del mantenedor, 2026-09-09. Aquí había un
@@ -808,12 +850,23 @@ function simulate(meteo,prof,loc,soc0,opts){
     if(Math.abs(target-prevPos)>maxSweep) target=prevPos+Math.sign(target-prevPos)*maxSweep;
     var deltaEff=moveNow?Math.abs(target-prevPos):0;
     var avgPos=(target+prevPos)/2;
-    if(moveNow)prevPos=target;
-
-    tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
     /* — Consumo del paso: electrónica + motor + calefactor, todo en consumoTCU — */
-    var cons=consumoTCU({dtH:dtH,dia:day,mov:deltaEff,pos:avgPos,
-                         motorModel:opts.motorModel,tAmb:tBat});   /* sin calefactor: ningún perfil lo lleva */
+    return {target:target, moveNow:moveNow, deltaEff:deltaEff, avgPos:avgPos,
+            cons:consumoTCU({dtH:dtH,dia:day,mov:deltaEff,pos:avgPos,
+                             motorModel:opts.motorModel,tAmb:tBat})};   /* sin calefactor: ningún perfil lo lleva */
+    }
+    var pl=planifica(parked);
+    /* MODO SEGURIDAD, predictivo como el de Track N Co: si la energía que quedaría DESPUÉS
+       de esta hora no cubre la reserva, esta hora ya no se sigue: se va a defensa, y la
+       reserva paga el viaje. La carga de la hora no se cuenta a favor, que es conservador.
+       Sólo en las estrategias: «Sin gestión» es precisamente la TCU sin protección, y de la
+       de SUNNER no consta que tenga esta lógica, así que no se le supone. */
+    if(opts.strategy && !seguridad && soc*capWh-pl.cons.total<eRes){
+      seguridad=true;
+      if(!parked){parked=true; pl=planifica(true);}
+    }
+    var target=pl.target, moveNow=pl.moveNow, deltaEff=pl.deltaEff, avgPos=pl.avgPos, cons=pl.cons;
+    if(moveNow)prevPos=target;
     var motorWh=cons.motor, baseWh=cons.base, heatWh=cons.heat, tEff=cons.tEff, consWh=cons.total;
 
     /* — Carga: POA de la posición REAL (abanderado/defensa reduce), JEITA frío+calor, techo — */
@@ -886,9 +939,11 @@ function simulate(meteo,prof,loc,soc0,opts){
 
     rows.push({t:m.t,ghi:m.ghi,temp:m.temp,tCell:tEff,wind:m.wind,soc:soc,chg:chgEff,base:baseWh,motor:motorWh,
                heat:heatWh,net:chgEff-consWh,pos:target,parked:parked,stow:stow>0,mov:deltaEff,
-               poaPot:poaPot,poaLost:poaLost,poaReal:poaReal,cal:calibNow,fullWin:!!fullDay,cRate:cRateNow});
+               poaPot:poaPot,poaLost:poaLost,poaReal:poaReal,cal:calibNow,fullWin:!!fullDay,cRate:cRateNow,
+               /* en CADA fila y no colgado del array: `slice` pierde lo colgado */
+               eRes:eRes,eLib:soc*capWh-eRes,seg:seguridad});
   }
-  rows.nCalib=nCalib; rows.daysNoCalib=daysNoCalib;
+  rows.nCalib=nCalib; rows.daysNoCalib=daysNoCalib; rows.capWh=capWh; rows.eDia=eDia;
   return rows;
 }
 
@@ -957,12 +1012,15 @@ function eligeMejor(C){
   if(!C||!C.length)return null;
   var ctl=C.filter(function(x){return !x.c.prof});
   if(!ctl.length)return null;
-  var minZero=Math.min.apply(null,ctl.map(function(x){return x.S.hZero}));
-  var cand=ctl.filter(function(x){return x.S.hZero<=minZero+1e-9});
+  /* Desde 2026-11-18 descarta por horas BAJO LA RESERVA, no por horas a cero: una
+     batería a cero está bajo la reserva, pero no al revés, y es el «no al revés» el que
+     deja un seguidor sin energía para llegar a seguridad. */
+  var minRes=Math.min.apply(null,ctl.map(function(x){return x.S.hBajoReserva}));
+  var cand=ctl.filter(function(x){return x.S.hBajoReserva<=minRes+1e-9});
   var mejor=cand.slice().sort(function(a,b){
     return (a.S.inactivePct-b.S.inactivePct)||(b.S.cyc.years-a.S.cyc.years)||(b.S.prodRelPct-a.S.prodRelPct)})[0];
-  return {mejor:mejor,minZero:minZero,
-    descartados:ctl.filter(function(x){return x.S.hZero>minZero+1e-9})};
+  return {mejor:mejor,minRes:minRes,
+    descartados:ctl.filter(function(x){return x.S.hBajoReserva>minRes+1e-9})};
 }
 
 /* ═══════════ Rainflow (ASTM simplificado) + modelo de ciclos LFP (11.5b) ═══════════ */
@@ -1089,7 +1147,19 @@ function summarize(rows){
   var hPark=rows.filter(function(r){return (r.parked&&!r.stow)||r.soc<=0.001}).length*dtH;
   var hStow=rows.filter(function(r){return r.stow}).length*dtH;
   var _rf=rainflow(soc);
+  /* LA RESERVA: margen mínimo sobre ella (la cifra de cabecera) y los periodos sin ella,
+     contados como Track N Co: un periodo es cada entrada, y los días son los distintos.
+     Una hora cuenta si está bajo la reserva O en modo seguridad: como en su informe,
+     ENTRAR en modo seguridad ya es no tener energía para seguir, aunque al aparcar a
+     tiempo no se llegue a cruzar. «Sin gestión» no tiene modo seguridad: sólo cruza. */
+  var margenI=0, nRes=0, hRes=0, diasRes={}, bajo=false;
+  rows.forEach(function(r,i){
+    if(r.eLib<rows[margenI].eLib)margenI=i;
+    if(r.eLib<0||r.seg){hRes+=dtH; diasRes[Math.floor(+r.t/864e5)]=1; if(!bajo)nRes++; bajo=true;} else bajo=false;
+  });
   return {
+    reservaWh:rows[0].eRes, margenMin:rows[margenI].eLib, margenMinT:rows[margenI].t,
+    periodosRes:nRes, diasRes:Object.keys(diasRes).length, hBajoReserva:hRes,
     socFinal:soc[soc.length-1], socMin:soc[minI], socMinT:rows[minI].t,
     hBelow15:soc.filter(function(v){return v<0.15}).length*dtH,
     hZero:soc.filter(function(v){return v<=0.001}).length*dtH,
@@ -1509,11 +1579,12 @@ $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
   var loc=getLoc(), prof=conPanel(PROFILES[$('prof').value],+$('panel').value);
   var mm=$('motor').value; mm=(mm==='factiun'||mm==='curva')?mm:+mm;
-  var opts={motorModel:mm, winter:$('winter').checked, strategy:true,
+  var soh=$('aged').checked?SOH_FIN_VIDA:1;
+  var opts={motorModel:mm, soh:soh, winter:$('winter').checked, strategy:true,
             socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
             fcDays:+$('fc').value, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
             mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
-  var refOpts={motorModel:mm, winter:false, strategy:false,
+  var refOpts={motorModel:mm, soh:soh, winter:false, strategy:false,
             socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
             mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
   var soc0=+$('soc0').value/100;
@@ -1765,7 +1836,7 @@ th{background:#eef4f2;color:#0d5c46;font-weight:600;text-align:center}
 td:first-child,th:first-child{text-align:left}
 td.k{background:#f7f9fb;font-weight:500}
 td.ok{color:#0a7d55;font-weight:600} td.bad{color:#b3352b;font-weight:600} td.wn{color:#96650d}
-.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:12px 0}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:12px 0}
 .kpi{border:1px solid #d5dde4;border-radius:7px;padding:8px 10px;background:#f7f9fb}
 .kpi .l{font-size:9.5px;color:#6b7b8a;text-transform:uppercase;letter-spacing:.05em}
 .kpi .v{font:600 17px "IBM Plex Mono",monospace;color:#0d5c46}
@@ -1822,8 +1893,10 @@ function buildReport(){
   });
 
   /* — veredicto automático — */
-  var okDisp=S.inactivePct<1.0, okProd=S.prodLostPct<0.1, okSoc=S.socMin>0.05;
-  var apto=okDisp&&okProd&&okSoc;
+  var okDisp=S.inactivePct<1.0, okProd=S.prodLostPct<0.1, okSoc=S.socMin>0.05, okRes=S.periodosRes===0;
+  var apto=okDisp&&okProd&&okSoc&&okRes;
+  var cap=mng.capWh, envejecida=cap<prof.wh-1e-9;
+  var fT=function(d){return f(d)+' '+('0'+d.getUTCHours()).slice(-2)+':00 UTC'};
   var elec=eligeMejor(C), mejor=elec?elec.mejor:null;
   var colLT=C?C.filter(function(x){return x.c.k==='lt'})[0]:null;
   var colStd=C?C.filter(function(x){return x.c.k==='std'})[0]:null;
@@ -1833,7 +1906,8 @@ function buildReport(){
   H+='<div class="cover"><div class="brand">Factiun · Ingeniería de seguimiento solar</div>'+
      '<h1>Estudio de disponibilidad<br>de batería de la TCU</h1>'+
      '<div class="sub">'+sitio+'</div>'+
-     '<div class="meta">Proyecto: '+proyecto+'<br>Modelo de TCU: '+(prof.comercial||prof.id)+' — '+fmt(prof.wh,1)+' Wh (25,6 V) · fuente de carga '+prof.chgW+' W'+
+     '<div class="meta">Proyecto: '+proyecto+'<br>Modelo de TCU: '+(prof.comercial||prof.id)+' — '+fmt(prof.wh,1)+' Wh (25,6 V)'+
+     (envejecida?', evaluada a <b>'+fmt(cap,1)+' Wh</b> ('+fmt(100*cap/prof.wh)+' %, final de vida)':'')+' · fuente de carga '+prof.chgW+' W'+
      (deCatalogo?'':' <b>(combinación de estudio, no de catálogo)</b>')+'<br>'+
      'Periodo simulado: '+f(d0)+' – '+f(d1)+' ('+fmt(dias)+' días, paso '+fmt(dtH*60)+' min)<br>'+
      'Origen de la meteorología: '+fuente+'<br>Fecha de emisión: '+fHoy+'</div>'+
@@ -1848,15 +1922,21 @@ function buildReport(){
      'sobre la planta de las horas en que no puede hacerlo. La metodología replica la del <i>Battery Availability Study</i> '+
      'del estudio de disponibilidad, con la física de consumo y batería medida por Factiun.</p>';
   H+='<div class="note"><b>Conclusión.</b> '+(apto
-      ? 'La configuración evaluada <b>cumple</b>: el seguidor permanece indisponible por falta de energía un '+fmt(S.inactivePct,4)+' % del tiempo, '+
-        'con una pérdida de producción imputable a la batería del '+fmt(S.prodLostPct,4)+' % y un SOC mínimo del '+fmt(S.socMin*100)+' %.'
-      : 'La configuración evaluada <b>presenta riesgo</b>: '+fmt(S.inactivePct,4)+' % de tiempo no disponible, '+
+      ? 'La configuración evaluada <b>cumple</b>'+(envejecida?' <b>con la batería al final de su vida</b>':'')+
+        ': el seguidor permanece indisponible por falta de energía un '+fmt(S.inactivePct,4)+' % del tiempo, '+
+        'con una pérdida de producción imputable a la batería del '+fmt(S.prodLostPct,4)+' % y un SOC mínimo del '+fmt(S.socMin*100)+' %. '+
+        'No baja nunca de la reserva necesaria para llevar el seguidor a su posición de seguridad: el margen mínimo sobre ella es de <b>'+
+        fmt(S.margenMin,2)+' Wh</b>, el '+fT(S.margenMinT)+'.'
+      : 'La configuración evaluada <b>presenta riesgo</b>'+(envejecida?' con la batería al final de su vida':'')+': '+fmt(S.inactivePct,4)+' % de tiempo no disponible, '+
         fmt(S.prodLostPct,4)+' % de producción perdida y un SOC mínimo del '+fmt(S.socMin*100)+' %'+
-        (S.hZero>0?', con '+fmt(S.hZero)+' h de batería completamente agotada':'')+'. Se recomienda revisar la capacidad, la potencia de carga o la estrategia de gestión.')+
+        (S.hZero>0?', con '+fmt(S.hZero)+' h de batería completamente agotada':'')+
+        (S.periodosRes>0?'. Baja '+S.periodosRes+' '+(S.periodosRes===1?'vez':'veces')+' ('+S.diasRes+' '+(S.diasRes===1?'día':'días')+', '+fmt(S.hBajoReserva)+' h) '+
+          'de la reserva necesaria para llevar el seguidor a su posición de seguridad, y en esas horas un seguidor fuera de ella <b>no puede ponerse a salvo</b>':'')+
+        '. Se recomienda revisar la capacidad, la potencia de carga o la estrategia de gestión.')+
      (mejor?' De los sistemas de control evaluados, el más favorable en este emplazamiento es <b>'+mejor.c.n+'</b>: '+
-       'entre los que menos horas dejan la batería agotada ('+fmt(elec.minZero)+' h), el de mayor disponibilidad y, a igualdad, mayor vida.'+
-       (elec.descartados.length?' Quedan descartados por agotar la batería: '+elec.descartados.map(function(x){
-         return x.c.n+' ('+fmt(x.S.hZero)+' h)'}).join(', ')+'.':''):'')+
+       'entre los que menos horas pasan por debajo de la reserva para llegar a seguridad ('+fmt(elec.minRes)+' h), el de mayor disponibilidad y, a igualdad, mayor vida.'+
+       (elec.descartados.length?' Quedan descartados por bajar de esa reserva: '+elec.descartados.map(function(x){
+         return x.c.n+' ('+fmt(x.S.hBajoReserva)+' h)'}).join(', ')+'.':''):'')+
      (colLT&&colStd?(Math.abs(colLT.S.inactivePct-colStd.S.inactivePct)<5e-5&&colLT.S.hZero===colStd.S.hZero
        ?' La variante de baja temperatura (<b>'+colLT.prof.id+'</b>, apartado 9) <b>no cambia el resultado</b> en este emplazamiento: '+
         'el déficit de invierno es de irradiación, no de temperatura, y ampliar el rango de carga en frío no lo compensa.'
@@ -1867,6 +1947,7 @@ function buildReport(){
      '<div class="kpi"><div class="l">Tiempo no disponible</div><div class="v">'+fmt(S.inactivePct,4)+' %</div><div class="s">'+fmt(S.hParked)+' h</div></div>'+
      '<div class="kpi"><div class="l">Producción perdida</div><div class="v">'+fmt(S.prodLostPct,4)+' %</div><div class="s">imputable a batería</div></div>'+
      '<div class="kpi"><div class="l">SOC mínimo</div><div class="v">'+fmt(S.socMin*100)+' %</div><div class="s">'+f(S.socMinT)+'</div></div>'+
+     '<div class="kpi"><div class="l">Margen sobre la reserva</div><div class="v">'+fmt(S.margenMin,1)+' Wh</div><div class="s">reserva '+fmt(S.reservaWh,1)+' Wh</div></div>'+
      '<div class="kpi"><div class="l">Vida a 80 % SOH</div><div class="v">'+fmt(S.cyc.years,1)+' a</div><div class="s">fade '+fmt(S.cyc.fadeYr,2)+' %/año</div></div>'+
      '</div>';
 
@@ -1905,6 +1986,12 @@ function buildReport(){
   H+=tbl([['Modelo de TCU',{v:(prof.comercial?'<b>'+prof.comercial+'</b> (ficha SUNNER) · ':'')+prof.id+(prof.sinFicha?' — <b>sin contraparte en la ficha SUNNER</b>':'')}],
      ['Celda',{v:prof.celda?prof.celda+' · LiFePO₄':'no declarada en la ficha'}],
      ['Capacidad nominal',{v:fmt(prof.wh,1)+' Wh ('+fmt(prof.wh/25.6,1)+' Ah a 25,6 V)'}],
+     ['Capacidad evaluada',{v:envejecida
+        ?'<b>'+fmt(cap,1)+' Wh</b>: el '+fmt(100*cap/prof.wh)+' % de la nominal, que es el final de vida del modelo de degradación. Si cumple así, cumple toda la vida de la batería.'
+        :fmt(cap,1)+' Wh: la nominal, batería <b>nueva</b>. El resultado no cubre la pérdida de capacidad con los años.',cls:envejecida?'':'wn'}],
+     ['Reserva para llegar a seguridad',{v:'<b>'+fmt(S.reservaWh,2)+' Wh</b>: la peor maniobra hasta la posición de defensa —de −'+AXIS_MAX+'° a +'+DEFENSE_POS+'°, '+
+        fmt(DEFENSE_POS+AXIS_MAX)+'°— con el modelo de motor de esta simulación, ×'+K_STOW_MOTOR+' de corriente porque puede tocar con viento. '+
+        'Las estrategias con gestión no bajan de ella: por debajo van a defensa (modo seguridad) y no vuelven a seguir hasta tener la reserva más un día de invierno de operación ('+fmt(mng.eDia,1)+' Wh).'}],
      ['Química',{v:'LiFePO₄'}],
      ['Fuente de carga',{v:prof.string?fmt(prof.chgW)+' W (regulador del string)'
         :fmt(prof.chgW)+' W de panel dedicado'+(prof.base?' — apartado del panel de serie del modelo, que son '+fmt(prof.base.chgW)+' W':' — panel de serie del modelo')}],
@@ -1916,7 +2003,7 @@ function buildReport(){
      ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes (medido Factiun)'}],
      ['Modelo de consumo de motor',{v:motorTxt}],
      ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
-     ['Efecto del viento sobre el consumo',{v:'NO considerado — ver limitaciones',cls:'wn'}],
+     ['Efecto del viento sobre el consumo',{v:'NO considerado en el seguimiento; sólo la reserva lo cobra, ×'+K_STOW_MOTOR+' — ver limitaciones',cls:'wn'}],
      ['Tª mínima de carga',{v:opts.tMin+' °C'}],
      ['Umbral mínimo de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
      ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA'}],
@@ -1953,6 +2040,9 @@ function buildReport(){
     ['SOC mínimo',{v:fmt(S.socMin*100)+' %',cls:S.socMin<0.1?'bad':'ok'},{v:fmt(R.socMin*100)+' %'}],
     ['SOC medio',{v:fmt(S.cyc.socMean*100)+' %'},{v:fmt(R.cyc.socMean*100)+' %'}],
     ['Horas con batería agotada',{v:fmt(S.hZero)+' h',cls:S.hZero>0?'bad':'ok'},{v:fmt(R.hZero)+' h'}],
+    ['Veces bajo la reserva para llegar a seguridad',{v:S.periodosRes+' ('+S.diasRes+' d, '+fmt(S.hBajoReserva)+' h)',cls:S.periodosRes>0?'bad':'ok'},
+       {v:R.periodosRes+' ('+R.diasRes+' d, '+fmt(R.hBajoReserva)+' h)'}],
+    ['Margen mínimo sobre la reserva',{v:fmt(S.margenMin,2)+' Wh · '+fT(S.margenMinT),cls:S.margenMin<0?'bad':'ok'},{v:fmt(R.margenMin,2)+' Wh · '+fT(R.margenMinT)}],
     ['Horas abanderado por viento',{v:fmt(S.hStow)+' h'},{v:fmt(R.hStow)+' h'}],
     ['Captación solar',{v:fmt(S.chg)+' Wh'},{v:fmt(R.chg)+' Wh'}],
     ['Consumo de motor',{v:fmt(S.motor)+' Wh'},{v:fmt(R.motor)+' Wh'}],
@@ -2030,6 +2120,10 @@ function buildReport(){
      '<li><b>El límite superior de carga de la -LT (60 °C) no se modela</b>: se le aplica el derate JEITA de la celda estándar (recorte desde 35 °C, nulo a 45 °C), que para la -LT es conservador. Y el límite de DESCARGA no se modela en ninguna de las dos variantes: la batería entrega por debajo de su mínimo (−10 °C la estándar, −40 °C la -LT) como si nada. Importa en emplazamientos muy fríos.</li>'+
      '<li><b>No se valora el efecto del viento sobre el consumo del motor.</b> El viento interviene únicamente para disparar el abanderamiento; el par adicional que opone sobre la estructura, y por tanto la corriente extra que exige al motor, no se modelan. El consumo simulado es en consecuencia un <b>límite inferior</b> en emplazamientos ventosos: la metodología de referencia declara 2 m/s como velocidad de viento de referencia para ese efecto, que aquí no se aplica. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
      '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
+     '<li><b>La reserva para llegar a seguridad se calcula para el peor caso fijo</b>, la maniobra de −'+AXIS_MAX+'° a la defensa en +'+DEFENSE_POS+'°, y no desde la posición de cada momento. '+
+       'Es conservador. Si la TCU fuera al final de carrera más cercano, como hace la de Track N Co, le bastaría la mitad; eso depende del firmware y aquí no se supone. '+
+       'El factor ×'+K_STOW_MOTOR+' de corriente con viento es el supuesto del informe de Track N Co sobre este mismo tracker, sin medida propia. '+
+       'La columna «Sin gestión» no tiene modo seguridad: es la TCU sin protección, y de la de SUNNER no consta que lo tenga.</li>'+
      '<li>La suciedad y la nieve acumulada no penalizan la captación del panel de la TCU.</li>'+
      '<li>Los resultados dependen de la serie meteorológica empleada; para decisiones de compra conviene el barrido multianual del apartado 8.</li>'+
      '</ul>';
