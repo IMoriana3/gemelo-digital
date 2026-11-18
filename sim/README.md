@@ -404,7 +404,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | Fichero | Qué es |
 |---|---|
 | `planta.js` | el motor: física, jerarquía y generación de la imagen de registros. Sin DOM — se ejecuta igual en Node |
-| `modbus-map.js` | **generado**, no se toca a mano: 515 direcciones del mapa canónico |
+| `modbus-map.js` | **generado**, no se toca a mano: 746 direcciones del mapa canónico, de los dos fabricantes |
 | `fisica.js` | **espejo vigilado** del core, no generado: se mantiene a mano declarando que manda el Python, y `tools/carea_fisica.mjs` lo carea contra sus goldens |
 | `viento.js` | **compartido con cobertura-zigbee**: la estrategia B2 de abanderamiento, una sola implementación |
 | `cielo.js` · `difusa.js` | descomposición de Erbs y políticas de cielo cubierto (respaldo del navegador cuando no está el motor de SolarGPT) |
@@ -415,12 +415,13 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `plantas.js` | **generado**, no se toca a mano: las once plantas de la casa con su inventario y su plano, de los layouts del DWG |
 | `campo3d.js` | el campo en 3D, con la geometría de `seguidor.js`: el seguidor **bífila** de la casa —dos vigas, un motor— o monofila si la planta lo es |
 | `servidor.mjs` | publica el motor por HTTP para que `scada/tools/ncu_simulada.py` lo sirva por **Modbus TCP de verdad** |
-| `prueba.mjs` | prueba de humo: 196 comprobaciones sobre un día de planta |
+| `prueba.mjs` | prueba de humo: 360 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/extrae_plantas.mjs` | regenera `plantas.js` desde `cobertura-zigbee/<planta>_layout.json`, contrastando con overcast |
 | `../tools/prueba_simulador.mjs` | banco de la interfaz: renders, mandos y reproductor — lo que no se ve en una captura |
 | `../tools/extrae_mapa.mjs` | regenera `modbus-map.js` desde la ficha de `cobertura-zigbee` |
-| `../tools/carea_fisica.mjs` | **arnés**: carea `fisica.js` contra los goldens del core (4/7 funciones hoy, y lo imprime) |
+| `../tools/carea_fisica.mjs` | **arnés**: carea `fisica.js` contra los goldens del core (5/9 funciones hoy, y lo imprime) |
+| `../tools/cifras_readme.mjs` | **banco**: las cifras de este README y del principal (direcciones del mapa, comprobaciones de `prueba.mjs`, funciones careadas) contra lo que miden quienes las producen; si derivan, la puerta cae |
 | `../tools/carea_difusa.mjs` | **arnés**: carea `poaAt` —la transposición con la que se PUNTÚA la política de difusa— contra 27 anclas de pvlib y contra una implementación independiente sobre 6930 condiciones |
 | `../tools/prueba_bateria.mjs` | banco de `bateria.html`: que el espejo NO derrama al ámbito global, que abre sin errores, que su `poaAt` da Perez en el navegador y que sus 21 canónicos salen del espejo |
 | `../tools/carea_resultado.mjs` | **arnés de cierre**: corre el MISMO día en el gemelo y en el core (`run_tcu_sim`) con las mismas entradas y falla si se separan — θ, POA, SOC y consumo. Lo pedía la hoja de ruta del portal: «hoy el cotejo cubre las constantes, no el resultado» |
