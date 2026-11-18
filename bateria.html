@@ -191,7 +191,7 @@ table.cmp th{color:var(--tx3)}
       </select></div>
     <div class="fld"><label>Umbral mínimo de carga <span class="rv" id="poaMinV">0 W/m²</span></label>
       <input type="range" id="poaMin" min="0" max="200" step="10" value="0">
-      <div class="note">0 = sólo la curva del regulador η(G) de PS26002_RevA, que ya arranca despacio con poca luz.</div></div>
+      <div class="note">0 = sólo la curva del regulador η(G) de PS26002_RevA (la de P4Q; la de SUNNER no está disponible), que ya arranca despacio con poca luz.</div></div>
     <div class="note" id="profNote"></div>
   </div>
   <div class="grp"><h3>Meteorología · periodo</h3>
@@ -241,6 +241,8 @@ table.cmp th{color:var(--tx3)}
     <div class="fld"><label>Abanderamiento por</label><select id="vientoStow">
       <option value="racha" selected>racha a 10 m (la NCU compara la racha)</option>
       <option value="media">viento medio horario (como hasta el hito 3)</option></select></div>
+    <label class="sw"><input type="checkbox" id="capmin" checked>
+      <span>En el barrido de años: baterías del catálogo y capacidad mínima<small>Unas 20 simulaciones más de la serie entera: segundos, no minutos</small></span></label>
     <label class="sw"><input type="checkbox" id="aged" checked>
       <span>Batería envejecida: se evalúa al 80 % de su capacidad nominal (final de vida)</span></label>
     <label class="sw"><input type="checkbox" id="cmp" checked>
@@ -746,6 +748,62 @@ function periodoQueGobierna(rows,opts,j0,j1){
           horasEnMinimo:iE-iM+1,cortadoIni:cortadoIni,cortadoFin:cortadoFin};
 }
 
+/* ═══════════ CAPACIDAD MÍNIMA Y BATERÍAS DEL CATÁLOGO (hito 4, 2026-11-18) ═══════════
+   Lo cuarto que Track N Co hacía y nosotros no. Sobre los MISMOS años seguidos:
+   - Cada batería del catálogo del mismo tipo (SP o STRING), con el mismo panel y la
+     misma estrategia: suficiente si no se queda NUNCA sin reserva.
+   - La CAPACIDAD MÍNIMA: la menor capacidad nominal, en pasos de 0,1 Ah y evaluada al
+     SOH del panel, que es suficiente. Se busca por bisección SUPONIENDO que más batería
+     nunca empeora —con la misma química y la misma estrategia es lo esperable, pero es
+     una suposición y el informe lo dice—. Si ni 40 Ah bastan, se dice así: es el panel,
+     no la batería. */
+var CAPMIN_V=25.6, CAPMIN_PASO=0.1, CAPMIN_TOPE_AH=40;
+function reservaEnSerie(tramos,prof,loc,opts){return cuentaReserva(simulaSeguido(tramos,prof,loc,opts),1);}
+/* Cada batería carga con el suelo de SU ficha. El panel trae el de la EVALUADA (lo pone
+   sincronizaTmin), y pasárselo tal cual a las demás simulaba la -LT con el suelo de la
+   estándar: salían idénticas. Es el mismo defecto que tuvo la columna -LT. La evaluada
+   respeta lo que diga el panel. */
+function opcionesPara(p,prof,opts){
+  if((p.base||p).id===(prof.base||prof).id||!p.tCarga)return opts;
+  var o={};for(var k in opts)o[k]=opts[k];
+  o.tMin=p.tCarga[0]; return o;
+}
+function pausa(){return new Promise(function(r){setTimeout(r,0)});}
+async function capacidadMinima(tramos,prof,loc,opts,aviso){
+  var evals=0, cache={};
+  var basta=function(k){
+    if(cache[k]==null){cache[k]=reservaEnSerie(tramos,conCapacidad(prof,k*CAPMIN_PASO*CAPMIN_V),loc,opts).periodosRes===0;evals++;}   /* opts ya trae el suelo de esta química */
+    return cache[k];
+  };
+  var tope=Math.round(CAPMIN_TOPE_AH/CAPMIN_PASO);
+  if(aviso)aviso(0); await pausa();
+  if(!basta(tope))return {ah:null,tope:CAPMIN_TOPE_AH,evals:evals};
+  var lo=0, hi=tope;                                   /* lo: no basta (0 Ah no basta nunca); hi: basta */
+  while(hi-lo>1){
+    var mid=(lo+hi)>>1;
+    if(basta(mid))hi=mid; else lo=mid;
+    if(aviso)aviso(evals); await pausa();
+  }
+  return {ah:+(hi*CAPMIN_PASO).toFixed(1),evals:evals};
+}
+function perfilesDelCatalogo(prof){
+  var base=prof.base||prof;
+  return PROFILES.filter(function(p){return !p.variante && !!p.string===!!base.string;})
+    .map(function(p){return p.string?p:conPanel(p,prof.chgW);});
+}
+async function comparaCatalogo(tramos,prof,loc,opts,aviso){
+  var cat=perfilesDelCatalogo(prof), out=[];
+  for(var i=0;i<cat.length;i++){
+    var p=cat[i], CR=reservaEnSerie(tramos,p,loc,opcionesPara(p,prof,opts));
+    out.push({id:p.id,comercial:p.comercial||null,celda:p.celda||null,sinFicha:!!p.sinFicha,lt:!!p.lt,
+      ah:p.wh/CAPMIN_V,wh:p.wh,periodosRes:CR.periodosRes,diasRes:CR.diasRes,margenMin:CR.margenMin,
+      suficiente:CR.periodosRes===0,evaluado:(p.base||p).id===(prof.base||prof).id});
+    if(aviso)aviso(i+1,cat.length); await pausa();
+  }
+  out.sort(function(a,b){return (a.lt-b.lt)||(a.wh-b.wh)});
+  return out;
+}
+
 function clasificaBarrido(list,years,simYear){
   var res=[],caidos=[];
   list.forEach(function(meteo,i){
@@ -891,6 +949,7 @@ function simulate(meteo,prof,loc,soc0,opts){
   var t0Day=Math.floor((+meteo[0].t)/864e5);
   var soc=soc0, parked=false, prevPos=null, stow=0;
   var eRes=reservaWh(opts.motorModel), eDia=diaOperacionWh(opts.motorModel), seguridad=false;
+  var ladoNieve=null;                                  /* el lado de SP3 se fija al empezar la alarma */
   /* Temperatura de la BATERÍA, no la ambiente: es la que decide el calefactor y
      la que limita el C-rate. Hasta 2026-10-21 aquí se pasaba `m.temp` crudo —el
      gemelo sí modelaba la inercia (sim/planta.js), así que la MISMA regla tenía
@@ -938,6 +997,15 @@ function simulate(meteo,prof,loc,soc0,opts){
     var ab=AB.paso(dtH*3600,vf===0?m.gust:m.wind,trackPos,180+sun.az/D2R);
     stow=ab.estado;
     var nieve=m.snowDepth!=null && m.snowDepth>=SNOW_ALARM_M;
+    /* EL LADO DE LA NIEVE SE FIJA AL EMPEZAR, como el de la bandera de viento (sim/viento.js:
+       «el lado se fija al abanderar», lección del equipo real). La primera versión lo
+       recalculaba cada hora con el signo del seguimiento, y con nieve el seguidor cruzaba
+       de −55° a +55° al mediodía y volvía de noche: 110° a doble corriente, dos veces al
+       día. En Casalmaggiore eran 1822° de giro al año en nieve contra 117°, y por sí solo
+       subía la capacidad mínima de 14,4 a 20 Ah. Se queda del lado en que estaba, que es lo
+       que hace la NCU real: confirmado por el mantenedor el 2026-11-18. */
+    if(!nieve)ladoNieve=null;
+    else if(ladoNieve==null)ladoNieve=(prevPos!=null&&prevPos!==0)?Math.sign(prevPos):1;
     tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
     /* La hora se PLANIFICA antes de comprometerla —posición, movimiento y consumo—, porque
        el modo seguridad necesita saber lo que costaría para decidir si se la puede permitir.
@@ -946,7 +1014,7 @@ function simulate(meteo,prof,loc,soc0,opts){
     function planifica(aparcado){
     /* Jerarquía de la casa: viento (SP1) > nieve (SP3) > batería > seguimiento */
     var target=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo))
-                     :nieve?(trackPos<0?-1:1)*Math.min(SNOW_POS,AXIS_MAX)
+                     :nieve?ladoNieve*Math.min(SNOW_POS,AXIS_MAX)
                      :(aparcado?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
     if(prevPos==null)prevPos=target;
     /* BATERÍA AGOTADA: la TCU no mueve nada. Antes, con SOC 0 % el seguidor
@@ -1525,7 +1593,7 @@ function profNote(){
     ' · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · química '+
     (P.lt?'<b>LiFePO₄ de baja temperatura</b> — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C, descarga de '+P.tDescarga[0]+' a '+P.tDescarga[1]+' °C, SIN calefactor'
         :'LiFePO₄ estándar — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C, descarga de '+P.tDescarga[0]+' a '+P.tDescarga[1]+' °C')+
-    ' · motor 36 W a 0° … 67,2 W a 55° (curva medida, sin tope) · regulador η(G) PS26002_RevA';
+    ' · motor 36 W a 0° … 67,2 W a 55° (curva medida, sin tope) · regulador η(G) de P4Q (PS26002_RevA)';
 }
 /* Elegir equipo escribe SU suelo de carga en el panel: el umbral es del equipo,
    no una preferencia. Se puede seguir apartando a mano para estudiar qué pasa. */
@@ -1798,14 +1866,32 @@ $('run').onclick=function(){
         return {c:c,rows:rows,S:summarize(rows),soc0:socEstacionario(od.o),prof:od.p,S30:cuentaReserva(f,1)};
       }):null;
       var wMeteo=meteoSeguido.slice(peor.i0,peor.i1); meteoSeguido=null;
+      var catalogo=null, capMin=null;
+      var hito4=!$('capmin')||$('capmin').checked
+        ?(async function(){
+            var tag=$('srcTag');
+            catalogo=await comparaCatalogo(tramos,prof,loc,opts,function(i,n){tag.textContent='Baterías del catálogo '+i+'/'+n+'…';});
+            /* las dos químicas, sea cual sea la evaluada: la gemela se busca por id */
+            var est=(prof.base||prof), idStd=est.id.replace(/_LT$/,''), conP=function(p){return p&&!p.string?conPanel(p,prof.chgW):p};
+            var stdGem=PROFILES.filter(function(p){return p.id===idStd})[0], ltGem=PROFILES.filter(function(p){return p.id===idStd+'_LT'})[0];
+            var quims=[{n:'estándar',p:prof.lt?conP(stdGem):prof},{n:'-LT',p:prof.lt?prof:conP(ltGem)}].filter(function(q){return q.p});
+            capMin=[];
+            for(var q=0;q<quims.length;q++){
+              var r=await capacidadMinima(tramos,quims[q].p,loc,opcionesPara(quims[q].p,prof,opts),function(e){tag.textContent='Capacidad mínima ('+quims[q].n+'): '+e+' simulaciones de la serie…';});
+              capMin.push({quimica:quims[q].n,id:quims[q].p.id,ah:r.ah,tope:r.tope||null,evals:r.evals});
+            }
+          })()
+        :Promise.resolve();
+      return hito4.then(function(){
       var a0=tramos[0].years[0], a1=tramos[tramos.length-1].years.slice(-1)[0];
       $('srcTag').textContent=(a1-a0+1)+' años seguidos ('+a0+'–'+a1+') · invierno que gobierna '+peor.label+' · '+loc.n+' · paso 60 min';
       LAST={meteo:wMeteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,soc0:socEstacionario(opts),socModo:'estacionario',
         sweep:{inviernos:inv,worst:peor.label,caidos:cl.caidos,pedidos:years.length,anos:[a0,a1],
                tramos:tramos.map(function(t){return [t.years[0],t.years[t.years.length-1]]}),
-               total:total,refTotal:refTotal,gobierna:gob},controls:ctrlW,
+               total:total,refTotal:refTotal,gobierna:gob,catalogo:catalogo,capMin:capMin},controls:ctrlW,
         weatherContract:null,weatherFallback:null};
       render(wMeteo,mng,ref,prof,loc,opts,LAST.sweep,null,ctrlW);
+      });
     });
   }else{
     job=getMeteo(loc).then(function(meteo){
@@ -2014,6 +2100,16 @@ function tbl(rows,head){
       var v=(typeof c==='object')?c.v:c;
       return '<td class="'+cls+'">'+v+'</td>';}).join('')+'</tr>';}).join('')+'</table>';
 }
+/* La frase del hito 4 para la conclusión: la menor batería del catálogo que basta y la
+   capacidad mínima de cada química. */
+function frasesCapMin(sw){
+  var suf=(sw.catalogo||[]).filter(function(c){return c.suficiente}), menor=suf.sort(function(a,b){return a.wh-b.wh})[0];
+  var cm=sw.capMin.map(function(c){return c.ah!=null?'<b>'+fmt(c.ah,1)+' Ah</b> con la química '+c.quimica
+    :'<b>más de '+c.tope+' Ah</b> con la química '+c.quimica+' (no es la batería: es el panel)'});
+  return (sw.catalogo?(menor?'De las baterías del catálogo, la menor que no se queda nunca sin reserva es <b>'+(menor.comercial||menor.id)+'</b>. '
+      :'<b>Ninguna batería del catálogo basta</b> con este panel y esta estrategia. '):'')+
+    'La capacidad mínima, con la batería al final de su vida, es de '+cm.join(' y de ')+' (apartado 8.2).';
+}
 function buildReport(){
   if(!LAST){alert('Ejecuta primero una simulación.');return;}
   var mng=LAST.mng, ref=LAST.ref, prof=LAST.prof, loc=LAST.loc, opts=LAST.opts;
@@ -2092,6 +2188,7 @@ function buildReport(){
         :'baja <b>'+T30.periodosRes+' '+(T30.periodosRes===1?'vez':'veces')+'</b> de la reserva, en '+T30.diasRes+' '+(T30.diasRes===1?'día':'días')+', repartidas en '+
          sweep.inviernos.filter(function(w){return w.periodosRes>0}).length+' inviernos.')+
        ' El invierno que gobierna, el que se detalla, es el <b>'+sweep.worst+'</b>.':'')+
+     (sweep&&sweep.capMin&&sweep.capMin.length?' '+frasesCapMin(sweep):'')+
      (mejor?' De los sistemas de control evaluados, el más favorable en este emplazamiento es <b>'+mejor.c.n+'</b>: '+
        'entre los que menos horas pasan por debajo de la reserva para llegar a seguridad ('+fmt(elec.minRes)+' h), el de mayor disponibilidad y, a igualdad, mayor vida.'+
        (elec.descartados.length?' Quedan descartados por bajar de esa reserva: '+elec.descartados.map(function(x){
@@ -2159,7 +2256,7 @@ function buildReport(){
      ['Variante de baja temperatura (-LT)',{v:prof.lt
         ?'sí — celda LiFePO₄ de baja temperatura, <b>sin calefactor</b>: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'
         :'no — celda LiFePO₄ estándar: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'}],
-     ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes (medido Factiun)'}],
+     ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes, con radio y sin motor (medida de IED)'}],
      ['Modelo de consumo de motor',{v:motorTxt}],
      ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
      ['Dato que dispara la bandera de viento',{v:(S.vientoPor==='media'
@@ -2167,13 +2264,13 @@ function buildReport(){
         :'la <b>racha</b> a 10 m, que es lo que compara la NCU')+' (umbrales en el apartado 4)'+
         (S.hSinRacha>0?'. <b>La fuente no trae racha en '+fmt(S.hSinRacha)+' h</b>: en esas horas se abandera con la media, que se queda corta':''),
         cls:S.hSinRacha>0?'wn':''}],
-     ['Abanderamiento por nieve',{v:'SP3, la regla de la HSU: nieve acumulada ≥ '+fmt(SNOW_ALARM_M*100)+' cm → '+SNOW_POS+'° del lado del sol mientras dure la alarma'+
+     ['Abanderamiento por nieve',{v:'SP3, la regla de la HSU: nieve acumulada ≥ '+fmt(SNOW_ALARM_M*100)+' cm → '+SNOW_POS+'° del lado en que estaba al saltar la alarma, mientras dure'+
         (S.hSinNieve>0?'. <b>La fuente no trae nieve acumulada en '+fmt(S.hSinNieve)+' h</b>: en esas horas no se abandera por nieve':''),
         cls:S.hSinNieve>0?'wn':''}],
      ['Efecto del viento sobre el consumo',{v:'las maniobras de protección —viento, nieve y modo seguridad— se cobran ×'+K_STOW_MOTOR+'; el seguimiento con viento, no — ver limitaciones',cls:'wn'}],
      ['Tª mínima de carga',{v:opts.tMin+' °C'}],
      ['Umbral mínimo de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
-     ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA'}],
+     ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA, curva del regulador de <b>P4Q</b>: la del regulador de la TCU SUNNER no está disponible',cls:'wn'}],
      ['Montaje de la fuente de carga',{v:opts.mountTilt!=null?('panel fijo a '+opts.mountTilt+'° orientado al ecuador'):'solidario al seguidor (plano del generador)'}],
      ['Curva de carga',{v:'CC/CV — derate ×0,8 sobre 85 % SOC, ×0,5 sobre 90 %, ×0,2 sobre 95 %'}],
      ['SOC inicial',{v:LAST.socModo==='estacionario'
@@ -2279,6 +2376,28 @@ function buildReport(){
         {v:fmt(d.eFin,1)+' Wh',cls:d.margenFin<0?'bad':''},{v:fmt(d.margenFin,1)+' Wh'+(d.seg?' · modo seguridad':''),cls:d.margenFin<0||d.seg?'bad':''}]}),
         ['Día','Carga del panel','Electrónica','Motor','Batería al final del día','Margen sobre la reserva']);
     }
+    /* 8.2 BATERÍAS DEL CATÁLOGO Y CAPACIDAD MÍNIMA */
+    if(sweep.catalogo&&sweep.catalogo.length){
+      H+='<h3>8.2 Baterías del catálogo y capacidad mínima</h3>';
+      H+='<p>Cada batería del catálogo del mismo tipo, con el mismo panel ('+fmt(prof.chgW)+' W), la misma estrategia y los mismos '+nA+' años seguidos, '+
+         'con la batería '+(envejecida?'al final de su vida ('+fmt(100*cap/prof.wh)+' % de la nominal)':'nueva')+'. '+
+         'Es <b>suficiente</b> si no se queda nunca sin reserva para llegar a seguridad.</p>';
+      H+=tbl(sweep.catalogo.map(function(c){return [
+          (c.evaluado?'<b>':'')+(c.comercial||c.id)+(c.evaluado?'</b> — la evaluada':'')+(c.sinFicha?' <small>(sin ficha SUNNER)</small>':''),
+          {v:c.celda||'—'},{v:fmt(c.ah,1)+' Ah · '+fmt(c.wh,1)+' Wh'},
+          {v:c.suficiente?'Suficiente':'Insuficiente',cls:c.suficiente?'ok':'bad'},
+          {v:c.periodosRes+(c.periodosRes?' ('+c.diasRes+' d)':''),cls:c.periodosRes?'bad':''},
+          {v:fmt(c.margenMin,1)+' Wh',cls:c.margenMin<0?'bad':''}];}),
+        ['Batería','Celda','Capacidad nominal','Resultado','Veces sin reserva','Margen mínimo']);
+      if(sweep.capMin&&sweep.capMin.length){
+        H+='<p><b>Capacidad mínima</b>: la menor capacidad nominal, en pasos de '+fmt(CAPMIN_PASO,1)+' Ah, que no se queda nunca sin reserva en los '+nA+' años'+
+           (envejecida?', evaluada al final de su vida para que se compare directamente con las del catálogo':'')+'. '+
+           sweep.capMin.map(function(c){return 'Química '+c.quimica+': '+(c.ah!=null?'<b>'+fmt(c.ah,1)+' Ah</b> ('+fmt(c.ah*CAPMIN_V)+' Wh)'
+             :'<b>más de '+c.tope+' Ah</b>: ninguna batería basta con este panel, y el límite es la carga y no la capacidad')}).join('. ')+'. '+
+           'Se busca por bisección suponiendo que más batería, con la misma química y la misma estrategia, nunca empeora el resultado; '+
+           'el escalón inmediatamente inferior queda simulado y no basta.</p>';
+      }
+    }
   }
 
   /* 9. SISTEMAS DE CONTROL */
@@ -2331,6 +2450,8 @@ function buildReport(){
      '<li><b>La vida que da este informe es CALCULADA y no es la de la ficha.</b> Sale del conteo rainflow más Palmgren-Miner y de la degradación calendaria, sobre la serie meteorológica de este emplazamiento. SUNNER estima la suya por otro camino en <i>SUNNER TCU SP 6Ah Battery Life Estimation</i> (18/09/2024): 2000 ciclos de ensayo entre 80 ciclos/año dan 25 años por ciclado, la calendaria a 25 °C con SoC por debajo del 70 % da más de 12 años, y concluye <b>más de 10 años</b>; en emplazamientos calientes, con tres horas diarias a 45 °C, baja a <b>7 años</b> en el peor caso, que es de donde sale el «&gt; 6 años» de la ficha. Las dos estimaciones no son comparables sin más: los 80 ciclos/año de SUNNER son el caso SIN aportación del panel —su medida es explícitamente «under the worst conditions, when there is no input energy from the solar panel»— mientras que aquí el panel recarga durante el día y el ciclado efectivo sale menor. <b>La cifra de este apartado no debe citarse como garantía</b>: para eso manda la ficha.</li>'+
      '<li><b>El límite superior de carga de la -LT (60 °C) no se modela</b>: se le aplica el derate JEITA de la celda estándar (recorte desde 35 °C, nulo a 45 °C), que para la -LT es conservador. Y el límite de DESCARGA no se modela en ninguna de las dos variantes: la batería entrega por debajo de su mínimo (−10 °C la estándar, −40 °C la -LT) como si nada. Importa en emplazamientos muy fríos.</li>'+
      '<li><b>El efecto del viento sobre el consumo del motor sólo se cobra en las maniobras de protección.</b> La bandera de viento, la de nieve y el modo seguridad se cobran a ×'+K_STOW_MOTOR+' de corriente, que es el supuesto del informe de Track N Co sobre este mismo tracker, sin medida propia. El seguimiento con viento por debajo del umbral de bandera sigue sin cargo extra, así que en emplazamientos ventosos el consumo simulado es un <b>límite inferior</b>. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
+     '<li><b>En la posición de nieve el seguidor se queda del lado en que estaba al saltar la alarma</b>, que es lo que hace la NCU real (confirmado por Factiun, 2026-11-18). El gemelo de planta la recalcula con el sol en cada paso y en eso está mal: obligaría a cruzar 110° dos veces al día mientras dura la nieve.</li>'+
+     '<li><b>El rendimiento del regulador con poca luz es el de P4Q</b> (PS26002_RevA), no el de la TCU SUNNER, que no está disponible. Es el supuesto que más mueve el resultado en invierno, porque decide cuánto se carga en los días cubiertos: rinde el 38 % a 50 W/m² y el 61 % a 100 W/m². Un regulador mejor con poca luz daría bastante más margen.</li>'+
      '<li><b>El abanderamiento se decide con la racha horaria de ERA5</b> (la máxima de la hora, en una rejilla de unos 30 km). La racha local en una ladera o en un valle puede ser bastante distinta. Y la <b>nieve acumulada</b> también es de rejilla: en un valle frío la real puede durar más.</li>'+
      '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
      '<li><b>La reserva para llegar a seguridad se calcula para el peor caso fijo</b>, la maniobra de −'+AXIS_MAX+'° a la defensa en +'+DEFENSE_POS+'°, y no desde la posición de cada momento. '+
@@ -2495,6 +2616,13 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
     });
     caidosUI.forEach(function(c){tb+='<tr><td>'+c.year+'</td><td class="wn" colspan="6">no disponible — '+c.motivo+'</td></tr>'});
     tb+='</table>';
+    if(sweep.catalogo){
+      tb+='<h3 style="margin-top:12px">Baterías del catálogo · '+nAn+' años · capacidad mínima '+
+        (sweep.capMin||[]).map(function(c){return c.quimica+' '+(c.ah!=null?fmt(c.ah,1)+' Ah':'> '+c.tope+' Ah')}).join(' · ')+'</h3>'+
+        '<table class="cmp"><tr><th>Batería</th><th>Capacidad</th><th>Resultado</th><th>Veces sin reserva</th><th>Margen mín.</th></tr>'+
+        sweep.catalogo.map(function(c){return '<tr><td>'+(c.evaluado?'<b>':'')+(c.comercial||c.id)+(c.evaluado?'</b>':'')+'</td><td>'+fmt(c.ah,1)+' Ah</td>'+
+          '<td class="'+(c.suficiente?'':'bad')+'">'+(c.suficiente?'Suficiente':'Insuficiente')+'</td><td>'+c.periodosRes+'</td><td>'+fmt(c.margenMin,1)+' Wh</td></tr>'}).join('')+'</table>';
+    }
     cS.insertAdjacentHTML('beforeend',tb);
     out.appendChild(cS);
   }
