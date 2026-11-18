@@ -241,6 +241,8 @@ table.cmp th{color:var(--tx3)}
     <div class="fld"><label>Abanderamiento por</label><select id="vientoStow">
       <option value="racha" selected>racha a 10 m (la NCU compara la racha)</option>
       <option value="media">viento medio horario (como hasta el hito 3)</option></select></div>
+    <label class="sw"><input type="checkbox" id="capmin" checked>
+      <span>En el barrido de años: baterías del catálogo y capacidad mínima<small>Unas 20 simulaciones más de la serie entera: segundos, no minutos</small></span></label>
     <label class="sw"><input type="checkbox" id="aged" checked>
       <span>Batería envejecida: se evalúa al 80 % de su capacidad nominal (final de vida)</span></label>
     <label class="sw"><input type="checkbox" id="cmp" checked>
@@ -744,6 +746,62 @@ function periodoQueGobierna(rows,opts,j0,j1){
   }
   return {i0:i0,i1:i1+1,iMin:iM,t:rows[iM].t,margenMin:CR.margenMin,eMin:rows[iM].soc*cap,dias:dias,
           horasEnMinimo:iE-iM+1,cortadoIni:cortadoIni,cortadoFin:cortadoFin};
+}
+
+/* ═══════════ CAPACIDAD MÍNIMA Y BATERÍAS DEL CATÁLOGO (hito 4, 2026-11-18) ═══════════
+   Lo cuarto que Track N Co hacía y nosotros no. Sobre los MISMOS años seguidos:
+   - Cada batería del catálogo del mismo tipo (SP o STRING), con el mismo panel y la
+     misma estrategia: suficiente si no se queda NUNCA sin reserva.
+   - La CAPACIDAD MÍNIMA: la menor capacidad nominal, en pasos de 0,1 Ah y evaluada al
+     SOH del panel, que es suficiente. Se busca por bisección SUPONIENDO que más batería
+     nunca empeora —con la misma química y la misma estrategia es lo esperable, pero es
+     una suposición y el informe lo dice—. Si ni 40 Ah bastan, se dice así: es el panel,
+     no la batería. */
+var CAPMIN_V=25.6, CAPMIN_PASO=0.1, CAPMIN_TOPE_AH=40;
+function reservaEnSerie(tramos,prof,loc,opts){return cuentaReserva(simulaSeguido(tramos,prof,loc,opts),1);}
+/* Cada batería carga con el suelo de SU ficha. El panel trae el de la EVALUADA (lo pone
+   sincronizaTmin), y pasárselo tal cual a las demás simulaba la -LT con el suelo de la
+   estándar: salían idénticas. Es el mismo defecto que tuvo la columna -LT. La evaluada
+   respeta lo que diga el panel. */
+function opcionesPara(p,prof,opts){
+  if((p.base||p).id===(prof.base||prof).id||!p.tCarga)return opts;
+  var o={};for(var k in opts)o[k]=opts[k];
+  o.tMin=p.tCarga[0]; return o;
+}
+function pausa(){return new Promise(function(r){setTimeout(r,0)});}
+async function capacidadMinima(tramos,prof,loc,opts,aviso){
+  var evals=0, cache={};
+  var basta=function(k){
+    if(cache[k]==null){cache[k]=reservaEnSerie(tramos,conCapacidad(prof,k*CAPMIN_PASO*CAPMIN_V),loc,opts).periodosRes===0;evals++;}   /* opts ya trae el suelo de esta química */
+    return cache[k];
+  };
+  var tope=Math.round(CAPMIN_TOPE_AH/CAPMIN_PASO);
+  if(aviso)aviso(0); await pausa();
+  if(!basta(tope))return {ah:null,tope:CAPMIN_TOPE_AH,evals:evals};
+  var lo=0, hi=tope;                                   /* lo: no basta (0 Ah no basta nunca); hi: basta */
+  while(hi-lo>1){
+    var mid=(lo+hi)>>1;
+    if(basta(mid))hi=mid; else lo=mid;
+    if(aviso)aviso(evals); await pausa();
+  }
+  return {ah:+(hi*CAPMIN_PASO).toFixed(1),evals:evals};
+}
+function perfilesDelCatalogo(prof){
+  var base=prof.base||prof;
+  return PROFILES.filter(function(p){return !p.variante && !!p.string===!!base.string;})
+    .map(function(p){return p.string?p:conPanel(p,prof.chgW);});
+}
+async function comparaCatalogo(tramos,prof,loc,opts,aviso){
+  var cat=perfilesDelCatalogo(prof), out=[];
+  for(var i=0;i<cat.length;i++){
+    var p=cat[i], CR=reservaEnSerie(tramos,p,loc,opcionesPara(p,prof,opts));
+    out.push({id:p.id,comercial:p.comercial||null,celda:p.celda||null,sinFicha:!!p.sinFicha,lt:!!p.lt,
+      ah:p.wh/CAPMIN_V,wh:p.wh,periodosRes:CR.periodosRes,diasRes:CR.diasRes,margenMin:CR.margenMin,
+      suficiente:CR.periodosRes===0,evaluado:(p.base||p).id===(prof.base||prof).id});
+    if(aviso)aviso(i+1,cat.length); await pausa();
+  }
+  out.sort(function(a,b){return (a.lt-b.lt)||(a.wh-b.wh)});
+  return out;
 }
 
 function clasificaBarrido(list,years,simYear){
@@ -1798,14 +1856,32 @@ $('run').onclick=function(){
         return {c:c,rows:rows,S:summarize(rows),soc0:socEstacionario(od.o),prof:od.p,S30:cuentaReserva(f,1)};
       }):null;
       var wMeteo=meteoSeguido.slice(peor.i0,peor.i1); meteoSeguido=null;
+      var catalogo=null, capMin=null;
+      var hito4=!$('capmin')||$('capmin').checked
+        ?(async function(){
+            var tag=$('srcTag');
+            catalogo=await comparaCatalogo(tramos,prof,loc,opts,function(i,n){tag.textContent='Baterías del catálogo '+i+'/'+n+'…';});
+            /* las dos químicas, sea cual sea la evaluada: la gemela se busca por id */
+            var est=(prof.base||prof), idStd=est.id.replace(/_LT$/,''), conP=function(p){return p&&!p.string?conPanel(p,prof.chgW):p};
+            var stdGem=PROFILES.filter(function(p){return p.id===idStd})[0], ltGem=PROFILES.filter(function(p){return p.id===idStd+'_LT'})[0];
+            var quims=[{n:'estándar',p:prof.lt?conP(stdGem):prof},{n:'-LT',p:prof.lt?prof:conP(ltGem)}].filter(function(q){return q.p});
+            capMin=[];
+            for(var q=0;q<quims.length;q++){
+              var r=await capacidadMinima(tramos,quims[q].p,loc,opcionesPara(quims[q].p,prof,opts),function(e){tag.textContent='Capacidad mínima ('+quims[q].n+'): '+e+' simulaciones de la serie…';});
+              capMin.push({quimica:quims[q].n,id:quims[q].p.id,ah:r.ah,tope:r.tope||null,evals:r.evals});
+            }
+          })()
+        :Promise.resolve();
+      return hito4.then(function(){
       var a0=tramos[0].years[0], a1=tramos[tramos.length-1].years.slice(-1)[0];
       $('srcTag').textContent=(a1-a0+1)+' años seguidos ('+a0+'–'+a1+') · invierno que gobierna '+peor.label+' · '+loc.n+' · paso 60 min';
       LAST={meteo:wMeteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,soc0:socEstacionario(opts),socModo:'estacionario',
         sweep:{inviernos:inv,worst:peor.label,caidos:cl.caidos,pedidos:years.length,anos:[a0,a1],
                tramos:tramos.map(function(t){return [t.years[0],t.years[t.years.length-1]]}),
-               total:total,refTotal:refTotal,gobierna:gob},controls:ctrlW,
+               total:total,refTotal:refTotal,gobierna:gob,catalogo:catalogo,capMin:capMin},controls:ctrlW,
         weatherContract:null,weatherFallback:null};
       render(wMeteo,mng,ref,prof,loc,opts,LAST.sweep,null,ctrlW);
+      });
     });
   }else{
     job=getMeteo(loc).then(function(meteo){
@@ -2014,6 +2090,16 @@ function tbl(rows,head){
       var v=(typeof c==='object')?c.v:c;
       return '<td class="'+cls+'">'+v+'</td>';}).join('')+'</tr>';}).join('')+'</table>';
 }
+/* La frase del hito 4 para la conclusión: la menor batería del catálogo que basta y la
+   capacidad mínima de cada química. */
+function frasesCapMin(sw){
+  var suf=(sw.catalogo||[]).filter(function(c){return c.suficiente}), menor=suf.sort(function(a,b){return a.wh-b.wh})[0];
+  var cm=sw.capMin.map(function(c){return c.ah!=null?'<b>'+fmt(c.ah,1)+' Ah</b> con la química '+c.quimica
+    :'<b>más de '+c.tope+' Ah</b> con la química '+c.quimica+' (no es la batería: es el panel)'});
+  return (sw.catalogo?(menor?'De las baterías del catálogo, la menor que no se queda nunca sin reserva es <b>'+(menor.comercial||menor.id)+'</b>. '
+      :'<b>Ninguna batería del catálogo basta</b> con este panel y esta estrategia. '):'')+
+    'La capacidad mínima, con la batería al final de su vida, es de '+cm.join(' y de ')+' (apartado 8.2).';
+}
 function buildReport(){
   if(!LAST){alert('Ejecuta primero una simulación.');return;}
   var mng=LAST.mng, ref=LAST.ref, prof=LAST.prof, loc=LAST.loc, opts=LAST.opts;
@@ -2092,6 +2178,7 @@ function buildReport(){
         :'baja <b>'+T30.periodosRes+' '+(T30.periodosRes===1?'vez':'veces')+'</b> de la reserva, en '+T30.diasRes+' '+(T30.diasRes===1?'día':'días')+', repartidas en '+
          sweep.inviernos.filter(function(w){return w.periodosRes>0}).length+' inviernos.')+
        ' El invierno que gobierna, el que se detalla, es el <b>'+sweep.worst+'</b>.':'')+
+     (sweep&&sweep.capMin&&sweep.capMin.length?' '+frasesCapMin(sweep):'')+
      (mejor?' De los sistemas de control evaluados, el más favorable en este emplazamiento es <b>'+mejor.c.n+'</b>: '+
        'entre los que menos horas pasan por debajo de la reserva para llegar a seguridad ('+fmt(elec.minRes)+' h), el de mayor disponibilidad y, a igualdad, mayor vida.'+
        (elec.descartados.length?' Quedan descartados por bajar de esa reserva: '+elec.descartados.map(function(x){
@@ -2278,6 +2365,28 @@ function buildReport(){
         {v:fmt(d.motor,1)+' Wh'+(d.stowH?' · abanderado '+fmt(d.stowH)+' h':'')},
         {v:fmt(d.eFin,1)+' Wh',cls:d.margenFin<0?'bad':''},{v:fmt(d.margenFin,1)+' Wh'+(d.seg?' · modo seguridad':''),cls:d.margenFin<0||d.seg?'bad':''}]}),
         ['Día','Carga del panel','Electrónica','Motor','Batería al final del día','Margen sobre la reserva']);
+    }
+    /* 8.2 BATERÍAS DEL CATÁLOGO Y CAPACIDAD MÍNIMA */
+    if(sweep.catalogo&&sweep.catalogo.length){
+      H+='<h3>8.2 Baterías del catálogo y capacidad mínima</h3>';
+      H+='<p>Cada batería del catálogo del mismo tipo, con el mismo panel ('+fmt(prof.chgW)+' W), la misma estrategia y los mismos '+nA+' años seguidos, '+
+         'con la batería '+(envejecida?'al final de su vida ('+fmt(100*cap/prof.wh)+' % de la nominal)':'nueva')+'. '+
+         'Es <b>suficiente</b> si no se queda nunca sin reserva para llegar a seguridad.</p>';
+      H+=tbl(sweep.catalogo.map(function(c){return [
+          (c.evaluado?'<b>':'')+(c.comercial||c.id)+(c.evaluado?'</b> — la evaluada':'')+(c.sinFicha?' <small>(sin ficha SUNNER)</small>':''),
+          {v:c.celda||'—'},{v:fmt(c.ah,1)+' Ah · '+fmt(c.wh,1)+' Wh'},
+          {v:c.suficiente?'Suficiente':'Insuficiente',cls:c.suficiente?'ok':'bad'},
+          {v:c.periodosRes+(c.periodosRes?' ('+c.diasRes+' d)':''),cls:c.periodosRes?'bad':''},
+          {v:fmt(c.margenMin,1)+' Wh',cls:c.margenMin<0?'bad':''}];}),
+        ['Batería','Celda','Capacidad nominal','Resultado','Veces sin reserva','Margen mínimo']);
+      if(sweep.capMin&&sweep.capMin.length){
+        H+='<p><b>Capacidad mínima</b>: la menor capacidad nominal, en pasos de '+fmt(CAPMIN_PASO,1)+' Ah, que no se queda nunca sin reserva en los '+nA+' años'+
+           (envejecida?', evaluada al final de su vida para que se compare directamente con las del catálogo':'')+'. '+
+           sweep.capMin.map(function(c){return 'Química '+c.quimica+': '+(c.ah!=null?'<b>'+fmt(c.ah,1)+' Ah</b> ('+fmt(c.ah*CAPMIN_V)+' Wh)'
+             :'<b>más de '+c.tope+' Ah</b>: ninguna batería basta con este panel, y el límite es la carga y no la capacidad')}).join('. ')+'. '+
+           'Se busca por bisección suponiendo que más batería, con la misma química y la misma estrategia, nunca empeora el resultado; '+
+           'el escalón inmediatamente inferior queda simulado y no basta.</p>';
+      }
     }
   }
 
@@ -2495,6 +2604,13 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
     });
     caidosUI.forEach(function(c){tb+='<tr><td>'+c.year+'</td><td class="wn" colspan="6">no disponible — '+c.motivo+'</td></tr>'});
     tb+='</table>';
+    if(sweep.catalogo){
+      tb+='<h3 style="margin-top:12px">Baterías del catálogo · '+nAn+' años · capacidad mínima '+
+        (sweep.capMin||[]).map(function(c){return c.quimica+' '+(c.ah!=null?fmt(c.ah,1)+' Ah':'> '+c.tope+' Ah')}).join(' · ')+'</h3>'+
+        '<table class="cmp"><tr><th>Batería</th><th>Capacidad</th><th>Resultado</th><th>Veces sin reserva</th><th>Margen mín.</th></tr>'+
+        sweep.catalogo.map(function(c){return '<tr><td>'+(c.evaluado?'<b>':'')+(c.comercial||c.id)+(c.evaluado?'</b>':'')+'</td><td>'+fmt(c.ah,1)+' Ah</td>'+
+          '<td class="'+(c.suficiente?'':'bad')+'">'+(c.suficiente?'Suficiente':'Insuficiente')+'</td><td>'+c.periodosRes+'</td><td>'+fmt(c.margenMin,1)+' Wh</td></tr>'}).join('')+'</table>';
+    }
     cS.insertAdjacentHTML('beforeend',tb);
     out.appendChild(cS);
   }

@@ -786,13 +786,15 @@ const seg = await pg.evaluate(async () => {
       meteoAlineada: LAST.meteo.length === LAST.mng.length && +LAST.meteo[0].t === +LAST.mng[0].t,
       s30: (LAST.controls || []).every((x) => x.S30 && typeof x.S30.hBajoReserva === 'number'),
       dias: sw.gobierna.dias.length,
+      catalogo: (sw.catalogo || []).length, capMin: (sw.capMin || []).length,
       gobDentro: inviernoDe(sw.gobierna.t) === peor.inv, peorEsPosterior: peor.inv === yEnd - 2,
       primerMinimoAntes: inviernoDe(sw.total.margenMinT) < peor.inv, doc };
   };
   const ok5 = await corre(null), conHueco = await corre(yEnd - 3);
   window.fetchYearDeclarado = fetchReal;
   R.e2e = ok5 && Object.assign({}, ok5, { doc: undefined,
-    informe: ['años seguidos', 'Periodo que gobierna', 'Figura 5', '<svg', 'julio a junio', 'sin reiniciar la batería'].filter((x) => !ok5.doc.includes(x)) });
+    informe: ['años seguidos', 'Periodo que gobierna', 'Figura 5', '<svg', 'julio a junio', 'sin reiniciar la batería',
+      '8.2 Baterías del catálogo y capacidad mínima', 'La capacidad mínima, con la batería al final de su vida'].filter((x) => !ok5.doc.includes(x)) });
   R.hueco = conHueco && { tramos: conHueco.tramos, caidos: conHueco.caidos, dice: conHueco.doc.includes('Faltan años en la fuente') };
   R.gobAno = ok5 && ok5.worst;
   return R;
@@ -829,6 +831,8 @@ ok(seg.e2e && seg.e2e.peorEsPosterior && seg.e2e.primerMinimoAntes,
   JSON.stringify(seg.e2e && { worst: seg.e2e.worst, posterior: seg.e2e.peorEsPosterior, antes: seg.e2e.primerMinimoAntes }));
 ok(seg.e2e && seg.e2e.gobDentro,
   'y el periodo que gobierna cae DENTRO del invierno que gobierna, no en otro que llegó antes al mismo mínimo', JSON.stringify(seg.e2e && { worst: seg.e2e.worst, dentro: seg.e2e.gobDentro }));
+ok(seg.e2e && seg.e2e.catalogo === 3 && seg.e2e.capMin === 2,
+  'el barrido trae las tres baterías del catálogo y la capacidad mínima de las dos químicas', JSON.stringify(seg.e2e && { cat: seg.e2e.catalogo, cm: seg.e2e.capMin }));
 ok(seg.e2e && seg.e2e.informe.length === 0, 'y el informe lo cuenta: años seguidos, inviernos de julio a junio, la figura de márgenes y el periodo que gobierna',
   seg.e2e ? 'falta: ' + seg.e2e.informe.join(', ') : 'sin corrida');
 ok(seg.hueco && seg.hueco.tramos === 2 && seg.hueco.caidos === 1 && seg.hueco.dice,
@@ -930,6 +934,51 @@ ok(h3.llegaPanel && h3.llegaPanelMedia, 'y el selector del panel llega a la simu
     'planta ' + enPlanta + ' / ' + sp3 + ' · batería ' + enBat + ' / ' + posBat);
 }
 
+/* ── 13) CAPACIDAD MÍNIMA Y BATERÍAS DEL CATÁLOGO (hito 4, 2026-11-18) ──
+   Lo cuarto de Track N Co: qué baterías del catálogo bastan en esos años, y cuál es la
+   menor capacidad que basta, en pasos de 0,1 Ah y al final de vida. */
+const h4 = await pg.evaluate(async () => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const seis = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0], lt = PROFILES.filter((p) => p.id === 'SP_45W_6Ah_LT')[0];
+  const strg = PROFILES.filter((p) => p.id === 'STRING_60W_6Ah')[0];
+  const o = { motorModel: 'factiun', soh: SOH_FIN_VIDA, winter: false, strategy: true, socTgt: 80, socCrit: 30, fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const bis = (y) => (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0));
+  const ano = (y, osc, temp) => synthMeteo(loc, bis(y) ? 366 : 365, 1, 40).map((m, i) => {
+    const r = Object.assign({}, m, { t: new Date(Date.UTC(y, 0, 1) + i * 36e5) }), d = Math.floor(i / 24);
+    if (temp != null) r.temp = temp;
+    return osc && d >= osc[0] && d < osc[1] ? Object.assign(r, { ghi: 0, dhi: 0, poa: null }) : r;
+  });
+  const R = {};
+  /* a) la capacidad mínima basta, y 0,1 Ah menos no: comprobado AQUÍ, re-simulando */
+  const tr = tramosContinuos([ano(2001), ano(2002, [10, 17])], [2001, 2002]);
+  const cm = await capacidadMinima(tr, seis, loc, o);
+  const per = (ah) => reservaEnSerie(tr, conCapacidad(seis, ah * 25.6), loc, o).periodosRes;
+  R.cm = { ah: cm.ah, evals: cm.evals, basta: per(cm.ah), menos: per(+(cm.ah - 0.1).toFixed(1)) };
+  /* b) sin carga ninguna, ni 40 Ah bastan: lo dice así, no da un número */
+  const sinCarga = await capacidadMinima(tr, seis, loc, Object.assign({}, o, { tMin: 99 }));
+  R.tope = sinCarga;
+  /* c) el catálogo es el del mismo tipo, sin variantes, con el panel de la evaluada */
+  R.catSP = perfilesDelCatalogo(conPanel(seis, 60)).map((p) => p.id + '@' + p.chgW);
+  R.catSTR = perfilesDelCatalogo(strg).map((p) => p.id);
+  /* d) cada batería con el suelo de SU ficha: a −10 °C todo el año, la -LT carga y la estándar no */
+  const frio = tramosContinuos([ano(2001, null, -10), ano(2002, null, -10)], [2001, 2002]);
+  R.suelo = { lt: opcionesPara(lt, seis, o).tMin, propia: opcionesPara(seis, seis, o) === o };
+  const C = await comparaCatalogo(frio, seis, loc, o);
+  const std = C.filter((c) => c.id === 'SP_45W_6Ah')[0], cLT = C.filter((c) => c.id === 'SP_45W_6Ah_LT')[0];
+  R.frio = { std: std.periodosRes, lt: cLT.periodosRes, evaluado: C.filter((c) => c.evaluado).map((c) => c.id).join(',') };
+  return R;
+});
+ok(h4.cm.ah > 0 && h4.cm.basta === 0 && h4.cm.menos > 0 && h4.cm.evals <= 11,
+  'la capacidad mínima (' + h4.cm.ah + ' Ah) BASTA y 0,1 Ah menos ya no, comprobado re-simulando aquí; ' + h4.cm.evals + ' simulaciones de la serie',
+  JSON.stringify(h4.cm));
+ok(h4.tope.ah === null && h4.tope.tope === 40,
+  'sin carga ninguna, ni 40 Ah bastan, y lo dice así en vez de dar un número: el límite es el panel, no la batería', JSON.stringify(h4.tope));
+ok(h4.catSP.join(',') === 'SP_60W_3Ah@60,SP_60W_6Ah@60,SP_60W_6Ah_LT@60' && h4.catSTR.join(',') === 'STRING_60W_3Ah,STRING_60W_6Ah,STRING_60W_6Ah_LT',
+  'el catálogo comparado es el del mismo tipo, sin variantes repetidas y con el panel de la evaluada', h4.catSP.join(',') + ' | ' + h4.catSTR.join(','));
+ok(h4.suelo.lt === -20 && h4.suelo.propia && h4.frio.lt < h4.frio.std && h4.frio.evaluado === 'SP_45W_6Ah',
+  'cada batería del catálogo carga con el suelo de SU ficha: a −10 °C la -LT (' + h4.frio.lt + ') queda por delante de la estándar (' + h4.frio.std + ')',
+  JSON.stringify({ suelo: h4.suelo, frio: h4.frio }));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa, y se sabe qué batería basta'));
 process.exit(fallos ? 1 : 0);
