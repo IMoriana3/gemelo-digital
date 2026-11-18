@@ -703,6 +703,38 @@ ok(res.limpio.per === 0 && res.limpio.inact < 1 && res.limpio.lost < 0.1 && res.
   'y el veredicto CAE por la reserva: la misma corrida que cumple, con una sola hora sin reserva, pasa a «presenta riesgo» y dice por qué',
   JSON.stringify(res.limpio));
 
+/* LA PEOR SEMANA Y EL COSTE DEL FRÍO. (a) la semana elegida es de verdad la de
+   menos carga — se comprueba contra TODAS las ventanas de 7 días contadas aquí,
+   no con peorSemana; (b) sus cifras son las filas de esos días; (c) el frío se
+   mide por diferencia: «con suelo» es la simulación de arriba y «sin suelo» la
+   misma con tMin −99, que nunca carga menos; (d) un suelo que no muerde no cuesta. */
+const peor = await pg.evaluate(() => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const p = PROFILES.filter((q) => q.id === 'SP_45W_6Ah')[0];
+  const meteo = synthMeteo(loc, 30, 340, 85);
+  const o = { motorModel: 'curva', winter: false, strategy: true, socTgt: 100, socCrit: 0, fcDays: 5, tMin: 5, poaMin: 0, mountTilt: null };
+  const rows = simulate(meteo, p, loc, 0.6, o);
+  const W = peorSemana(rows, 7);
+  const dia = {}; rows.forEach((r) => { const k = Math.floor(+r.t / 864e5); dia[k] = (dia[k] || 0) + r.chg; });
+  const ks = Object.keys(dia).map(Number).sort((a, b) => a - b), v = ks.map((k) => dia[k]);
+  let mejor = Infinity; for (let i = 0; i + 7 <= v.length; i++) mejor = Math.min(mejor, v.slice(i, i + 7).reduce((a, b) => a + b, 0));
+  const k0 = Math.floor(+W.dias[0].t / 864e5), enVentana = rows.filter((r) => { const k = Math.floor(+r.t / 864e5); return k >= k0 && k < k0 + 7; });
+  const F = costeFrio(meteo, p, loc, 0.6, o), con = summarize(rows);
+  const o0 = Object.assign({}, o, { tMin: -99 }), F0 = costeFrio(meteo, p, loc, 0.6, o0);
+  return { wChg: W.chg, mejor, n: W.n, consec: W.dias.every((d, i) => !i || d.k === W.dias[i - 1].k + 1),
+    chgFil: enVentana.reduce((a, r) => a + r.chg, 0), consFil: enVentana.reduce((a, r) => a + r.chg - r.net, 0), wCons: W.cons,
+    socMinFil: Math.min(...enVentana.map((r) => r.soc)), wSocMin: W.socMin,
+    F, conInact: con.inactivePct, conDias: diasSocCero(rows), F0 };
+});
+ok(peor.n === 7 && peor.consec && Math.abs(peor.wChg - peor.mejor) < 1e-9,
+  'peor semana: es la ventana de 7 días seguidos con MENOS carga de todas (' + peor.wChg.toFixed(0) + ' Wh)', JSON.stringify(peor));
+ok(Math.abs(peor.chgFil - peor.wChg) < 1e-9 && Math.abs(peor.consFil - peor.wCons) < 1e-9 && peor.socMinFil === peor.wSocMin,
+  'y su carga, consumo y SOC mínimo son los de las filas de esos días', JSON.stringify(peor));
+ok(peor.F.con.inact === peor.conInact && peor.F.con.dias === peor.conDias && peor.F.sin.chg > peor.F.con.chg && peor.F.hFrio > 0,
+  'coste del frío: «con suelo» es la simulación de arriba y «sin suelo» carga más (' + peor.F.con.chg.toFixed(0) + ' → ' + peor.F.sin.chg.toFixed(0) + ' Wh, ' + peor.F.hFrio + ' h de sol bajo el suelo)', JSON.stringify(peor.F));
+ok(peor.F0.con.chg === peor.F0.sin.chg && peor.F0.hFrio === 0,
+  'y un suelo que no muerde (−99 °C) no cuesta nada', JSON.stringify(peor.F0));
+
 /* ── 11) TREINTA AÑOS SEGUIDOS (hito 2, 2026-11-18) ──
    Lo segundo que Track N Co hacía mejor: la serie entera de un tirón, sin reiniciar la
    batería cada enero, en inviernos de julio a junio, y con el periodo que gobierna. */
