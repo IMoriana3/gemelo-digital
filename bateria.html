@@ -92,6 +92,8 @@
   table.cmp td:first-child,table.cmp th:first-child{text-align:left;color:var(--tx2)}
   table.cmp td{font-family:var(--mono)}
   table.cmp td.ok{color:var(--ok)} table.cmp td.bad{color:var(--danger)} table.cmp td.wn{color:var(--warn)}
+  .peorKpi>div{background:var(--line);border-radius:8px;padding:6px 10px} .peorKpi small{display:block;color:var(--tx3);font:600 10.5px var(--mono);text-transform:uppercase}
+  .peorKpi b{font:600 15px var(--mono);color:var(--tx)} .peorKpi b.ok{color:var(--ok)} .peorKpi b.bad{color:var(--danger)}
   table.mapa{width:100%;border-collapse:separate;border-spacing:3px;font-family:var(--mono);font-size:12.5px;margin-top:8px}
   table.mapa th{color:var(--tx3);font:600 11px var(--mono);padding:4px 6px;text-align:center}
   table.mapa th.cap{text-align:right;white-space:nowrap}
@@ -2213,6 +2215,97 @@ function cardMapa(meteo,prof,loc,soc0,opts){
   return c;
 }
 
+/* ═══════════ LA PEOR SEMANA Y LO QUE CUESTA EL FRÍO ═══════════
+   Un año entero se resume mal en cifras anuales: la batería no se queda sin
+   energía «de media», se queda en UNA semana. Se busca la ventana de 7 días con
+   MENOS energía cargada (la semana más oscura del periodo, sobre la simulación de
+   arriba, sin recalcular nada) y se enseña día a día: carga frente a consumo,
+   SOC y horas sin seguir.
+   EL FRÍO se mide por diferencia, no por fórmula: la MISMA simulación sin el
+   suelo de carga en frío (opts.tMin → −99 °C) — lo demás igual, incluido el
+   C-rate por temperatura de la celda —. Lo que cambia entre las dos es lo que
+   cuesta el suelo de carga. */
+function diasDe(rows){
+  var dtH=rows.length>1?((+rows[1].t)-(+rows[0].t))/36e5:1, D=[], cur=null;
+  rows.forEach(function(r){
+    var k=Math.floor((+r.t)/864e5);
+    if(!cur||cur.k!==k){cur={k:k,t:r.t,chg:0,cons:0,socIni:r.soc,socMin:r.soc,socFin:r.soc,hNoDisp:0,hFrio:0,tMin:r.temp};D.push(cur);}
+    cur.chg+=r.chg; cur.cons+=r.chg-r.net; cur.socMin=Math.min(cur.socMin,r.soc); cur.socFin=r.soc;
+    cur.tMin=Math.min(cur.tMin,r.temp);
+    if((r.parked&&!r.stow)||r.soc<=0.001)cur.hNoDisp+=dtH;
+  });
+  return D;
+}
+function peorSemana(rows,w){
+  var D=diasDe(rows), n=Math.min(w||7,D.length), best=-1, bv=Infinity;
+  for(var i=0;i+n<=D.length;i++){var v=0;for(var j=i;j<i+n;j++)v+=D[j].chg;if(v<bv){bv=v;best=i;}}
+  var S=D.slice(best,best+n), sum=function(k){return S.reduce(function(a,d){return a+d[k]},0)};
+  return {i0:best,n:n,dias:S,chg:sum('chg'),cons:sum('cons'),hNoDisp:sum('hNoDisp'),
+          socIni:S[0].socIni,socMin:Math.min.apply(null,S.map(function(d){return d.socMin})),socFin:S[n-1].socFin,
+          tMin:Math.min.apply(null,S.map(function(d){return d.tMin})),nDias:D.length};
+}
+/* horas de SOL en las que la celda estaba por debajo del suelo de carga: la luz
+   estaba, la batería no la podía tomar */
+function horasFrio(rows,tMin){
+  var dtH=rows.length>1?((+rows[1].t)-(+rows[0].t))/36e5:1;
+  return rows.filter(function(r){return r.ghi>20&&r.tCell<tMin}).length*dtH;
+}
+function costeFrio(meteo,prof,loc,soc0,opts){
+  var o2={};for(var k in opts)o2[k]=opts[k]; o2.tMin=-99;
+  var sin=simulate(meteo,prof,loc,soc0,o2), con=simulate(meteo,prof,loc,soc0,opts);
+  var Sc=summarize(con), Ss=summarize(sin);
+  return {con:{dias:diasSocCero(con),inact:Sc.inactivePct,chg:con.reduce(function(a,r){return a+r.chg},0)},
+          sin:{dias:diasSocCero(sin),inact:Ss.inactivePct,chg:sin.reduce(function(a,r){return a+r.chg},0)},
+          hFrio:horasFrio(con,opts.tMin), tMin:opts.tMin};
+}
+function cardPeorSemana(meteo,mng,prof,loc,soc0,opts){
+  var c=document.createElement('div');c.className='card';c.id='cardPeor';
+  var W=peorSemana(mng,7), F=costeFrio(meteo,prof,loc,soc0,opts);
+  if(LAST)LAST.peor={W:W,F:F};
+  var fd=function(t){var d=new Date(t);return d.getUTCDate()+' '+['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][d.getUTCMonth()]};
+  var bal=W.chg-W.cons;
+  c.innerHTML='<h2>La peor semana — '+fd(W.dias[0].t)+' a '+fd(W.dias[W.n-1].t)+'</h2>'+
+    '<div class="sub">Los '+W.n+' días seguidos con MENOS energía cargada de los '+W.nDias+' simulados arriba (misma simulación, sin recalcular).</div>'+
+    '<div class="peorKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:10px 0">'+
+      '<div><small>cargado</small><b id="peorChg">'+fmt(W.chg)+' Wh</b></div>'+
+      '<div><small>consumido</small><b>'+fmt(W.cons)+' Wh</b></div>'+
+      '<div><small>balance</small><b class="'+(bal<0?'bad':'ok')+'" id="peorBal">'+(bal<0?'−':'+')+fmt(Math.abs(bal))+' Wh</b></div>'+
+      '<div><small>SOC</small><b id="peorSoc">'+fmt(W.socIni*100)+' → '+fmt(W.socMin*100)+' → '+fmt(W.socFin*100)+' %</b></div>'+
+      '<div><small>sin seguir</small><b>'+fmt(W.hNoDisp,1)+' h</b></div>'+
+      '<div><small>T mínima</small><b>'+fmt(W.tMin,1)+' °C</b></div></div>'+
+    '<canvas id="peorCv" height="150" style="width:100%;display:block"></canvas>'+
+    '<h2 style="margin-top:14px">Lo que cuesta el frío</h2>'+
+    '<div class="sub">La misma simulación sin el suelo de carga en frío ('+fmt(F.tMin,0)+' °C → sin límite). El C-rate por temperatura de la celda se queda.</div>'+
+    '<table class="cmp" id="tablaFrio" style="margin-top:8px"><thead><tr><th></th><th>con suelo '+fmt(F.tMin,0)+' °C</th><th>sin suelo</th></tr></thead><tbody>'+
+      '<tr><td>días con SOC 0</td><td>'+fmt(F.con.dias)+'</td><td>'+fmt(F.sin.dias)+'</td></tr>'+
+      '<tr><td>% no disponible</td><td>'+fmt(F.con.inact,2)+' %</td><td>'+fmt(F.sin.inact,2)+' %</td></tr>'+
+      '<tr><td>energía cargada</td><td>'+fmt(F.con.chg)+' Wh</td><td>'+fmt(F.sin.chg)+' Wh</td></tr>'+
+      '<tr><td>horas de sol con la celda bajo el suelo</td><td colspan="2">'+fmt(F.hFrio,1)+' h</td></tr></tbody></table>';
+  setTimeout(function(){pintaPeor(c.querySelector('#peorCv'),W);},0);
+  return c;
+}
+function pintaPeor(cv,W){
+  if(!cv)return;
+  var dpr=Math.min(2,window.devicePixelRatio||1), Wd=Math.max(260,cv.clientWidth||600), H=150;
+  cv.width=Wd*dpr;cv.height=H*dpr;var g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);
+  var mx=Math.max.apply(null,W.dias.map(function(d){return Math.max(d.chg,d.cons)}).concat([1]));
+  var L=40,B=H-18,bw=(Wd-L-8)/W.n;
+  g.font='10px ui-monospace,monospace';g.fillStyle='#8B98A8';g.textAlign='right';
+  g.fillText(fmt(mx)+' Wh',L-4,12);g.fillText('0',L-4,B);
+  W.dias.forEach(function(d,i){
+    var x=L+i*bw, hc=(B-16)*d.chg/mx, hs=(B-16)*d.cons/mx;
+    g.fillStyle='#5BBF8A';g.fillRect(x+bw*0.12,B-hc,bw*0.34,hc);
+    g.fillStyle='#E8869A';g.fillRect(x+bw*0.54,B-hs,bw*0.34,hs);
+    g.fillStyle='#8B98A8';g.textAlign='center';var t=new Date(d.t);g.fillText(t.getUTCDate()+'/'+(t.getUTCMonth()+1),x+bw/2,H-4);
+  });
+  // SOC (0–100 % en todo el alto útil), punto por día: inicio y fin
+  g.strokeStyle='#F2C94C';g.lineWidth=2;g.beginPath();
+  W.dias.forEach(function(d,i){var x0=L+i*bw,x1=x0+bw,y0=B-(B-16)*d.socIni,y1=B-(B-16)*d.socFin;i?g.lineTo(x0,y0):g.moveTo(x0,y0);g.lineTo(x1,y1);});
+  g.stroke();
+  g.fillStyle='#F2C94C';g.textAlign='left';g.fillText('SOC',Wd-34,12);
+  g.fillStyle='#5BBF8A';g.fillText('carga',L+4,12);g.fillStyle='#E8869A';g.fillText('consumo',L+48,12);
+}
+
 function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   var S=summarize(mng), R=summarize(ref);
   var out=$('out');out.innerHTML='';
@@ -2295,6 +2388,7 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
     (opts.winter?' · winter mode':'')+'</div>';
   out.appendChild(c1);
   out.appendChild(cardMapa(meteo,prof,loc,(LAST&&LAST.soc0!=null)?LAST.soc0:socEstacionario(opts),opts));
+  out.appendChild(cardPeorSemana(meteo,mng,prof,loc,(LAST&&LAST.soc0!=null)?LAST.soc0:socEstacionario(opts),opts));
   var g1=mkCanvas(c1,210), f1=frame(g1,0,100,mng,function(v){return fmt(v)+'%'});
   bandParked(g1,f1,mng,'rgba(58,160,255,.10)',function(r){return r.stow});
   bandParked(g1,f1,mng,'rgba(226,87,76,.12)',function(r){return r.parked&&!r.stow});
