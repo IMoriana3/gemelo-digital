@@ -238,6 +238,9 @@ table.cmp th{color:var(--tx3)}
       <input type="range" id="fc" min="1" max="15" step="1" value="5"></div>
     <div class="fld"><label>Tª mínima de carga (°C)</label>
       <input type="number" id="tmin" value="0" step="1"></div>
+    <div class="fld"><label>Abanderamiento por</label><select id="vientoStow">
+      <option value="racha" selected>racha a 10 m (la NCU compara la racha)</option>
+      <option value="media">viento medio horario (como hasta el hito 3)</option></select></div>
     <label class="sw"><input type="checkbox" id="aged" checked>
       <span>Batería envejecida: se evalúa al 80 % de su capacidad nominal (final de vida)</span></label>
     <label class="sw"><input type="checkbox" id="cmp" checked>
@@ -610,11 +613,15 @@ function parseOM(j){
       ghi:Math.max(0,H.shortwave_radiation[i]||0),
       dhi:Math.max(0,(H.diffuse_radiation&&H.diffuse_radiation[i])||0),
       temp:(H.temperature_2m[i]==null?15:H.temperature_2m[i]),
-      wind:(H.windspeed_10m&&H.windspeed_10m[i])||0});
+      wind:(H.windspeed_10m&&H.windspeed_10m[i])||0,
+      /* null, NO 0, cuando la fuente no los trae: un 0 abandera nunca y nieva nunca
+         sin que nada lo diga. El simulador cuenta las horas sin ellos y el informe lo declara. */
+      gust:(H.wind_gusts_10m&&H.wind_gusts_10m[i]!=null)?Math.max(0,H.wind_gusts_10m[i]):null,
+      snowDepth:(H.snow_depth&&H.snow_depth[i]!=null)?Math.max(0,H.snow_depth[i]):null});
   }
   return out;
 }
-var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m&windspeed_unit=ms";
+var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m,wind_gusts_10m,snow_depth&windspeed_unit=ms";
 function fetchOpenMeteo(loc,days){
   var u="https://api.open-meteo.com/v1/forecast?latitude="+loc.lat+"&longitude="+loc.lon+
     "&hourly="+OM_VARS+"&forecast_days="+days+"&timezone=UTC";
@@ -696,7 +703,8 @@ function resumenInviernos(rows){
     var S=summarize(recorta(rows,w.i0,w.i1));
     return {inv:w.inv,label:w.label,parcial:w.parcial,i0:w.i0,i1:w.i1,
       margenMin:S.margenMin,margenMinT:S.margenMinT,periodosRes:S.periodosRes,diasRes:S.diasRes,hBajoReserva:S.hBajoReserva,
-      inact:S.inactivePct,lost:S.prodLostPct,socMin:S.socMin,hZero:S.hZero,hStow:S.hStow};
+      inact:S.inactivePct,lost:S.prodLostPct,socMin:S.socMin,hZero:S.hZero,hStow:S.hStow,
+      nStow:S.nStow,hNieve:S.hNieve,nNieve:S.nNieve};
   });
 }
 /* El invierno de proyecto: el que más veces baja de la reserva y, a igualdad, el de
@@ -857,6 +865,12 @@ function resample(meteo,stepMin){
    umbral de fin de vida del propio modelo de degradación. Si la configuración cumple así,
    cumple durante toda la vida de la batería; si sólo cumple nueva, eso hay que saberlo. */
 var K_STOW_MOTOR=2;   /* corriente con viento ×2: supuesto de Track N Co sobre el TRX, sin medida propia */
+/* NIEVE (hito 3, 2026-11-18): la regla de la CASA, no la de Track N Co. En el gemelo de
+   planta la HSU dispara SP3 cuando la nieve ACUMULADA llega a 3 cm, y el seguidor se queda
+   en la posición de nieve —55° del lado del sol, spTilt[3]— mientras dure la alarma. Track
+   N Co va a seguridad 20 minutos cada 10 cm de nevada en 24 h y vuelve; esa es SU TC. El
+   umbral es el de sim/planta.js (K.SNOW_ALARM_M) y el banco carea que no se separen. */
+var SNOW_ALARM_M=0.03, SNOW_POS=55;
 var SOH_FIN_VIDA=0.80;
 function motorRecorridoWh(motorModel,desde,hasta){
   var wh=0, s=desde<hasta?1:-1;
@@ -916,15 +930,23 @@ function simulate(meteo,prof,loc,soc0,opts){
     /* — Abanderamiento por viento (B2 canónica), en el módulo compartido —
        sun.az viene en radianes con 0 = sur y negativo = este; el módulo quiere el
        azimut absoluto 0-360 (0 N · 90 E · 180 S · 270 O) */
-    var ab=AB.paso(dtH*3600,m.wind,trackPos,180+sun.az/D2R);
+    /* ABANDERAMIENTO POR RACHA (hito 3): el anemómetro de la NCU responde en segundos y
+       los umbrales de 40 y 60 km/h se comparan con la racha —confirmado por el mantenedor
+       el 2026-11-18—. Abanderar con la media horaria, como hasta aquí, se quedaba corto.
+       Sin racha en la fuente, la media, y la fila lo dice (vf 2). */
+    var porRacha=opts.vientoStow!=='media', vf=porRacha?(m.gust!=null?0:2):1;
+    var ab=AB.paso(dtH*3600,vf===0?m.gust:m.wind,trackPos,180+sun.az/D2R);
     stow=ab.estado;
+    var nieve=m.snowDepth!=null && m.snowDepth>=SNOW_ALARM_M;
     tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
     /* La hora se PLANIFICA antes de comprometerla —posición, movimiento y consumo—, porque
        el modo seguridad necesita saber lo que costaría para decidir si se la puede permitir.
        `planifica` no toca `prevPos`: eso sólo lo hace el plan elegido. */
     var muerta=soc<=0.001;
     function planifica(aparcado){
+    /* Jerarquía de la casa: viento (SP1) > nieve (SP3) > batería > seguimiento */
     var target=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo))
+                     :nieve?(trackPos<0?-1:1)*Math.min(SNOW_POS,AXIS_MAX)
                      :(aparcado?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
     if(prevPos==null)prevPos=target;
     /* BATERÍA AGOTADA: la TCU no mueve nada. Antes, con SOC 0 % el seguidor
@@ -936,7 +958,7 @@ function simulate(meteo,prof,loc,soc0,opts){
     if(muerta)target=prevPos;
     /* Histéresis del lazo: en seguimiento sólo corrige si el error frente al sol ≥ 2,5°
        (estudio de disponibilidad). Se evalúa sobre el error REAL, antes de limitar el avance. */
-    var moveNow=muerta?false:(stow>0||aparcado)?Math.abs(target-prevPos)>0.01
+    var moveNow=muerta?false:(stow>0||nieve||aparcado)?Math.abs(target-prevPos)>0.01
                                              :Math.abs(target-prevPos)>=HYST_DEG;
     /* El WINTER MODE NO TOCA EL MOVIMIENTO. Es techo de SOC (90 %) y calibración
        cada 3 días, y nada más — decisión del mantenedor, 2026-09-09. Aquí había un
@@ -950,9 +972,15 @@ function simulate(meteo,prof,loc,soc0,opts){
     var deltaEff=moveNow?Math.abs(target-prevPos):0;
     var avgPos=(target+prevPos)/2;
     /* — Consumo del paso: electrónica + motor + calefactor, todo en consumoTCU — */
-    return {target:target, moveNow:moveNow, deltaEff:deltaEff, avgPos:avgPos,
-            cons:consumoTCU({dtH:dtH,dia:day,mov:deltaEff,pos:avgPos,
-                             motorModel:opts.motorModel,tAmb:tBat})};   /* sin calefactor: ningún perfil lo lleva */
+    var cons=consumoTCU({dtH:dtH,dia:day,mov:deltaEff,pos:avgPos,
+                        motorModel:opts.motorModel,tAmb:tBat});   /* sin calefactor: ningún perfil lo lleva */
+    /* Las maniobras de PROTECCIÓN —bandera de viento, nieve y modo seguridad— se cobran
+       ×K_STOW_MOTOR, como hace Track N Co: se hacen con carga en la estructura. El
+       seguimiento normal y el aparcado por SOC crítico, a ×1. */
+    if(deltaEff>0 && (stow>0||nieve||(aparcado&&seguridad))){
+      var extra=cons.motor*(K_STOW_MOTOR-1); cons.motor+=extra; cons.total+=extra;
+    }
+    return {target:target, moveNow:moveNow, deltaEff:deltaEff, avgPos:avgPos, cons:cons};
     }
     var pl=planifica(parked);
     /* MODO SEGURIDAD, predictivo como el de Track N Co: si la energía que quedaría DESPUÉS
@@ -1040,7 +1068,8 @@ function simulate(meteo,prof,loc,soc0,opts){
                heat:heatWh,net:chgEff-consWh,pos:target,parked:parked,stow:stow>0,mov:deltaEff,
                poaPot:poaPot,poaLost:poaLost,poaReal:poaReal,cal:calibNow,fullWin:!!fullDay,cRate:cRateNow,
                /* en CADA fila y no colgado del array: `slice` pierde lo colgado */
-               eRes:eRes,eLib:soc*capWh-eRes,seg:seguridad});
+               eRes:eRes,eLib:soc*capWh-eRes,seg:seguridad,
+               nieve:nieve,nd:m.snowDepth!=null,vf:vf});
   }
   rows.nCalib=nCalib; rows.daysNoCalib=daysNoCalib; rows.capWh=capWh; rows.eDia=eDia;
   return rows;
@@ -1274,6 +1303,12 @@ function summarize(rows){
     hBelow15:soc.filter(function(v){return v<0.15}).length*dtH,
     hZero:soc.filter(function(v){return v<=0.001}).length*dtH,
     hParked:hPark, hStow:hStow, inactivePct:100*hPark/(rows.length*dtH),
+    nStow:rows.filter(function(r,i){return r.stow&&!(i>0&&rows[i-1].stow)}).length,
+    hNieve:rows.filter(function(r){return r.nieve}).length*dtH,
+    nNieve:rows.filter(function(r,i){return r.nieve&&!(i>0&&rows[i-1].nieve)}).length,
+    hSinRacha:rows.filter(function(r){return r.vf===2}).length*dtH,
+    hSinNieve:rows.filter(function(r){return r.nd===false}).length*dtH,
+    vientoPor:rows.some(function(r){return r.vf===1})?'media':'racha',
     heatWh:sum('heat'),
     prodLostPct:(function(){var p=sum('poaPot'),l=sum('poaLost');return p>0?100*l/p:0})(),
     prodRelPct:(function(){var p=sum('poaPot'),r=sum('poaReal');return p>0?100*r/p:100})(),
@@ -1691,11 +1726,11 @@ $('run').onclick=function(){
   var loc=getLoc(), prof=conPanel(PROFILES[$('prof').value],+$('panel').value);
   var mm=$('motor').value; mm=(mm==='factiun'||mm==='curva')?mm:+mm;
   var soh=$('aged').checked?SOH_FIN_VIDA:1;
-  var opts={motorModel:mm, soh:soh, winter:$('winter').checked, strategy:true,
+  var opts={motorModel:mm, soh:soh, vientoStow:$('vientoStow').value, winter:$('winter').checked, strategy:true,
             socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
             fcDays:+$('fc').value, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
             mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
-  var refOpts={motorModel:mm, soh:soh, winter:false, strategy:false,
+  var refOpts={motorModel:mm, soh:soh, vientoStow:$('vientoStow').value, winter:false, strategy:false,
             socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
             mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
   var soc0=+$('soc0').value/100;
@@ -2127,7 +2162,15 @@ function buildReport(){
      ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes (medido Factiun)'}],
      ['Modelo de consumo de motor',{v:motorTxt}],
      ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
-     ['Efecto del viento sobre el consumo',{v:'NO considerado en el seguimiento; sólo la reserva lo cobra, ×'+K_STOW_MOTOR+' — ver limitaciones',cls:'wn'}],
+     ['Dato que dispara la bandera de viento',{v:(S.vientoPor==='media'
+        ?'el <b>viento medio horario</b>, elegido en el panel: se queda corto frente al anemómetro de la NCU'
+        :'la <b>racha</b> a 10 m, que es lo que compara la NCU')+' (umbrales en el apartado 4)'+
+        (S.hSinRacha>0?'. <b>La fuente no trae racha en '+fmt(S.hSinRacha)+' h</b>: en esas horas se abandera con la media, que se queda corta':''),
+        cls:S.hSinRacha>0?'wn':''}],
+     ['Abanderamiento por nieve',{v:'SP3, la regla de la HSU: nieve acumulada ≥ '+fmt(SNOW_ALARM_M*100)+' cm → '+SNOW_POS+'° del lado del sol mientras dure la alarma'+
+        (S.hSinNieve>0?'. <b>La fuente no trae nieve acumulada en '+fmt(S.hSinNieve)+' h</b>: en esas horas no se abandera por nieve':''),
+        cls:S.hSinNieve>0?'wn':''}],
+     ['Efecto del viento sobre el consumo',{v:'las maniobras de protección —viento, nieve y modo seguridad— se cobran ×'+K_STOW_MOTOR+'; el seguimiento con viento, no — ver limitaciones',cls:'wn'}],
      ['Tª mínima de carga',{v:opts.tMin+' °C'}],
      ['Umbral mínimo de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
      ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA'}],
@@ -2167,7 +2210,8 @@ function buildReport(){
     ['Veces bajo la reserva para llegar a seguridad',{v:S.periodosRes+' ('+S.diasRes+' d, '+fmt(S.hBajoReserva)+' h)',cls:S.periodosRes>0?'bad':'ok'},
        {v:R.periodosRes+' ('+R.diasRes+' d, '+fmt(R.hBajoReserva)+' h)'}],
     ['Margen mínimo sobre la reserva',{v:fmt(S.margenMin,2)+' Wh · '+fT(S.margenMinT),cls:S.margenMin<0?'bad':'ok'},{v:fmt(R.margenMin,2)+' Wh · '+fT(R.margenMinT)}],
-    ['Horas abanderado por viento',{v:fmt(S.hStow)+' h'},{v:fmt(R.hStow)+' h'}],
+    ['Horas abanderado por viento',{v:fmt(S.hStow)+' h ('+S.nStow+' veces)'},{v:fmt(R.hStow)+' h ('+R.nStow+' veces)'}],
+    ['Horas en posición de nieve',{v:fmt(S.hNieve)+' h ('+S.nNieve+' veces)'},{v:fmt(R.hNieve)+' h ('+R.nNieve+' veces)'}],
     ['Captación solar',{v:fmt(S.chg)+' Wh'},{v:fmt(R.chg)+' Wh'}],
     ['Consumo de motor',{v:fmt(S.motor)+' Wh'},{v:fmt(R.motor)+' Wh'}],
     ['Consumo de electrónica',{v:fmt(S.base)+' Wh'},{v:fmt(R.base)+' Wh'}]
@@ -2216,10 +2260,11 @@ function buildReport(){
       return [w.label+(w.parcial?' (parcial)':'')+(g?' — gobierna':''),
         {v:fmt(w.margenMin,1)+' Wh',cls:w.margenMin<0?'bad':(g?'wn':'')},
         {v:w.periodosRes+(w.periodosRes?' ('+w.diasRes+' d)':''),cls:w.periodosRes?'bad':''},
-        {v:fmt(w.inact,4)},{v:fmt(w.socMin*100)+' %'},{v:fmt(w.hZero)}];});
-    filas.push([{v:'<b>Media ('+compl.length+' inviernos completos)</b>'},{v:'—'},{v:'—'},{v:'<b>'+fmt(mean('inact'),4)+'</b>'},{v:'—'},{v:'—'}]);
-    filas.push([{v:'<b>Media + 2σ (97,5 %)</b>'},{v:'—'},{v:'—'},{v:'<b>'+fmt(mean('inact')+2*std('inact'),4)+'</b>'},{v:'—'},{v:'—'}]);
-    H+=tbl(filas,['Invierno','Margen mín. sobre la reserva','Veces sin reserva','% no disponible','SOC mínimo','h a cero']);
+        {v:fmt(w.inact,4)},{v:fmt(w.socMin*100)+' %'},{v:fmt(w.hZero)},{v:w.nStow+' ('+fmt(w.hStow)+' h)'},{v:w.hNieve?fmt(w.hNieve):'—'}];});
+    filas.push([{v:'<b>Media ('+compl.length+' inviernos completos)</b>'},{v:'—'},{v:'—'},{v:'<b>'+fmt(mean('inact'),4)+'</b>'},{v:'—'},{v:'—'},
+      {v:'<b>'+fmt(mean('nStow'),1)+'</b>'},{v:'<b>'+fmt(mean('hNieve'))+'</b>'}]);
+    filas.push([{v:'<b>Media + 2σ (97,5 %)</b>'},{v:'—'},{v:'—'},{v:'<b>'+fmt(mean('inact')+2*std('inact'),4)+'</b>'},{v:'—'},{v:'—'},{v:'—'},{v:'—'}]);
+    H+=tbl(filas,['Invierno','Margen mín. sobre la reserva','Veces sin reserva','% no disponible','SOC mínimo','h a cero','Abanderamientos','Nieve (h)']);
     /* 8.1 EL PERIODO QUE GOBIERNA */
     var G=sweep.gobierna;
     if(G&&G.dias.length){
@@ -2285,7 +2330,8 @@ function buildReport(){
      '<li>La temperatura de la batería sigue a la ambiente con inercia de primer orden (τ = 1800 s). Ningún perfil lleva calefactor: la variante -LT es otra química, con el rango de carga ampliado, no una batería calentada.</li>'+
      '<li><b>La vida que da este informe es CALCULADA y no es la de la ficha.</b> Sale del conteo rainflow más Palmgren-Miner y de la degradación calendaria, sobre la serie meteorológica de este emplazamiento. SUNNER estima la suya por otro camino en <i>SUNNER TCU SP 6Ah Battery Life Estimation</i> (18/09/2024): 2000 ciclos de ensayo entre 80 ciclos/año dan 25 años por ciclado, la calendaria a 25 °C con SoC por debajo del 70 % da más de 12 años, y concluye <b>más de 10 años</b>; en emplazamientos calientes, con tres horas diarias a 45 °C, baja a <b>7 años</b> en el peor caso, que es de donde sale el «&gt; 6 años» de la ficha. Las dos estimaciones no son comparables sin más: los 80 ciclos/año de SUNNER son el caso SIN aportación del panel —su medida es explícitamente «under the worst conditions, when there is no input energy from the solar panel»— mientras que aquí el panel recarga durante el día y el ciclado efectivo sale menor. <b>La cifra de este apartado no debe citarse como garantía</b>: para eso manda la ficha.</li>'+
      '<li><b>El límite superior de carga de la -LT (60 °C) no se modela</b>: se le aplica el derate JEITA de la celda estándar (recorte desde 35 °C, nulo a 45 °C), que para la -LT es conservador. Y el límite de DESCARGA no se modela en ninguna de las dos variantes: la batería entrega por debajo de su mínimo (−10 °C la estándar, −40 °C la -LT) como si nada. Importa en emplazamientos muy fríos.</li>'+
-     '<li><b>No se valora el efecto del viento sobre el consumo del motor.</b> El viento interviene únicamente para disparar el abanderamiento; el par adicional que opone sobre la estructura, y por tanto la corriente extra que exige al motor, no se modelan. El consumo simulado es en consecuencia un <b>límite inferior</b> en emplazamientos ventosos: la metodología de referencia declara 2 m/s como velocidad de viento de referencia para ese efecto, que aquí no se aplica. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
+     '<li><b>El efecto del viento sobre el consumo del motor sólo se cobra en las maniobras de protección.</b> La bandera de viento, la de nieve y el modo seguridad se cobran a ×'+K_STOW_MOTOR+' de corriente, que es el supuesto del informe de Track N Co sobre este mismo tracker, sin medida propia. El seguimiento con viento por debajo del umbral de bandera sigue sin cargo extra, así que en emplazamientos ventosos el consumo simulado es un <b>límite inferior</b>. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
+     '<li><b>El abanderamiento se decide con la racha horaria de ERA5</b> (la máxima de la hora, en una rejilla de unos 30 km). La racha local en una ladera o en un valle puede ser bastante distinta. Y la <b>nieve acumulada</b> también es de rejilla: en un valle frío la real puede durar más.</li>'+
      '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
      '<li><b>La reserva para llegar a seguridad se calcula para el peor caso fijo</b>, la maniobra de −'+AXIS_MAX+'° a la defensa en +'+DEFENSE_POS+'°, y no desde la posición de cada momento. '+
        'Es conservador. Si la TCU fuera al final de carrera más cercano, como hace la de Track N Co, le bastaría la mitad; eso depende del firmware y aquí no se supone. '+

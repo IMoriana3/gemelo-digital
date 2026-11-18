@@ -44,7 +44,10 @@ export function contractToBattery(pkg,{year=null}={}){
     dhi:Math.max(0,finite(r.dhi_wm2,0)),
     temp:finite(r.temp_c,15),
     wind:Math.max(0,finite(r.wind_ms,0)),
-    gust:Math.max(0,finite(r.gust_ms,0)),
+    /* null y no 0 cuando falta: el simulador de batería abandera por racha, y una racha 0
+       inventada no abanderaría nunca sin que nada lo dijera */
+    gust:r.gust_ms==null?null:Math.max(0,finite(r.gust_ms,0)),
+    snowDepth:r.snow_depth_m==null?null:Math.max(0,finite(r.snow_depth_m,0)),
     precip:Math.max(0,finite(r.precip_mm,0)),
     snow:Math.max(0,finite(r.snowfall_cm,0))
   }));

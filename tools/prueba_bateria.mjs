@@ -37,6 +37,11 @@ const ok = (c, m, x) => { console.log((c ? '  ✓ ' : '  ✗ ') + m + (!c && x ?
   const m=A.contractToBattery(pkg,{year:2024});
   ok(m.length===2&&m[1].ghi===100&&m[1].wind===5&&m[1].gust===8,
     'WeatherContract se convierte al meteo de batería sin cambiar magnitudes');
+  const sinRacha=A.contractToBattery({...pkg,rows:[{t:'2024-02-01T00:00:00Z',ghi_wm2:0,dhi_wm2:0,temp_c:1,wind_ms:2},
+    {t:'2024-02-01T01:00:00Z',ghi_wm2:0,dhi_wm2:0,temp_c:-1,wind_ms:2,gust_ms:9,snow_depth_m:0.07}]},{year:2024});
+  ok(sinRacha[0].gust===null&&sinRacha[0].snowDepth===null&&sinRacha[1].gust===9&&sinRacha[1].snowDepth===0.07,
+    'y una fila SIN racha o sin nieve acumulada llega como null, no como 0: un 0 no abanderaría nunca sin decirlo',
+    JSON.stringify(sinRacha.map((r)=>[r.gust,r.snowDepth])));
   ok(m.contract.contract_id==='wc-bat'&&m.contract.dataset_hash==='h-bat',
     'batería/winter conserva contract_id + dataset_hash');
   const years=A.contractYears(pkg);
@@ -829,6 +834,102 @@ ok(seg.e2e && seg.e2e.informe.length === 0, 'y el informe lo cuenta: años segui
 ok(seg.hueco && seg.hueco.tramos === 2 && seg.hueco.caidos === 1 && seg.hueco.dice,
   'con un año que no baja, la página parte la serie en dos tramos y el informe lo DICE', JSON.stringify(seg.hueco));
 
+/* ── 12) RACHAS, NIEVE Y MANIOBRAS DE PROTECCIÓN (hito 3, 2026-11-18) ──
+   La racha porque la NCU compara la racha (confirmado por el mantenedor). La nieve con la
+   regla de la casa (SP3, 3 cm acumulados), no con la de Track N Co. El ×2 de Track N Co. */
+const h3 = await pg.evaluate(async () => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const seis = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const R = {};
+  /* a) parseOM: racha y nieve acumulada si vienen; null si no */
+  const con = parseOM({ hourly: { time: ['2020-01-01T00:00', '2020-01-01T01:00'], shortwave_radiation: [0, 0], diffuse_radiation: [0, 0],
+    temperature_2m: [1, 1], windspeed_10m: [3, 4], wind_gusts_10m: [9, null], snow_depth: [0.04, null] } });
+  const sin = parseOM({ hourly: { time: ['2020-01-01T00:00'], shortwave_radiation: [0], diffuse_radiation: [0], temperature_2m: [1], windspeed_10m: [3] } });
+  R.parse = [con[0].gust, con[0].snowDepth, con[1].gust, con[1].snowDepth, sin[0].gust, sin[0].snowDepth];
+  R.pide = OM_VARS.includes('wind_gusts_10m') && OM_VARS.includes('snow_depth');
+  /* b) la RACHA decide: media de 5 m/s —lejos de los 40 km/h— y rachas de 20 m/s dos días */
+  const base = synthMeteo(loc, 6, 20, 30);
+  const racheado = base.map((m, i) => Object.assign({}, m, { wind: 5, gust: i >= 48 && i < 96 ? 20 : 6, snowDepth: 0 }));
+  const o = { motorModel: 'factiun', winter: false, strategy: false, socTgt: 100, socCrit: 0, fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const porRacha = summarize(simulate(racheado, seis, loc, 0.9, o));
+  const porMedia = summarize(simulate(racheado, seis, loc, 0.9, Object.assign({}, o, { vientoStow: 'media' })));
+  const sinDato = summarize(simulate(base, seis, loc, 0.9, o));
+  R.racha = { hStow: porRacha.hStow, nStow: porRacha.nStow, sinRacha: porRacha.hSinRacha, por: porRacha.vientoPor };
+  R.media = { hStow: porMedia.hStow, por: porMedia.vientoPor };
+  R.sinDato = { sinRacha: sinDato.hSinRacha, sinNieve: sinDato.hSinNieve, horas: base.length };
+  /* c) nieve: 4 cm acumulados dos días → 55° del lado del sol mientras dure */
+  const nevado = base.map((m, i) => Object.assign({}, m, { wind: 2, gust: 3, snowDepth: i >= 48 && i < 96 ? 0.04 : 0 }));
+  const rn = simulate(nevado, seis, loc, 0.9, o);
+  const enNieve = rn.filter((r, i) => r.nieve && i > 0 && rn[i - 1].nieve);
+  R.nieve = { h: rn.filter((r) => r.nieve).length, veces: summarize(rn).nNieve,
+    en55: enNieve.every((r) => Math.abs(Math.abs(r.pos) - SNOW_POS) < 1e-9), n: enNieve.length,
+    /* «sale al acabar»: después de la alarma, la MISMA posición que la serie sin nieve.
+       No vale «no está a 55°»: ±55° es también el tope del seguimiento con el sol bajo. */
+    fuera: (() => { const limpio = simulate(nevado.map((m) => Object.assign({}, m, { snowDepth: 0 })), seis, loc, 0.9, o);
+      return rn.filter((r, i) => i >= 98 && Math.abs(r.pos - limpio[i].pos) > 1e-9).length; })() };
+  /* c2) jerarquía de la casa: la nieve (SP3) manda sobre la batería. Aparcado por SOC bajo
+         y con nieve, por la mañana va a −55° (lado del sol), no a la defensa fija en +55°. */
+  /* sin carga (tMin 99) y al 45 % con el crítico al 50 %: aparcada, y viva, toda la nevada */
+  const oBaja = Object.assign({}, o, { strategy: true, socTgt: 80, socCrit: 50, tMin: 99 });
+  const rj = simulate(nevado, seis, loc, 0.45, oBaja);
+  R.jerarquia = { aparcadoConNieve: rj.filter((r) => r.parked && r.nieve).length,
+    alSol: rj.filter((r) => r.parked && r.nieve && Math.abs(r.pos + SNOW_POS) < 1e-9).length };
+  /* d) el ×2 se cobra en las maniobras de PROTECCIÓN y en ninguna otra */
+  const kOrig = K_STOW_MOTOR;
+  const motor = (rows, f) => rows.filter(f).reduce((a, r) => a + r.motor, 0);
+  const a2 = simulate(nevado, seis, loc, 0.9, o);
+  K_STOW_MOTOR = 1; const a1 = simulate(nevado, seis, loc, 0.9, o); K_STOW_MOTOR = kOrig;
+  const prot = (r) => r.nieve && r.mov > 0, segui = (r) => !r.nieve && !r.stow && r.mov > 0;
+  R.x2 = { prot: motor(a2, prot) / motor(a1, prot), segui: motor(a2, segui) / motor(a1, segui), hayProt: a2.filter(prot).length };
+  /* e) los inviernos cuentan banderas y nieve */
+  const W = resumenInviernos(rn);
+  R.inv = { nStow: typeof W[0].nStow, hNieve: W[0].hNieve };
+  /* f) el informe declara las horas en que la fuente no trae racha o nieve */
+  const idx = PROFILES.map((p, i) => [p.id, i]);
+  $('prof').value = String(idx.filter((x) => x[0] === 'SP_45W_6Ah')[0][1]); $('prof').onchange();
+  $('src').value = 'synth'; if ($('src').onchange) $('src').onchange();
+  $('vientoStow').value = 'racha'; window.LAST = null; $('run').click();
+  for (let i = 0; i < 300 && !window.LAST; i++) await new Promise((r) => setTimeout(r, 50));
+  let doc = null; const abre = window.open; window.open = () => ({ document: { write: (d) => { doc = d; }, close: () => {} } });
+  buildReport(); window.open = abre;
+  R.informe = ['La fuente no trae racha', 'La fuente no trae nieve acumulada', 'Horas en posición de nieve', 'racha horaria de ERA5'].filter((x) => !doc.includes(x));
+  R.llegaPanel = LAST.opts.vientoStow === 'racha';
+  $('vientoStow').value = 'media'; window.LAST = null; $('run').click();
+  for (let i = 0; i < 300 && !window.LAST; i++) await new Promise((r) => setTimeout(r, 50));
+  R.llegaPanelMedia = LAST.opts.vientoStow === 'media' && summarize(LAST.mng).vientoPor === 'media';
+  $('vientoStow').value = 'racha';
+  return R;
+});
+ok(h3.parse.join(',') === '9,0.04,,,,' && h3.pide,
+  'Open-Meteo pide racha y nieve acumulada, y lo que no viene llega como null y no como 0', JSON.stringify(h3.parse));
+ok(h3.racha.hStow > 0 && h3.racha.nStow >= 1 && h3.racha.sinRacha === 0 && h3.racha.por === 'racha' && h3.media.hStow === 0 && h3.media.por === 'media',
+  'abandera la RACHA: media de 5 m/s con rachas de 20 → ' + h3.racha.hStow + ' h de bandera; con la media, 0',
+  JSON.stringify({ racha: h3.racha, media: h3.media }));
+ok(h3.sinDato.sinRacha === h3.sinDato.horas && h3.sinDato.sinNieve === h3.sinDato.horas,
+  'sin racha ni nieve en la fuente, el simulador CUENTA las horas sin ellas (' + h3.sinDato.horas + ' h) en vez de dar un cero por bueno',
+  JSON.stringify(h3.sinDato));
+ok(h3.nieve.h === 48 && h3.nieve.veces === 1 && h3.nieve.n > 0 && h3.nieve.en55 && h3.nieve.fuera === 0,
+  'con 4 cm acumulados dos días, SP3: ' + h3.nieve.h + ' h en la posición de nieve, a ' + 55 + '° del lado del sol, y sale al acabar',
+  JSON.stringify(h3.nieve));
+ok(h3.jerarquia.aparcadoConNieve > 0 && h3.jerarquia.alSol > 0,
+  'y la nieve manda sobre la batería, como en la casa: aparcado por SOC bajo y con nieve, por la mañana va a −55° y no a la defensa fija',
+  JSON.stringify(h3.jerarquia));
+ok(h3.x2.hayProt > 0 && Math.abs(h3.x2.prot - 2) < 1e-9 && Math.abs(h3.x2.segui - 1) < 1e-9,
+  'el ×2 de corriente se cobra en las maniobras de protección (×' + h3.x2.prot.toFixed(2) + ') y en el seguimiento no (×' + h3.x2.segui.toFixed(2) + ')',
+  JSON.stringify(h3.x2));
+ok(h3.inv.nStow === 'number' && h3.inv.hNieve === 48, 'los inviernos cuentan las banderas y las horas de nieve', JSON.stringify(h3.inv));
+ok(h3.informe.length === 0, 'el informe DICE cuándo la fuente no trae racha o nieve, y cuenta las horas en nieve', 'falta: ' + h3.informe.join(', '));
+ok(h3.llegaPanel && h3.llegaPanelMedia, 'y el selector del panel llega a la simulación: racha o media');
+{
+  const planta = readFileSync(path.join(RAIZ, 'sim', 'planta.js'), 'utf8'), bat = readFileSync(path.join(RAIZ, 'bateria.html'), 'utf8');
+  const enPlanta = +(planta.match(/SNOW_ALARM_M:\s*([\d.]+)/) || [])[1], enBat = +(bat.match(/var SNOW_ALARM_M=([\d.]+)/) || [])[1];
+  const sp = (planta.match(/spTilt: cfg\.spTilt \|\| \[([^\]]+)\]/) || [])[1], sp3 = sp ? +sp.split(',')[3] : NaN;
+  const posBat = +(bat.match(/SNOW_POS=(\d+)/) || [])[1];
+  ok(enPlanta === 0.03 && enBat === enPlanta && sp3 === posBat,
+    'la nieve del simulador de batería es la del gemelo de planta: ' + enBat * 100 + ' cm y spTilt[3] = ' + sp3 + '°, careados contra sim/planta.js',
+    'planta ' + enPlanta + ' / ' + sp3 + ' · batería ' + enBat + ' / ' + posBat);
+}
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo y los treinta años corren seguidos'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa'));
 process.exit(fallos ? 1 : 0);
