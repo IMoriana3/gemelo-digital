@@ -2230,5 +2230,39 @@ console.log('\n── el ángulo de la SP7 baja de la NCU, por grupo ──');
      'la 40031 (grupo 2, sin poner) no está en la imagen');
 }
 
+/* SP3 NIEVE: el lado se fija al saltar la alarma, hacia donde estaba el seguidor, y no
+   se mueve hasta que cae (confirmado por el mantenedor, 2026-11-18). Antes salía del sol
+   en cada paso y la planta cruzaba 110° al mediodía con nieve. Planta nueva: a media
+   mañana el seguidor mira al este; la nieve dura hasta pasado el mediodía; luego se va
+   y vuelve por la tarde, con el seguidor ya al oeste. */
+console.log('\n── SP3 nieve: el lado se fija al saltar la alarma ──');
+{
+  const Q = new SIM.Planta({ nTcu: 4, nHsu: 1, nRep: 1, grupos: 1, dia: 172, hora: 9 });
+  for (let i = 0; i < 20 * 60; i += 10) Q.paso(10);
+  const u = Q.tcu(1), ladoManana = Math.sign(u.angulo);
+  Q.meteo.nieve = 0.05;
+  const lados = new Set(); let giro = 0, prev = u.angulo, horasNieve = 0;
+  while (Q.t.hora < 15) {
+    Q.paso(30);
+    if (u.sp === SIM.SP.NIEVE) { lados.add(Math.sign(u.objetivo)); horasNieve += 30 / 3600; giro += Math.abs(u.angulo - prev); }
+    prev = u.angulo;
+  }
+  ok(ladoManana === -1, 'a media mañana el seguidor mira al este', u.angulo.toFixed(1) + '° antes de la nieve');
+  ok(horasNieve > 4 && lados.size === 1 && [...lados][0] === ladoManana,
+     'con nieve de la mañana a las 15:00, SP3 se queda del lado en que estaba al saltar la alarma',
+     horasNieve.toFixed(1) + ' h en SP3, lados ' + [...lados].join(','));
+  ok(giro < 60, 'y no cruza 110° al pasar el mediodía', giro.toFixed(0) + '° girados en SP3');
+  Q.meteo.nieve = 0;
+  while (Q.t.hora < 16.5) Q.paso(30);
+  const ladoTarde = Math.sign(u.angulo);
+  Q.meteo.nieve = 0.05;
+  const lados2 = new Set();
+  while (Q.t.hora < 17.5) { Q.paso(30); if (u.sp === SIM.SP.NIEVE) lados2.add(Math.sign(u.objetivo)); }
+  ok(ladoTarde === 1 && lados2.size === 1 && [...lados2][0] === 1,
+     'y una alarma nueva por la tarde fija el lado nuevo: hacia donde estaba entonces, al oeste',
+     'lado ' + ladoTarde + ' · SP3 ' + [...lados2].join(','));
+  Q.meteo.nieve = 0;
+}
+
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallos de ' + hechas : '✓ ' + hechas + ' comprobaciones, todas bien') + '\n');
 process.exit(fallos ? 1 : 0);
