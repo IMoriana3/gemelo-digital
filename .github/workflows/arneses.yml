@@ -120,6 +120,15 @@ jobs:
         working-directory: gemelo-digital
         run: node tools/carea_fisica.mjs
 
+      # LAS CIFRAS DE LOS README, CONTRA QUIEN LAS MIDE. «515 direcciones», «196
+      # comprobaciones», «3 de 6» y «4/7» derivaron sin que nada lo dijera, y un
+      # informe externo las copió como si fueran de hoy (auditoría Construct F0,
+      # H-13). Va detrás de prueba y carea_fisica porque vuelve a ejecutarlos para
+      # leer sus cifras: si ellos caen, cae su paso, no éste.
+      - name: tools/cifras_readme.mjs
+        working-directory: gemelo-digital
+        run: node tools/cifras_readme.mjs
+
       - name: tools/carea_difusa.mjs
         working-directory: gemelo-digital
         run: node tools/carea_difusa.mjs
