@@ -234,11 +234,15 @@ const inf = await pg.evaluate(async () => {
   R.chgStdFrio = enFrio.filter((x) => x.c.k === 'std')[0].S.chg;
   R.chgLTFrio = (enFrio.filter((x) => x.c.k === 'lt')[0] || { S: { chg: -1 } }).S.chg;
   /* c) el «más favorable»: la tabla real de Bellinzago 2014, en miniatura. */
-  const fila = (k, prof, hZero, inact, years) => ({ c: { k, n: k, prof }, S: { hZero, inactivePct: inact, cyc: { years }, prodRelPct: 99 } });
-  const C = [fila('none', null, 64, 0.7306, 14.9), fila('std', null, 3, 4.7260, 15.7), fila('winter', null, 6, 4.0982, 15.2),
-    fila('cons', null, 0, 5.7648, 15.7), fila('lt', lt, 0, 1.0, 15.7)];
+  const fila = (k, prof, hZero, hRes, inact, years) => ({ c: { k, n: k, prof }, S: { hZero, hBajoReserva: hRes, inactivePct: inact, cyc: { years }, prodRelPct: 99 } });
+  const C = [fila('none', null, 64, 80, 0.7306, 14.9), fila('std', null, 3, 9, 4.7260, 15.7), fila('winter', null, 6, 11, 4.0982, 15.2),
+    fila('cons', null, 0, 0, 5.7648, 15.7), fila('lt', lt, 0, 0, 1.0, 15.7)];
   const e = eligeMejor(C);
-  R.mejor = e.mejor.c.k; R.minZero = e.minZero; R.descartados = e.descartados.map((x) => x.c.k);
+  R.mejor = e.mejor.c.k; R.minRes = e.minRes; R.descartados = e.descartados.map((x) => x.c.k);
+  /* y el caso que SEPARA los dos criterios: ninguna llega a cero, pero «std» —la de
+     mejor disponibilidad— baja de la reserva. Con el criterio viejo ganaba ella. */
+  const e2 = eligeMejor([fila('std', null, 0, 4, 3.0, 15.7), fila('cons', null, 0, 0, 5.0, 15.7)]);
+  R.mejorPorReserva = e2.mejor.c.k; R.descartadosPorReserva = e2.descartados.map((x) => x.c.k);
   R.mejorVacio = eligeMejor([]) === null && eligeMejor(null) === null;
   /* d) el barrido separa lo que bajó de lo que no, con motivo. */
   const cl = clasificaBarrido([meteo.concat(meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo, meteo), { error: 'HTTP 429', intentos: 4 }, null, meteo],
@@ -270,9 +274,12 @@ ok(inf.colsDeLT.indexOf('lt') < 0, 'y el propio perfil -LT no la trae (no hay ge
 ok(inf.chgStdFrio === 0 && inf.chgLTFrio > 0,
   'la columna -LT SIMULA con el perfil calefactado: a −10 °C el estándar capta 0 Wh y la -LT ' + inf.chgLTFrio.toFixed(0) + ' Wh',
   'std ' + inf.chgStdFrio + ' · lt ' + inf.chgLTFrio);
-ok(inf.mejor === 'cons' && inf.minZero === 0 && inf.descartados.join(',') === 'none,std,winter',
-  'el «más favorable» descarta a los que agotan la batería, ignora la columna -LT y elige «cons» (el único con 0 h)',
-  'mejor ' + inf.mejor + ' · minZero ' + inf.minZero + ' · descartados ' + inf.descartados.join(','));
+ok(inf.mejor === 'cons' && inf.minRes === 0 && inf.descartados.join(',') === 'none,std,winter',
+  'el «más favorable» descarta a los que bajan de la reserva, ignora la columna -LT y elige «cons» (el único con 0 h)',
+  'mejor ' + inf.mejor + ' · minRes ' + inf.minRes + ' · descartados ' + inf.descartados.join(','));
+ok(inf.mejorPorReserva === 'cons' && inf.descartadosPorReserva.join(',') === 'std',
+  'y descarta por la RESERVA, no por el cero: con 0 h agotada las dos, cae la de mejor disponibilidad porque baja de lo que cuesta llegar a seguridad',
+  'mejor ' + inf.mejorPorReserva + ' · descartados ' + inf.descartadosPorReserva.join(','));
 ok(inf.mejorVacio, 'y sin comparativa no inventa veredicto');
 ok(inf.barrido.res.join(',') === '2013' && inf.barrido.caidos.join(' | ') === '2014:HTTP 429 tras 4 intentos | 2015:no está en la fuente | 2016:serie incompleta (288 h)',
   'el barrido LISTA los años que no bajaron, con motivo, en vez de saltarlos', JSON.stringify(inf.barrido));
@@ -609,6 +616,93 @@ ok(mapa.clase.join() === 'bad,wn,ok',
 ok(mapa.strPans.length === 1 && mapa.strPans[0] === 60 && mapa.strFilas >= 5,
   'en STRING el mapa no tiene eje de panel: una columna, la del regulador', JSON.stringify(mapa.strPans));
 
+/* ── 10) LA RESERVA PARA LLEGAR A SEGURIDAD Y EL FINAL DE VIDA (2026-11-18) ──
+   Las dos vienen del informe de Track N Co para Casalmaggiore, que en esto nos ganaba. */
+const res = await pg.evaluate(async () => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const seis = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const R = {};
+  /* a) la reserva, contra la cuenta a mano: 2 × ∫ de −55° a +55° de (K0 + K1·|θ|) */
+  R.reserva = reservaWh('factiun');
+  R.aMano = 2 * ((DEFENSE_POS + AXIS_MAX) * K0 + K1 * (AXIS_MAX * AXIS_MAX + DEFENSE_POS * DEFENSE_POS) / 2);
+  /* b) el final de vida cambia la capacidad y nada más */
+  const o = { motorModel: 'factiun', winter: false, strategy: true, socTgt: 80, socCrit: 30, fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const meteo = synthMeteo(loc, 30, 340, 85);
+  const nueva = simulate(meteo, seis, loc, 0.8, o), vieja = simulate(meteo, seis, loc, 0.8, Object.assign({}, o, { soh: SOH_FIN_VIDA }));
+  R.cap = { nueva: nueva.capWh, vieja: vieja.capWh };
+  R.margen = { nueva: summarize(nueva).margenMin, vieja: summarize(vieja).margenMin };
+  /* c) diez días a oscuras y luego veinte de verano, con el SOC crítico al 5 %: por debajo
+        de la reserva (16 Wh sobre 123), así que lo único que protege es el modo seguridad */
+  const verano = synthMeteo(loc, 30, 170, 10);
+  const oscuro = verano.map((m, i) => (i < 240 ? Object.assign({}, m, { ghi: 0, dhi: 0, poa: null }) : m));
+  const oS = Object.assign({}, o, { socCrit: 5, soh: SOH_FIN_VIDA });
+  const est = simulate(oscuro, seis, loc, 0.6, oS);
+  const sin = simulate(oscuro, seis, loc, 0.6, Object.assign({}, oS, { strategy: false, socCrit: 0 }));
+  R.entra = est.filter((r) => r.seg).length;
+  R.sigueBajo = est.filter((r) => !r.parked && !r.stow && r.eLib < -1e-9).length;
+  R.segFueraDeDefensa = est.filter((r) => r.seg && !r.stow && Math.abs(r.pos - DEFENSE_POS) > 0.01).length;
+  const salidas = []; for (let i = 1; i < est.length; i++) if (est[i - 1].seg && !est[i].seg) salidas.push(est[i - 1].eLib);
+  R.salidas = salidas.length; R.eDia = est.eDia; R.salidaPronto = salidas.filter((e) => e < est.eDia - 1e-9).length;
+  R.varado = sin.filter((r) => r.eLib < 0 && !r.stow && Math.abs(r.pos - DEFENSE_POS) > 1).length;
+  /* d) el panel lleva el final de vida a TODAS las columnas, la de referencia incluida */
+  const idx = PROFILES.map((p, i) => [p.id, i]);
+  $('prof').value = String(idx.filter((x) => x[0] === 'SP_45W_6Ah')[0][1]); $('prof').onchange();
+  $('src').value = 'synth'; if ($('src').onchange) $('src').onchange();
+  $('panel').value = '45'; $('panel').onchange();
+  const corre = async (aged) => {
+    $('aged').checked = aged; window.LAST = null; $('run').click();
+    for (let i = 0; i < 200 && !window.LAST; i++) await new Promise((r) => setTimeout(r, 50));
+    return window.LAST ? { mng: LAST.mng.capWh, ref: LAST.ref.capWh } : null;
+  };
+  R.conAged = await corre(true); R.sinAged = await corre(false);
+  $('aged').checked = true; window.LAST = null; $('run').click();
+  for (let i = 0; i < 200 && !window.LAST; i++) await new Promise((r) => setTimeout(r, 50));
+  /* e) el informe: con todo bien salvo UNA hora bajo la reserva, el veredicto cae por ella */
+  let doc = null; const abre = window.open;
+  window.open = () => ({ document: { write: (d) => { doc = d; }, close: () => {} } });
+  buildReport(); R.informe = doc;
+  const tocado = LAST.mng.map((r) => Object.assign({}, r)); tocado.capWh = LAST.mng.capWh; tocado.eDia = LAST.mng.eDia;
+  const k = Math.floor(tocado.length / 2); tocado[k].eLib = -0.5;
+  const limpio = summarize(LAST.mng);
+  R.limpio = { per: limpio.periodosRes, inact: limpio.inactivePct, lost: limpio.prodLostPct, socMin: limpio.socMin };
+  /* y entrar en modo seguridad cuenta aunque al aparcar a tiempo no se llegue a cruzar */
+  const enSeg = LAST.mng.map((r) => Object.assign({}, r)); enSeg[k].seg = true;
+  R.segSinCruzar = { eLib: enSeg[k].eLib, per: summarize(enSeg).periodosRes };
+  LAST.mng = tocado; doc = null; buildReport(); R.informeTocado = doc;
+  window.open = abre;
+  return R;
+});
+ok(Math.abs(res.reserva - res.aMano) < 1e-9 && Math.abs(res.reserva - 16.18) < 0.01,
+  'la reserva es la peor maniobra a seguridad —110°, de −55° a la defensa en +55°— ×2 por viento: ' + res.reserva.toFixed(2) + ' Wh, igual que la cuenta a mano',
+  res.reserva + ' contra ' + res.aMano);
+ok(Math.abs(res.cap.vieja - 0.8 * 153.6) < 1e-9 && res.cap.nueva === 153.6 && res.margen.vieja < res.margen.nueva,
+  'al final de vida la batería simula con el 80 % (' + res.cap.vieja.toFixed(2) + ' Wh) y el margen sobre la reserva baja (' +
+  res.margen.nueva.toFixed(1) + ' → ' + res.margen.vieja.toFixed(1) + ' Wh)', JSON.stringify(res.cap) + ' ' + JSON.stringify(res.margen));
+ok(res.entra > 0, 'el banco llega a meter a la estrategia en modo seguridad (' + res.entra + ' h): las comprobaciones que siguen no están vacías', String(res.entra));
+ok(res.sigueBajo === 0,
+  'y una estrategia NUNCA sigue al sol por debajo de la reserva: el modo seguridad es predictivo, decide antes de gastar la hora', res.sigueBajo + ' h siguiendo bajo la reserva');
+ok(res.segFueraDeDefensa === 0, 'en modo seguridad el seguidor está en defensa (+55°), no donde le pilló', res.segFueraDeDefensa + ' h fuera');
+ok(res.salidas > 0 && res.salidaPronto === 0,
+  'y sólo sale con la reserva MÁS un día de invierno (' + res.eDia.toFixed(1) + ' Wh por encima): ' + res.salidas + ' salida(s), ninguna antes',
+  'salidas ' + res.salidas + ' · prematuras ' + res.salidaPronto);
+ok(res.varado > 0,
+  'sin gestión, en la misma serie, el seguidor se queda sin reserva LEJOS de la defensa (' + res.varado + ' h): el riesgo que la reserva cierra', String(res.varado));
+ok(res.conAged && res.sinAged && Math.abs(res.conAged.mng - 122.88) < 1e-9 && Math.abs(res.conAged.ref - 122.88) < 1e-9 &&
+   res.sinAged.mng === 153.6 && res.sinAged.ref === 153.6,
+  'el interruptor del panel LLEGA a la simulación y a la columna de referencia: 122,88 Wh marcado, 153,6 sin marcar',
+  JSON.stringify({ con: res.conAged, sin: res.sinAged }));
+ok(res.segSinCruzar.eLib > 0 && res.segSinCruzar.per === 1,
+  'ENTRAR en modo seguridad ya cuenta como periodo sin reserva, aunque la batería no llegue a cruzarla: como en Track N Co',
+  JSON.stringify(res.segSinCruzar));
+ok(res.informe && res.informe.includes('Margen sobre la reserva') && res.informe.includes('Capacidad evaluada') &&
+   res.informe.includes('final de vida') && res.informe.includes('Veces bajo la reserva'),
+  'el informe imprime la reserva, el margen sobre ella y la capacidad evaluada al final de vida');
+ok(res.limpio.per === 0 && res.limpio.inact < 1 && res.limpio.lost < 0.1 && res.limpio.socMin > 0.05 &&
+   res.informe.includes('<b>cumple</b>') && res.informeTocado && res.informeTocado.includes('<b>presenta riesgo</b>') &&
+   res.informeTocado.includes('Baja 1 vez') && res.informeTocado.includes('no puede ponerse a salvo'),
+  'y el veredicto CAE por la reserva: la misma corrida que cumple, con una sola hora sin reserva, pasa a «presenta riesgo» y dice por qué',
+  JSON.stringify(res.limpio));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería y el catálogo cuadra con la ficha SUNNER'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER y ninguna estrategia sigue al sol sin reserva para ponerse a salvo'));
 process.exit(fallos ? 1 : 0);
