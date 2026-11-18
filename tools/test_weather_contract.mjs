@@ -30,6 +30,7 @@ check("sello declara consumidor",st.consumer==="battery_winter");
 const b=W.contractToBattery(pkg,{year:2024});
 check("batería filtra el año",b.length===2,String(b.length));
 check("batería conserva GHI/viento/racha",b[1].ghi===100&&b[1].wind===5&&b[1].gust===8,JSON.stringify(b[1]));
+check("batería sin racha da null, no 0",W.contractToBattery({...pkg,rows:[{t:"2024-03-01T00:00:00Z",ghi_wm2:0,dhi_wm2:0,temp_c:1,wind_ms:2}]},{year:2024})[0].gust===null);
 check("batería conserva identidad del contrato",b.contract.contract_id==="wc:test"&&b.contract.dataset_hash==="hash-test");
 check("batería declara WeatherContract",b.source==="weather_contract");
 check("años del contrato salen ordenados",JSON.stringify(W.contractYears(pkg))===JSON.stringify([2024,2025]));
