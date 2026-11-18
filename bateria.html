@@ -403,8 +403,55 @@ var PROFILES=[
  {id:"STRING_60W_3Ah",   n:"STRING · 3,3 Ah (84,5 Wh) · regulador 60 W", wh:84.48, chgW:60, string:true, tCarga:[0,45], tDescarga:[-10,60], comercial:"STR 3.3AH ST 150", celda:"3300 mAh · 8S1P"},
  {id:"STRING_60W_6Ah",   n:"STRING · 6 Ah · regulador 60 W",         wh:153.6, chgW:60, string:true, tCarga:[0,45], tDescarga:[-10,60], comercial:"STR 6AH ST 150",  celda:"6000 mAh · 8S1P"},
  {id:"SP_45W_6Ah_LT",    n:"SP · 6,5 Ah · LT (carga a −20 °C)",      wh:166.4, chgW:45, lt:true, tCarga:[-20,60], tDescarga:[-40,60], comercial:"SP 6,5AH LT 150", celda:"6500 mAh · 8S2P"},
- {id:"STRING_60W_6Ah_LT",n:"STRING · 6 Ah · LTH (carga a −30 °C) · regulador 60 W", wh:153.6, chgW:60, lt:true, string:true, tCarga:[-30,45], tDescarga:[-30,60], comercial:"STR 6AH LTH 150", celda:"6000 mAh · 8S1P"}
+ {id:"STRING_60W_6Ah_LT",n:"STRING · 6 Ah · LTH (carga a −30 °C) · regulador 60 W", wh:153.6, chgW:60, lt:true, string:true, tCarga:[-30,45], tDescarga:[-30,60], comercial:"STR 6AH LTH 150", celda:"6000 mAh · 8S1P"},
+ /* TCU DE TRACK N CO (Plug N Track): OTRO CONTROLADOR, no otra batería. Sus parámetros
+    son los de SU informe para Casalmaggiore (BAA-2611-0004 y -0005, 2026-11-16/17) y van
+    en TRACK_N_CO; `control` hace que el simulador los obedezca. Se modela sin su
+    calefactor opcional. 45 W de serie y 60 W de catálogo: los dos paneles de sus informes.
+    Validado contra el informe con sus reglas: capacidad mínima sin calefactor 10,8 Ah con
+    45 W (la suya, 10,6) y 10,7 Ah con 60 W (la suya, 10,3). */
+ {id:"TNC_45W_3.8Ah",    n:"Track N Co · TC 3,8 Ah (97,3 Wh)",       wh:97.28, chgW:45, tCarga:[0,50], tDescarga:[-20,null], control:"tracknco", marca:"Track N Co", comercial:"Track N Co TC 3,8 Ah"},
+ {id:"TNC_45W_6Ah",      n:"Track N Co · TC 6 Ah (153,6 Wh)",        wh:153.6, chgW:45, tCarga:[0,50], tDescarga:[-20,null], control:"tracknco", marca:"Track N Co", comercial:"Track N Co TC 6 Ah"},
+ {id:"TNC_45W_8Ah",      n:"Track N Co · TC 8 Ah (204,8 Wh)",        wh:204.8, chgW:45, tCarga:[0,50], tDescarga:[-20,null], control:"tracknco", marca:"Track N Co", comercial:"Track N Co TC 8 Ah"},
+ {id:"TNC_60W_3.8Ah",    n:"Track N Co · TC 3,8 Ah · panel 60 W",    wh:97.28, chgW:60, tCarga:[0,50], tDescarga:[-20,null], control:"tracknco", marca:"Track N Co", comercial:"Track N Co TC 3,8 Ah", variante:true},
+ {id:"TNC_60W_6Ah",      n:"Track N Co · TC 6 Ah · panel 60 W",      wh:153.6, chgW:60, tCarga:[0,50], tDescarga:[-20,null], control:"tracknco", marca:"Track N Co", comercial:"Track N Co TC 6 Ah", variante:true},
+ {id:"TNC_60W_8Ah",      n:"Track N Co · TC 8 Ah · panel 60 W",      wh:204.8, chgW:60, tCarga:[0,50], tDescarga:[-20,null], control:"tracknco", marca:"Track N Co", comercial:"Track N Co TC 8 Ah", variante:true}
 ];
+/* El controlador de Track N Co, tal como lo describe su informe: electrónica 0,21 W
+   (mediana medida en sus controladores), cargador 0,9 plano (MPPT y cableado), ventana
+   útil del 10 al 80 % del SoC, carga de 0 a 50 °C limitada a 300 mA (7,68 W) por debajo
+   de 10,2 °C, sin derate CC/CV (nunca pasa del 80 %), y firmware con modo seguridad y la
+   posición de seguridad en el final de carrera MÁS CERCANO. Sin techo de carga ni defensa
+   por SOC: esas son estrategias de la SUNNER. */
+/* TODO del informe de Track N Co, sin mezclar con IED ni con P4Q (lo pidió el
+   mantenedor, 2026-11-18). También el MOTOR: el suyo, medido sobre una carrera del TRX,
+   0,0488 Wh/° hacia el final de carrera y 0,1026 Wh/° alejándose. Su reserva es
+   2 × 55° × e_in = 5,37 Wh. Lo único que NO da en cifras es «un día de invierno de
+   operación» para salir del modo seguridad: se DERIVA de sus parámetros —24 h de su
+   electrónica más un día de su motor: −55→+55 y vuelta a su posición nocturna de 5°—,
+   unos 18,5 Wh, que cuadra con los ~13,6 Wh/día de motor de su tabla 5-3. Es inferencia. */
+/* LA TEMPERATURA DE LA BATERÍA, y una incoherencia de su informe. Su texto dice que, sin
+   calefactor, es «la mínima del aire de las 3 h anteriores». Pero sus propias cifras salen
+   con la temperatura del AIRE de cada hora: con ella se cuentan exactamente sus «20 días en
+   30 años sin ninguna hora de luz a 0 °C» (con la mínima de 3 h son 24), y con ella se
+   reproduce su capacidad mínima sin calefactor (10,7 Ah frente a sus 10,6; con la mínima de
+   3 h salen 13). Se usa la que reproduce SUS cifras. Pregunta abierta para Track N Co. */
+var TRACK_N_CO={idleW:0.21, eta:0.9, util:[0.10,0.80], frio:{t:10.2,w:7.68}, tMaxCarga:50,
+  eIn:0.0488, eOut:0.1026, posNoche:5, tBatVentanaH:1,
+  fuente:'informe de Track N Co para Casalmaggiore (BAA-2611-0004 y -0005)'};
+/* Su motor, con el sentido: los grados en que |θ| CRECE van hacia el final de carrera
+   (e_in) y los que |θ| DECRECE se alejan de él, levantando la mesa (e_out). */
+function motorTrackWh(desde,hasta){
+  var a=desde, b=hasta, wh=0;
+  if(a*b<0){wh+=Math.abs(a)*TRACK_N_CO.eOut; a=0;}               /* cruza 0: primero se aleja */
+  var d=Math.abs(b)-Math.abs(a);
+  return wh+(d>=0?d*TRACK_N_CO.eIn:-d*TRACK_N_CO.eOut);
+}
+function controlDe(prof){
+  if(prof&&prof.control==='tracknco')return {track:true,idleW:TRACK_N_CO.idleW,eta:TRACK_N_CO.eta,util:TRACK_N_CO.util,
+    frio:TRACK_N_CO.frio,tMaxCarga:TRACK_N_CO.tMaxCarga,motorPropio:true};
+  return {track:false,idleW:null,eta:null,util:[0,1],frio:null,tMaxCarga:null,motorPropio:false};
+}
 /* EL MODELO NOMBRA LA BATERÍA, NO LA PAREJA. Hasta que el panel fue un eje
    propio, el catálogo listaba PAREJAS y el nombre las decía: «SP · panel 45 W ·
    6 Ah». Con el panel elegible aparte eso sobra —el 45 W se elige después— y
@@ -796,11 +843,12 @@ async function comparaCatalogo(tramos,prof,loc,opts,aviso){
   for(var i=0;i<cat.length;i++){
     var p=cat[i], CR=reservaEnSerie(tramos,p,loc,opcionesPara(p,prof,opts));
     out.push({id:p.id,comercial:p.comercial||null,celda:p.celda||null,sinFicha:!!p.sinFicha,lt:!!p.lt,
+      marca:p.marca||'SUNNER',alternativa:controlDe(p).track!==controlDe(prof).track,
       ah:p.wh/CAPMIN_V,wh:p.wh,periodosRes:CR.periodosRes,diasRes:CR.diasRes,margenMin:CR.margenMin,
       suficiente:CR.periodosRes===0,evaluado:(p.base||p).id===(prof.base||prof).id});
     if(aviso)aviso(i+1,cat.length); await pausa();
   }
-  out.sort(function(a,b){return (a.lt-b.lt)||(a.wh-b.wh)});
+  out.sort(function(a,b){return (a.alternativa-b.alternativa)||(a.lt-b.lt)||(a.wh-b.wh)});
   return out;
 }
 
@@ -936,20 +984,34 @@ function motorRecorridoWh(motorModel,desde,hasta){
     wh+=consumoTCU({dtH:1,dia:true,mov:1,pos:p+s/2,motorModel:motorModel,tAmb:20}).motor;
   return wh;
 }
-function reservaWh(motorModel){return K_STOW_MOTOR*motorRecorridoWh(motorModel,-AXIS_MAX,DEFENSE_POS);}
+function reservaWh(motorModel,prof){
+  /* Track N Co: la de su informe, 2 × 55° × e_in, al final de carrera MÁS CERCANO */
+  if(controlDe(prof).track)return K_STOW_MOTOR*motorTrackWh(0,AXIS_MAX);
+  return K_STOW_MOTOR*motorRecorridoWh(motorModel,-AXIS_MAX,DEFENSE_POS);
+}
 /* «Un día de invierno de operación»: lo que la TCU tiene que haber recuperado por encima
    de la reserva para salir del modo seguridad. 24 h de electrónica y un barrido completo. */
-function diaOperacionWh(motorModel){return 24*IDLE_W+motorRecorridoWh(motorModel,-AXIS_MAX,AXIS_MAX);}
+function diaOperacionWh(motorModel,prof){
+  if(controlDe(prof).track)                                       /* inferencia: ver TRACK_N_CO */
+    return 24*TRACK_N_CO.idleW+motorTrackWh(-AXIS_MAX,AXIS_MAX)+motorTrackWh(AXIS_MAX,TRACK_N_CO.posNoche);
+  return 24*IDLE_W+motorRecorridoWh(motorModel,-AXIS_MAX,AXIS_MAX);
+}
 
 /* ═══════════ SIMULADOR — estrategia oficial de SOC + winter mode canónico ═══════════
    opts: {motorModel:'factiun'|mA(number), winter, socTgt, socCrit, fcDays, tMin, strategy:bool} */
 function simulate(meteo,prof,loc,soc0,opts){
-  var latR=loc.lat*D2R, capWh=prof.wh*(opts.soh!=null?opts.soh:1), n=meteo.length;
+  /* Con otro controlador manda SU firmware, no las estrategias SUNNER del panel: modo
+     seguridad siempre, sin techo de carga, sin calibración y sin defensa por SOC. */
+  var CD=controlDe(prof);
+  if(CD.track)opts=Object.assign({},opts,{strategy:true,socTgt:100,socCrit:0,fcDays:1e9,winter:false});
+  /* el SOC del simulador es la fracción de la VENTANA ÚTIL: en Track, del 10 al 80 % */
+  var latR=loc.lat*D2R, capWh=prof.wh*(CD.util[1]-CD.util[0])*(opts.soh!=null?opts.soh:1), n=meteo.length;
   var dtH=n>1?((+meteo[1].t)-(+meteo[0].t))/36e5:1;      /* paso en horas (uniforme) */
   var t0Day=Math.floor((+meteo[0].t)/864e5);
   var soc=soc0, parked=false, prevPos=null, stow=0;
-  var eRes=reservaWh(opts.motorModel), eDia=diaOperacionWh(opts.motorModel), seguridad=false;
+  var eRes=reservaWh(opts.motorModel,prof), eDia=diaOperacionWh(opts.motorModel,prof), seguridad=false;
   var ladoNieve=null;                                  /* el lado de SP3 se fija al empezar la alarma */
+  var histT=[];                                        /* Track: temperaturas del aire de las últimas 3 h */
   /* Temperatura de la BATERÍA, no la ambiente: es la que decide el calefactor y
      la que limita el C-rate. Hasta 2026-10-21 aquí se pasaba `m.temp` crudo —el
      gemelo sí modelaba la inercia (sim/planta.js), así que la MISMA regla tenía
@@ -1006,7 +1068,10 @@ function simulate(meteo,prof,loc,soc0,opts){
        que hace la NCU real: confirmado por el mantenedor el 2026-11-18. */
     if(!nieve)ladoNieve=null;
     else if(ladoNieve==null)ladoNieve=(prevPos!=null&&prevPos!==0)?Math.sign(prevPos):1;
-    tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
+    if(CD.track){                                     /* la del aire: ver la nota de TRACK_N_CO */
+      histT.push(m.temp); if(histT.length>Math.max(1,Math.round(TRACK_N_CO.tBatVentanaH/dtH)))histT.shift();
+      tBat=Math.min.apply(null,histT);
+    } else tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
     /* La hora se PLANIFICA antes de comprometerla —posición, movimiento y consumo—, porque
        el modo seguridad necesita saber lo que costaría para decidir si se la puede permitir.
        `planifica` no toca `prevPos`: eso sólo lo hace el plan elegido. */
@@ -1015,7 +1080,8 @@ function simulate(meteo,prof,loc,soc0,opts){
     /* Jerarquía de la casa: viento (SP1) > nieve (SP3) > batería > seguimiento */
     var target=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo))
                      :nieve?ladoNieve*Math.min(SNOW_POS,AXIS_MAX)
-                     :(aparcado?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
+                     :(aparcado?(CD.track?(prevPos!=null&&prevPos<0?-1:1)*AXIS_MAX   /* Track: final de carrera más cercano */
+                                         :(opts.defPos!=null?opts.defPos:DEFENSE_POS)):trackPos);
     if(prevPos==null)prevPos=target;
     /* BATERÍA AGOTADA: la TCU no mueve nada. Antes, con SOC 0 % el seguidor
        seguía al sol como si tal cosa —el motor «giraba» sin energía— y la
@@ -1041,7 +1107,11 @@ function simulate(meteo,prof,loc,soc0,opts){
     var avgPos=(target+prevPos)/2;
     /* — Consumo del paso: electrónica + motor + calefactor, todo en consumoTCU — */
     var cons=consumoTCU({dtH:dtH,dia:day,mov:deltaEff,pos:avgPos,
-                        motorModel:opts.motorModel,tAmb:tBat});   /* sin calefactor: ningún perfil lo lleva */
+                        motorModel:opts.motorModel,tAmb:tBat,                    /* sin calefactor: ningún perfil lo lleva */
+                        idleW:CD.idleW,sleepW:CD.idleW});                        /* null = la electrónica canónica */
+    if(CD.motorPropio){                                 /* Track: SU motor, con el sentido de giro */
+      var mT=deltaEff>0?motorTrackWh(prevPos,target):0; cons.total+=mT-cons.motor; cons.motor=mT;
+    }
     /* Las maniobras de PROTECCIÓN —bandera de viento, nieve y modo seguridad— se cobran
        ×K_STOW_MOTOR, como hace Track N Co: se hacen con carga en la estructura. El
        seguimiento normal y el aparcado por SOC crítico, a ×1. */
@@ -1056,7 +1126,17 @@ function simulate(meteo,prof,loc,soc0,opts){
        reserva paga el viaje. La carga de la hora no se cuenta a favor, que es conservador.
        Sólo en las estrategias: «Sin gestión» es precisamente la TCU sin protección, y de la
        de SUNNER no consta que tenga esta lógica, así que no se le supone. */
-    if(opts.strategy && !seguridad && soc*capWh-pl.cons.total<eRes){
+    /* Track decide con la energía al FINAL de la hora, con lo que carga el panel en ella
+       (su balance horario, figura 4-1). La SUNNER, sin contar la carga: más conservador. */
+    var chgPrev=0;
+    if(CD.track && day && tBat>=opts.tMin){
+      var pz=(opts.mountTilt!=null)?poaFixed(opts.mountTilt,sun.el,sun.az,bh,m.dhi,m.ghi,loc.lat)
+            :(pl.target===trackPos&&m.poa!=null)?m.poa
+            :(sun.el>0&&m.dhi>0)?poaAt(pl.target,sun.el,sun.az,bh,m.dhi,m.ghi,N):((m.poa!=null)?m.poa:m.ghi);
+      if(pz>=opts.poaMin)chgPrev=Math.min(prof.chgW*Math.min(pz/1000,1)*CD.eta,
+        tBat>=CD.tMaxCarga?0:(tBat<CD.frio.t?CD.frio.w:Infinity))*dtH;
+    }
+    if(opts.strategy && !seguridad && soc*capWh+chgPrev-pl.cons.total<eRes){
       seguridad=true;
       if(!parked){parked=true; pl=planifica(true);}
     }
@@ -1081,10 +1161,14 @@ function simulate(meteo,prof,loc,soc0,opts){
       var chgP=prof.string ? prof.chgW*Math.min(poaChg/POA_STRING_FULL,1)   /* string: potencia nominal desde muy poca luz */
                            : prof.chgW*Math.min(poaChg/1000,1);            /* panel dedicado: escala con la irradiancia */
       /* límite de la batería: C-rate seguro por Tª (11.5b) × JEITA caliente × derate CC/CV por SOC */
-      var pMax=cRateSafeLFP(tEff)*hotDerate(tEff)*capWh*socDerateCharge(soc);
+      var chgP0=chgP;                                      /* lo que da el panel, antes de topes */
+      var pMax=CD.track
+        ? (tEff>=CD.tMaxCarga?0:(tEff<CD.frio.t?CD.frio.w:Infinity))     /* Track: 300 mA bajo 10,2 °C, sin CC/CV */
+        : cRateSafeLFP(tEff)*hotDerate(tEff)*capWh*socDerateCharge(soc);
       chgP=Math.min(chgP,pMax);
       cRateNow=capWh>0?chgP/capWh:0;
-      chgWh=chgP*etaAtCrate(etaCharger(poaChg),cRateNow)*dtH;       /* Wh que entran de verdad */
+      /* Track: su fórmula pone el tope de 7,68 W a lo que ENTRA en la batería, después del 0,9 */
+      chgWh=(CD.track?Math.min(chgP0*CD.eta,pMax):chgP*etaAtCrate(etaCharger(poaChg),cRateNow))*dtH;       /* Wh que entran de verdad */
     }
     /* Carga completa (calibración del SoC): toca cada fcDays días DESDE LA ÚLTIMA LOGRADA.
        Si el día no da para llegar al 100 %, la ventana sigue abierta y se reintenta al día
@@ -1168,6 +1252,9 @@ var CONTROL_COL={none:'#8C9AAB',std:'#36D399',winter:'#3aa0ff',cons:'#c084fc',lt
    la QUÍMICA, que carga hasta −20 °C en vez de 0 y trae 166,4 Wh en vez de
    153,6. Esa alternativa es de EQUIPO, va en una columna más y se dice. */
 function controlesPara(prof){
+  if(controlDe(prof).track)return [{k:'tnc',n:'Firmware Track N Co',
+    d:'Modo seguridad con reserva al final de carrera más cercano, sin techo de carga ni defensa por SOC: como lo describe su informe',
+    o:{strategy:true,socTgt:100,socCrit:0,fcDays:1e9,winter:false}}];
   var lista=CONTROLS.slice();
   if(prof&&!prof.lt){
     var base=prof.base||prof;                   /* el gemelo -LT es del MODELO, no del id construido */
@@ -1589,6 +1676,13 @@ $('year').onchange=function(){$('sweepFld').style.display=this.value==='worst'?'
 $('year').onchange();      /* estado inicial coherente con la opción seleccionada */
 function profNote(){
   var P=PROFILES[$('prof').value];
+  if(controlDe(P).track){
+    $('profNote').innerHTML='<b>'+P.comercial+'</b> · <b>otra TCU</b>, con todos sus parámetros del '+TRACK_N_CO.fuente+
+      ' · batería '+fmt(P.wh,1)+' Wh (25,6 V), útil del 10 al 80 % del SoC · electrónica '+fmt(TRACK_N_CO.idleW,2)+' W · cargador '+fmt(TRACK_N_CO.eta,2)+' plano'+
+      ' · carga de 0 a 50 °C, 300 mA bajo 10,2 °C · batería a la temperatura del aire · motor '+fmt(TRACK_N_CO.eIn,4)+'/'+fmt(TRACK_N_CO.eOut,4)+' Wh/° (hacia/alejándose del final de carrera)'+
+      ' · reserva al final de carrera más cercano · su calefactor opcional NO se modela';
+    return;
+  }
   $('profNote').innerHTML='<b>'+(P.comercial||P.id)+'</b>'+(P.celda?' · celda '+P.celda:'')+(P.sinFicha?' · <b>sin contraparte en la ficha SUNNER</b>':'')+
     ' · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · química '+
     (P.lt?'<b>LiFePO₄ de baja temperatura</b> — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C, descarga de '+P.tDescarga[0]+' a '+P.tDescarga[1]+' °C, SIN calefactor'
@@ -1874,7 +1968,13 @@ $('run').onclick=function(){
             /* las dos químicas, sea cual sea la evaluada: la gemela se busca por id */
             var est=(prof.base||prof), idStd=est.id.replace(/_LT$/,''), conP=function(p){return p&&!p.string?conPanel(p,prof.chgW):p};
             var stdGem=PROFILES.filter(function(p){return p.id===idStd})[0], ltGem=PROFILES.filter(function(p){return p.id===idStd+'_LT'})[0];
-            var quims=[{n:'estándar',p:prof.lt?conP(stdGem):prof},{n:'-LT',p:prof.lt?prof:conP(ltGem)}].filter(function(q){return q.p});
+            var esTrack=controlDe(prof).track, spStd=PROFILES.filter(function(p){return p.id==='SP_45W_6Ah'})[0],
+                spLT=PROFILES.filter(function(p){return p.id==='SP_45W_6Ah_LT'})[0], tnc=PROFILES.filter(function(p){return p.id==='TNC_45W_6Ah'})[0];
+            var quims=esTrack
+              ?[{n:'SUNNER estándar',p:conP(spStd)},{n:'SUNNER -LT',p:conP(spLT)},{n:'Track N Co',p:prof}]
+              :[{n:'SUNNER estándar',p:prof.lt?conP(stdGem):prof},{n:'SUNNER -LT',p:prof.lt?prof:conP(ltGem)},
+                {n:'Track N Co',p:prof.string?null:conP(tnc)}];                   /* Track no tiene STRING */
+            quims=quims.filter(function(q){return q.p});
             capMin=[];
             for(var q=0;q<quims.length;q++){
               var r=await capacidadMinima(tramos,quims[q].p,loc,opcionesPara(quims[q].p,prof,opts),function(e){tag.textContent='Capacidad mínima ('+quims[q].n+'): '+e+' simulaciones de la serie…';});
@@ -2103,12 +2203,16 @@ function tbl(rows,head){
 /* La frase del hito 4 para la conclusión: la menor batería del catálogo que basta y la
    capacidad mínima de cada química. */
 function frasesCapMin(sw){
-  var suf=(sw.catalogo||[]).filter(function(c){return c.suficiente}), menor=suf.sort(function(a,b){return a.wh-b.wh})[0];
-  var cm=sw.capMin.map(function(c){return c.ah!=null?'<b>'+fmt(c.ah,1)+' Ah</b> con la química '+c.quimica
-    :'<b>más de '+c.tope+' Ah</b> con la química '+c.quimica+' (no es la batería: es el panel)'});
-  return (sw.catalogo?(menor?'De las baterías del catálogo, la menor que no se queda nunca sin reserva es <b>'+(menor.comercial||menor.id)+'</b>. '
+  var cat=sw.catalogo||[], menorDe=function(l){return l.filter(function(c){return c.suficiente}).sort(function(a,b){return a.wh-b.wh})[0]};
+  var propio=cat.filter(function(c){return !c.alternativa}), alt=cat.filter(function(c){return c.alternativa});
+  var m1=menorDe(propio), m2=menorDe(alt);
+  var cm=sw.capMin.map(function(c){return c.ah!=null?'<b>'+fmt(c.ah,1)+' Ah</b> con '+c.quimica
+    :'<b>más de '+c.tope+' Ah</b> con '+c.quimica+' (no es la batería: es el panel)'});
+  return (propio.length?(m1?'De las baterías del catálogo, la menor que no se queda nunca sin reserva es <b>'+(m1.comercial||m1.id)+'</b>. '
       :'<b>Ninguna batería del catálogo basta</b> con este panel y esta estrategia. '):'')+
-    'La capacidad mínima, con la batería al final de su vida, es de '+cm.join(' y de ')+' (apartado 8.2).';
+    (alt.length?'Como alternativa, con la TCU de '+alt[0].marca+' y los parámetros de su propio informe, '+
+      (m2?'la menor que basta es <b>'+(m2.comercial||m2.id)+'</b>. ':'<b>ninguna de sus baterías basta</b>. '):'')+
+    'La capacidad mínima, con la batería al final de su vida, es de '+cm.join(', de ')+' (apartado 8.2).';
 }
 function buildReport(){
   if(!LAST){alert('Ejecuta primero una simulación.');return;}
@@ -2144,7 +2248,10 @@ function buildReport(){
   var T30=sweep&&sweep.total?sweep.total:null;
   var okDisp=S.inactivePct<1.0, okProd=S.prodLostPct<0.1, okSoc=S.socMin>0.05, okRes=(T30||S).periodosRes===0;
   var apto=okDisp&&okProd&&okSoc&&okRes;
-  var cap=mng.capWh, envejecida=cap<prof.wh-1e-9;
+  var cap=mng.capWh, sohR=(opts.soh!=null?opts.soh:1), envejecida=sohR<1-1e-9, TNC=controlDe(prof).track;
+  /* ¿sale alguna SUNNER en este informe? Las limitaciones que sólo son suyas (vida frente a
+     su ficha, curva de P4Q, motor de la TCU 33, defensa fija) no van en uno sólo de Track. */
+  var hayS=!TNC||!!(sweep&&(sweep.catalogo||[]).some(function(c){return c.marca!=='Track N Co'}));
   var fT=function(d){return f(d)+' '+('0'+d.getUTCHours()).slice(-2)+':00 UTC'};
   var elec=eligeMejor(C), mejor=elec?elec.mejor:null;
   var colLT=C?C.filter(function(x){return x.c.k==='lt'})[0]:null;
@@ -2156,7 +2263,7 @@ function buildReport(){
      '<h1>Estudio de disponibilidad<br>de batería de la TCU</h1>'+
      '<div class="sub">'+sitio+'</div>'+
      '<div class="meta">Proyecto: '+proyecto+'<br>Modelo de TCU: '+(prof.comercial||prof.id)+' — '+fmt(prof.wh,1)+' Wh (25,6 V)'+
-     (envejecida?', evaluada a <b>'+fmt(cap,1)+' Wh</b> ('+fmt(100*cap/prof.wh)+' %, final de vida)':'')+' · fuente de carga '+prof.chgW+' W'+
+     (envejecida?', evaluada al <b>'+fmt(100*sohR)+' %</b> (final de vida)':'')+(TNC?', ventana útil del 10 al 80 % del SoC: <b>'+fmt(cap,1)+' Wh</b>':'')+' · fuente de carga '+prof.chgW+' W'+
      (deCatalogo?'':' <b>(combinación de estudio, no de catálogo)</b>')+'<br>'+
      'Periodo simulado: '+f(d0)+' – '+f(d1)+' ('+fmt(dias)+' días, paso '+fmt(dtH*60)+' min)<br>'+
      'Origen de la meteorología: '+fuente+'<br>Fecha de emisión: '+fHoy+'</div>'+
@@ -2225,7 +2332,7 @@ function buildReport(){
      ['Latitud',{v:fmt(loc.lat,4)+'°'}],['Longitud',{v:fmt(loc.lon,4)+'°'}],
      ['Tipo de seguidor',{v:'1 eje N-S, 1V bífila'}],
      ['GCR',{v:fmt(GCR,3)}],['Límite mecánico',{v:'± '+AXIS_MAX+'°'}],
-     ['Posición nocturna',{v:NIGHT_POS+'°'}],['Posición de defensa',{v:(opts.defPos!=null?opts.defPos:DEFENSE_POS)+'°'}],
+     ['Posición nocturna',{v:NIGHT_POS+'°'}],['Posición de defensa',{v:TNC?'el final de carrera más cercano, ±'+AXIS_MAX+'° (su informe)':(opts.defPos!=null?opts.defPos:DEFENSE_POS)+'°'}],
      ['Histéresis del lazo',{v:fmt(HYST_DEG,1)+'° por corrección'}],
      ['Velocidad de giro',{v:fmt(SLEW_DPS,2)+' °/s'}],
      ['Abanderamiento por viento',{v:'parcial ≥ 40 km/h (±'+PARTIAL_STOW_DEG+'°) · total ≥ 60 km/h (±'+AXIS_MAX+'°), histéresis '+fmt(DESTOW_HOLD_H*60)+' min'}]
@@ -2239,13 +2346,19 @@ function buildReport(){
 
   /* 5. BATERÍA Y MOTOR */
   H+='<h2 class="brk">5. Especificación de batería y motor</h2>';
-  H+=tbl([['Modelo de TCU',{v:(prof.comercial?'<b>'+prof.comercial+'</b> (ficha SUNNER) · ':'')+prof.id+(prof.sinFicha?' — <b>sin contraparte en la ficha SUNNER</b>':'')}],
-     ['Celda',{v:prof.celda?prof.celda+' · LiFePO₄':'no declarada en la ficha'}],
+  H+=tbl([['Modelo de TCU',{v:TNC?'<b>'+prof.comercial+'</b> — todos sus parámetros salen del '+TRACK_N_CO.fuente+' · '+prof.id
+        :(prof.comercial?'<b>'+prof.comercial+'</b> (ficha SUNNER) · ':'')+prof.id+(prof.sinFicha?' — <b>sin contraparte en la ficha SUNNER</b>':'')}],
+     ['Celda',{v:TNC?'LiFePO₄ a 25,6 V; su informe no da la celda':prof.celda?prof.celda+' · LiFePO₄':'no declarada en la ficha'}],
      ['Capacidad nominal',{v:fmt(prof.wh,1)+' Wh ('+fmt(prof.wh/25.6,1)+' Ah a 25,6 V)'}],
-     ['Capacidad evaluada',{v:envejecida
-        ?'<b>'+fmt(cap,1)+' Wh</b>: el '+fmt(100*cap/prof.wh)+' % de la nominal, que es el final de vida del modelo de degradación. Si cumple así, cumple toda la vida de la batería.'
-        :fmt(cap,1)+' Wh: la nominal, batería <b>nueva</b>. El resultado no cubre la pérdida de capacidad con los años.',cls:envejecida?'':'wn'}],
-     ['Reserva para llegar a seguridad',{v:'<b>'+fmt(S.reservaWh,2)+' Wh</b>: la peor maniobra hasta la posición de defensa —de −'+AXIS_MAX+'° a +'+DEFENSE_POS+'°, '+
+     ['Capacidad evaluada',{v:'<b>'+fmt(cap,1)+' Wh</b>'+
+        (TNC?': la ventana útil de su firmware, del 10 al 80 % del SoC (el 70 % de la nominal)'+(envejecida?', con la batería al '+fmt(100*sohR)+' %':'')+'.':'')+
+        (envejecida?(TNC?'':': el '+fmt(100*sohR)+' % de la nominal')+' Al final de vida del modelo de degradación: si cumple así, cumple toda la vida de la batería.'
+          :(TNC?'':': la nominal,')+' batería <b>nueva</b>. El resultado no cubre la pérdida de capacidad con los años.'),cls:envejecida?'':'wn'}],
+     ['Reserva para llegar a seguridad',{v:TNC
+        ?'<b>'+fmt(S.reservaWh,2)+' Wh</b>: la de su informe, 2 × '+AXIS_MAX+'° × '+fmt(TRACK_N_CO.eIn,4)+' Wh/°, hasta el final de carrera más cercano a doble corriente. '+
+         'Su firmware va a seguridad por debajo de ella y no vuelve a seguir hasta tener la reserva más un día de invierno de operación ('+fmt(mng.eDia,1)+' Wh: '+
+         '<b>inferido</b> de sus parámetros, porque su informe no da la cifra).'
+        :'<b>'+fmt(S.reservaWh,2)+' Wh</b>: la peor maniobra hasta la posición de defensa —de −'+AXIS_MAX+'° a +'+DEFENSE_POS+'°, '+
         fmt(DEFENSE_POS+AXIS_MAX)+'°— con el modelo de motor de esta simulación, ×'+K_STOW_MOTOR+' de corriente porque puede tocar con viento. '+
         'Las estrategias con gestión no bajan de ella: por debajo van a defensa (modo seguridad) y no vuelven a seguir hasta tener la reserva más un día de invierno de operación ('+fmt(mng.eDia,1)+' Wh).'}],
      ['Química',{v:'LiFePO₄'}],
@@ -2253,12 +2366,17 @@ function buildReport(){
         :fmt(prof.chgW)+' W de panel dedicado'+(prof.base?' — apartado del panel de serie del modelo, que son '+fmt(prof.base.chgW)+' W':' — panel de serie del modelo')}],
      ['Combinación panel + batería',{v:deCatalogo?'de <b>catálogo</b>':'de <b>ESTUDIO</b>: esta pareja de panel y batería no figura en el catálogo de Factiun y no debe cotizarse como producto',
         cls:deCatalogo?'':'wn'}],
+     TNC?['Rango de temperatura',{v:'carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C, limitada a 300 mA (7,68 W) por debajo de '+fmt(TRACK_N_CO.frio.t,1)+' °C; '+
+        'descarga desde '+prof.tDescarga[0]+' °C (el máximo no lo da su informe). Su calefactor opcional de 35 W <b>no se modela</b>: es la variante «sin calefactor» de su informe'}]:
      ['Variante de baja temperatura (-LT)',{v:prof.lt
         ?'sí — celda LiFePO₄ de baja temperatura, <b>sin calefactor</b>: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'
         :'no — celda LiFePO₄ estándar: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'}],
-     ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes, con radio y sin motor (medida de IED)'}],
-     ['Modelo de consumo de motor',{v:motorTxt}],
-     ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
+     ['Consumo de electrónica',{v:TNC?fmt(TRACK_N_CO.idleW,2)+' W permanentes (mediana medida por Track N Co en sus controladores, de su informe)'
+        :fmt(IDLE_W,2)+' W permanentes, con radio y sin motor (medida de IED)'}],
+     ['Temperatura de la batería',{v:TNC?'la del aire en cada hora: es con la que salen sus propias cifras, aunque su texto diga «la mínima de las 3 h anteriores» — ver limitaciones'
+        :'sigue al aire con inercia de primer orden (τ = 1800 s)',cls:TNC?'wn':''}],
+     ['Modelo de consumo de motor',{v:TNC?'el de su informe, con el sentido de giro: '+fmt(TRACK_N_CO.eIn,4)+' Wh/° hacia el final de carrera y '+fmt(TRACK_N_CO.eOut,4)+' Wh/° alejándose (una carrera medida del TRX)':motorTxt}],
+     ['Potencia de motor medida',{v:TNC?'1,39 A hacia el final de carrera y 2,92 A alejándose, a 24 V (su tabla 3-2)':'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
      ['Dato que dispara la bandera de viento',{v:(S.vientoPor==='media'
         ?'el <b>viento medio horario</b>, elegido en el panel: se queda corto frente al anemómetro de la NCU'
         :'la <b>racha</b> a 10 m, que es lo que compara la NCU')+' (umbrales en el apartado 4)'+
@@ -2269,10 +2387,12 @@ function buildReport(){
         cls:S.hSinNieve>0?'wn':''}],
      ['Efecto del viento sobre el consumo',{v:'las maniobras de protección —viento, nieve y modo seguridad— se cobran ×'+K_STOW_MOTOR+'; el seguimiento con viento, no — ver limitaciones',cls:'wn'}],
      ['Tª mínima de carga',{v:opts.tMin+' °C'}],
-     ['Umbral mínimo de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
-     ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA, curva del regulador de <b>P4Q</b>: la del regulador de la TCU SUNNER no está disponible',cls:'wn'}],
+     ['Umbral mínimo de carga',{v:opts.poaMin+' W/m²'+(TNC?'':' (además de la curva η(G))')}],
+     ['Rendimiento del regulador',TNC?{v:fmt(TRACK_N_CO.eta,2)+' plano, cargador MPPT y cableado (su informe)'}
+        :{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA, curva del regulador de <b>P4Q</b>: la del regulador de la TCU SUNNER no está disponible',cls:'wn'}],
      ['Montaje de la fuente de carga',{v:opts.mountTilt!=null?('panel fijo a '+opts.mountTilt+'° orientado al ecuador'):'solidario al seguidor (plano del generador)'}],
-     ['Curva de carga',{v:'CC/CV — derate ×0,8 sobre 85 % SOC, ×0,5 sobre 90 %, ×0,2 sobre 95 %'}],
+     ['Curva de carga',{v:TNC?'sin derate CC/CV: su ventana útil acaba en el 80 % del SoC (<b>inferencia</b>: su informe no lo modela)'
+        :'CC/CV — derate ×0,8 sobre 85 % SOC, ×0,5 sobre 90 %, ×0,2 sobre 95 %'}],
      ['SOC inicial',{v:LAST.socModo==='estacionario'
         ?fmt((LAST.soc0||0)*100)+' % — el objetivo de la estrategia (estado estacionario); en el apartado 9 cada lógica arranca en el suyo'
         :fmt((LAST.soc0||0)*100)+' % — valor del panel; el resultado del primer mes depende de él'}]
@@ -2380,19 +2500,24 @@ function buildReport(){
     if(sweep.catalogo&&sweep.catalogo.length){
       H+='<h3>8.2 Baterías del catálogo y capacidad mínima</h3>';
       H+='<p>Cada batería del catálogo del mismo tipo, con el mismo panel ('+fmt(prof.chgW)+' W), la misma estrategia y los mismos '+nA+' años seguidos, '+
-         'con la batería '+(envejecida?'al final de su vida ('+fmt(100*cap/prof.wh)+' % de la nominal)':'nueva')+'. '+
+         'con la batería '+(envejecida?'al final de su vida ('+fmt(100*sohR)+' % de su capacidad)':'nueva')+'. '+
          'Es <b>suficiente</b> si no se queda nunca sin reserva para llegar a seguridad.</p>';
       H+=tbl(sweep.catalogo.map(function(c){return [
-          (c.evaluado?'<b>':'')+(c.comercial||c.id)+(c.evaluado?'</b> — la evaluada':'')+(c.sinFicha?' <small>(sin ficha SUNNER)</small>':''),
-          {v:c.celda||'—'},{v:fmt(c.ah,1)+' Ah · '+fmt(c.wh,1)+' Wh'},
+          (c.evaluado?'<b>':'')+(c.comercial||c.id)+(c.evaluado?'</b> — la evaluada':'')+(c.sinFicha?' <small>(sin ficha SUNNER)</small>':'')+
+          (c.alternativa?' <small>(alternativa)</small>':''),
+          {v:c.marca},{v:c.celda||'—'},{v:fmt(c.ah,1)+' Ah · '+fmt(c.wh,1)+' Wh'},
           {v:c.suficiente?'Suficiente':'Insuficiente',cls:c.suficiente?'ok':'bad'},
           {v:c.periodosRes+(c.periodosRes?' ('+c.diasRes+' d)':''),cls:c.periodosRes?'bad':''},
           {v:fmt(c.margenMin,1)+' Wh',cls:c.margenMin<0?'bad':''}];}),
-        ['Batería','Celda','Capacidad nominal','Resultado','Veces sin reserva','Margen mínimo']);
+        ['Batería','TCU','Celda','Capacidad nominal','Resultado','Veces sin reserva','Margen mínimo']);
+      if(sweep.catalogo.some(function(c){return c.marca==='Track N Co'}))
+        H+='<p>Las filas de <b>Track N Co</b> son <b>otra TCU</b>, no otra batería, y salen <b>enteras de su informe</b> (electrónica, cargador, ventana útil del SoC, '+
+           'carga en frío, motor, reserva y firmware), sin mezclar datos de otra TCU. Lo común a las dos es la planta: la meteo, la irradiancia en el plano, '+
+           'el seguimiento y las reglas de viento y nieve de la NCU. Su calefactor opcional no se modela.</p>';
       if(sweep.capMin&&sweep.capMin.length){
         H+='<p><b>Capacidad mínima</b>: la menor capacidad nominal, en pasos de '+fmt(CAPMIN_PASO,1)+' Ah, que no se queda nunca sin reserva en los '+nA+' años'+
            (envejecida?', evaluada al final de su vida para que se compare directamente con las del catálogo':'')+'. '+
-           sweep.capMin.map(function(c){return 'Química '+c.quimica+': '+(c.ah!=null?'<b>'+fmt(c.ah,1)+' Ah</b> ('+fmt(c.ah*CAPMIN_V)+' Wh)'
+           sweep.capMin.map(function(c){return c.quimica+': '+(c.ah!=null?'<b>'+fmt(c.ah,1)+' Ah</b> ('+fmt(c.ah*CAPMIN_V)+' Wh)'
              :'<b>más de '+c.tope+' Ah</b>: ninguna batería basta con este panel, y el límite es la carga y no la capacidad')}).join('. ')+'. '+
            'Se busca por bisección suponiendo que más batería, con la misma química y la misma estrategia, nunca empeora el resultado; '+
            'el escalón inmediatamente inferior queda simulado y no basta.</p>';
@@ -2447,17 +2572,19 @@ function buildReport(){
   H+='<h2>11. Hipótesis y limitaciones</h2><ul>'+
      '<li>La transposición al plano del generador es isotrópica; en cielos muy anisótropos subestima ligeramente la captación directa.</li>'+
      '<li>La temperatura de la batería sigue a la ambiente con inercia de primer orden (τ = 1800 s). Ningún perfil lleva calefactor: la variante -LT es otra química, con el rango de carga ampliado, no una batería calentada.</li>'+
-     '<li><b>La vida que da este informe es CALCULADA y no es la de la ficha.</b> Sale del conteo rainflow más Palmgren-Miner y de la degradación calendaria, sobre la serie meteorológica de este emplazamiento. SUNNER estima la suya por otro camino en <i>SUNNER TCU SP 6Ah Battery Life Estimation</i> (18/09/2024): 2000 ciclos de ensayo entre 80 ciclos/año dan 25 años por ciclado, la calendaria a 25 °C con SoC por debajo del 70 % da más de 12 años, y concluye <b>más de 10 años</b>; en emplazamientos calientes, con tres horas diarias a 45 °C, baja a <b>7 años</b> en el peor caso, que es de donde sale el «&gt; 6 años» de la ficha. Las dos estimaciones no son comparables sin más: los 80 ciclos/año de SUNNER son el caso SIN aportación del panel —su medida es explícitamente «under the worst conditions, when there is no input energy from the solar panel»— mientras que aquí el panel recarga durante el día y el ciclado efectivo sale menor. <b>La cifra de este apartado no debe citarse como garantía</b>: para eso manda la ficha.</li>'+
+     (hayS?'<li><b>La vida que da este informe es CALCULADA y no es la de la ficha.</b> Sale del conteo rainflow más Palmgren-Miner y de la degradación calendaria, sobre la serie meteorológica de este emplazamiento. SUNNER estima la suya por otro camino en <i>SUNNER TCU SP 6Ah Battery Life Estimation</i> (18/09/2024): 2000 ciclos de ensayo entre 80 ciclos/año dan 25 años por ciclado, la calendaria a 25 °C con SoC por debajo del 70 % da más de 12 años, y concluye <b>más de 10 años</b>; en emplazamientos calientes, con tres horas diarias a 45 °C, baja a <b>7 años</b> en el peor caso, que es de donde sale el «&gt; 6 años» de la ficha. Las dos estimaciones no son comparables sin más: los 80 ciclos/año de SUNNER son el caso SIN aportación del panel —su medida es explícitamente «under the worst conditions, when there is no input energy from the solar panel»— mientras que aquí el panel recarga durante el día y el ciclado efectivo sale menor. <b>La cifra de este apartado no debe citarse como garantía</b>: para eso manda la ficha.</li>':'')+
      '<li><b>El límite superior de carga de la -LT (60 °C) no se modela</b>: se le aplica el derate JEITA de la celda estándar (recorte desde 35 °C, nulo a 45 °C), que para la -LT es conservador. Y el límite de DESCARGA no se modela en ninguna de las dos variantes: la batería entrega por debajo de su mínimo (−10 °C la estándar, −40 °C la -LT) como si nada. Importa en emplazamientos muy fríos.</li>'+
      '<li><b>El efecto del viento sobre el consumo del motor sólo se cobra en las maniobras de protección.</b> La bandera de viento, la de nieve y el modo seguridad se cobran a ×'+K_STOW_MOTOR+' de corriente, que es el supuesto del informe de Track N Co sobre este mismo tracker, sin medida propia. El seguimiento con viento por debajo del umbral de bandera sigue sin cargo extra, así que en emplazamientos ventosos el consumo simulado es un <b>límite inferior</b>. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
      '<li><b>En la posición de nieve el seguidor se queda del lado en que estaba al saltar la alarma</b>, que es lo que hace la NCU real (confirmado por Factiun, 2026-11-18). El gemelo de planta la recalcula con el sol en cada paso y en eso está mal: obligaría a cruzar 110° dos veces al día mientras dura la nieve.</li>'+
-     '<li><b>El rendimiento del regulador con poca luz es el de P4Q</b> (PS26002_RevA), no el de la TCU SUNNER, que no está disponible. Es el supuesto que más mueve el resultado en invierno, porque decide cuánto se carga en los días cubiertos: rinde el 38 % a 50 W/m² y el 61 % a 100 W/m². Un regulador mejor con poca luz daría bastante más margen.</li>'+
+     (TNC||(sweep&&(sweep.catalogo||[]).some(function(c){return c.marca==='Track N Co'}))
+       ?'<li><b>La TCU de Track N Co se modela entera con los parámetros de su informe</b> (BAA-2611-0004 y -0005): electrónica 0,21 W, cargador 0,9 plano, ventana útil del 10 al 80 % del SoC, carga de 0 a 50 °C con 300 mA por debajo de 10,2 °C, su motor con el sentido de giro, su reserva de 5,37 Wh al final de carrera más cercano y su modo seguridad. Dos cosas no las da en cifras y son <b>inferencia</b>: «un día de invierno de operación» para salir del modo seguridad, derivado de sus propios parámetros, y la ausencia de derate CC/CV. Y una la corrige su propio informe: dice que la batería sin calefactor está a la mínima del aire de las 3 h anteriores, pero sus cifras —20 días sin carga en 30 años, 10,6 Ah de capacidad mínima— salen con la temperatura del aire de cada hora; se usa esa. Su calefactor opcional no se modela. Ningún dato suyo sale de otra TCU.</li>':'')+
+     (hayS?'<li><b>El rendimiento del regulador con poca luz es el de P4Q</b> (PS26002_RevA), no el de la TCU SUNNER, que no está disponible. Es el supuesto que más mueve el resultado en invierno, porque decide cuánto se carga en los días cubiertos: rinde el 38 % a 50 W/m² y el 61 % a 100 W/m². Un regulador mejor con poca luz daría bastante más margen.</li>':'')+
      '<li><b>El abanderamiento se decide con la racha horaria de ERA5</b> (la máxima de la hora, en una rejilla de unos 30 km). La racha local en una ladera o en un valle puede ser bastante distinta. Y la <b>nieve acumulada</b> también es de rejilla: en un valle frío la real puede durar más.</li>'+
-     '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
-     '<li><b>La reserva para llegar a seguridad se calcula para el peor caso fijo</b>, la maniobra de −'+AXIS_MAX+'° a la defensa en +'+DEFENSE_POS+'°, y no desde la posición de cada momento. '+
+     (hayS?'<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>':'')+
+     (hayS?'<li><b>La reserva para llegar a seguridad se calcula para el peor caso fijo</b>, la maniobra de −'+AXIS_MAX+'° a la defensa en +'+DEFENSE_POS+'°, y no desde la posición de cada momento. '+
        'Es conservador. Si la TCU fuera al final de carrera más cercano, como hace la de Track N Co, le bastaría la mitad; eso depende del firmware y aquí no se supone. '+
        'El factor ×'+K_STOW_MOTOR+' de corriente con viento es el supuesto del informe de Track N Co sobre este mismo tracker, sin medida propia. '+
-       'La columna «Sin gestión» no tiene modo seguridad: es la TCU sin protección, y de la de SUNNER no consta que lo tenga.</li>'+
+       'La columna «Sin gestión» no tiene modo seguridad: es la TCU sin protección, y de la de SUNNER no consta que lo tenga.</li>':'')+
      '<li>La suciedad y la nieve acumulada no penalizan la captación del panel de la TCU.</li>'+
      '<li>Los resultados dependen de la serie meteorológica empleada; para decisiones de compra conviene el barrido multianual del apartado 8.</li>'+
      '</ul>';
