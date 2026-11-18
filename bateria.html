@@ -191,7 +191,7 @@ table.cmp th{color:var(--tx3)}
       </select></div>
     <div class="fld"><label>Umbral mínimo de carga <span class="rv" id="poaMinV">0 W/m²</span></label>
       <input type="range" id="poaMin" min="0" max="200" step="10" value="0">
-      <div class="note">0 = sólo la curva del regulador η(G) de PS26002_RevA, que ya arranca despacio con poca luz.</div></div>
+      <div class="note">0 = sólo la curva del regulador η(G) de PS26002_RevA (la de P4Q; la de SUNNER no está disponible), que ya arranca despacio con poca luz.</div></div>
     <div class="note" id="profNote"></div>
   </div>
   <div class="grp"><h3>Meteorología · periodo</h3>
@@ -1002,7 +1002,8 @@ function simulate(meteo,prof,loc,soc0,opts){
        recalculaba cada hora con el signo del seguimiento, y con nieve el seguidor cruzaba
        de −55° a +55° al mediodía y volvía de noche: 110° a doble corriente, dos veces al
        día. En Casalmaggiore eran 1822° de giro al año en nieve contra 117°, y por sí solo
-       subía la capacidad mínima de 14,4 a 20 Ah. Se queda del lado en que estaba. */
+       subía la capacidad mínima de 14,4 a 20 Ah. Se queda del lado en que estaba, que es lo
+       que hace la NCU real: confirmado por el mantenedor el 2026-11-18. */
     if(!nieve)ladoNieve=null;
     else if(ladoNieve==null)ladoNieve=(prevPos!=null&&prevPos!==0)?Math.sign(prevPos):1;
     tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
@@ -1592,7 +1593,7 @@ function profNote(){
     ' · batería '+fmt(P.wh,1)+' Wh (25,6 V) · carga pico '+P.chgW+' W · electrónica 0,64 W · química '+
     (P.lt?'<b>LiFePO₄ de baja temperatura</b> — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C, descarga de '+P.tDescarga[0]+' a '+P.tDescarga[1]+' °C, SIN calefactor'
         :'LiFePO₄ estándar — carga de '+P.tCarga[0]+' a '+P.tCarga[1]+' °C, descarga de '+P.tDescarga[0]+' a '+P.tDescarga[1]+' °C')+
-    ' · motor 36 W a 0° … 67,2 W a 55° (curva medida, sin tope) · regulador η(G) PS26002_RevA';
+    ' · motor 36 W a 0° … 67,2 W a 55° (curva medida, sin tope) · regulador η(G) de P4Q (PS26002_RevA)';
 }
 /* Elegir equipo escribe SU suelo de carga en el panel: el umbral es del equipo,
    no una preferencia. Se puede seguir apartando a mano para estudiar qué pasa. */
@@ -2255,7 +2256,7 @@ function buildReport(){
      ['Variante de baja temperatura (-LT)',{v:prof.lt
         ?'sí — celda LiFePO₄ de baja temperatura, <b>sin calefactor</b>: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'
         :'no — celda LiFePO₄ estándar: carga de '+prof.tCarga[0]+' a '+prof.tCarga[1]+' °C y descarga de '+prof.tDescarga[0]+' a '+prof.tDescarga[1]+' °C'}],
-     ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes (medido Factiun)'}],
+     ['Consumo de electrónica',{v:fmt(IDLE_W,2)+' W permanentes, con radio y sin motor (medida de IED)'}],
      ['Modelo de consumo de motor',{v:motorTxt}],
      ['Potencia de motor medida',{v:'36,0 W a 0° … 67,2 W a 55° — sin tope artificial de potencia'}],
      ['Dato que dispara la bandera de viento',{v:(S.vientoPor==='media'
@@ -2269,7 +2270,7 @@ function buildReport(){
      ['Efecto del viento sobre el consumo',{v:'las maniobras de protección —viento, nieve y modo seguridad— se cobran ×'+K_STOW_MOTOR+'; el seguimiento con viento, no — ver limitaciones',cls:'wn'}],
      ['Tª mínima de carga',{v:opts.tMin+' °C'}],
      ['Umbral mínimo de carga',{v:opts.poaMin+' W/m² (además de la curva η(G))'}],
-     ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA'}],
+     ['Rendimiento del regulador',{v:'η(G) = 0,96·(1−e^(−G/100)) — PS26002_RevA, curva del regulador de <b>P4Q</b>: la del regulador de la TCU SUNNER no está disponible',cls:'wn'}],
      ['Montaje de la fuente de carga',{v:opts.mountTilt!=null?('panel fijo a '+opts.mountTilt+'° orientado al ecuador'):'solidario al seguidor (plano del generador)'}],
      ['Curva de carga',{v:'CC/CV — derate ×0,8 sobre 85 % SOC, ×0,5 sobre 90 %, ×0,2 sobre 95 %'}],
      ['SOC inicial',{v:LAST.socModo==='estacionario'
@@ -2449,7 +2450,8 @@ function buildReport(){
      '<li><b>La vida que da este informe es CALCULADA y no es la de la ficha.</b> Sale del conteo rainflow más Palmgren-Miner y de la degradación calendaria, sobre la serie meteorológica de este emplazamiento. SUNNER estima la suya por otro camino en <i>SUNNER TCU SP 6Ah Battery Life Estimation</i> (18/09/2024): 2000 ciclos de ensayo entre 80 ciclos/año dan 25 años por ciclado, la calendaria a 25 °C con SoC por debajo del 70 % da más de 12 años, y concluye <b>más de 10 años</b>; en emplazamientos calientes, con tres horas diarias a 45 °C, baja a <b>7 años</b> en el peor caso, que es de donde sale el «&gt; 6 años» de la ficha. Las dos estimaciones no son comparables sin más: los 80 ciclos/año de SUNNER son el caso SIN aportación del panel —su medida es explícitamente «under the worst conditions, when there is no input energy from the solar panel»— mientras que aquí el panel recarga durante el día y el ciclado efectivo sale menor. <b>La cifra de este apartado no debe citarse como garantía</b>: para eso manda la ficha.</li>'+
      '<li><b>El límite superior de carga de la -LT (60 °C) no se modela</b>: se le aplica el derate JEITA de la celda estándar (recorte desde 35 °C, nulo a 45 °C), que para la -LT es conservador. Y el límite de DESCARGA no se modela en ninguna de las dos variantes: la batería entrega por debajo de su mínimo (−10 °C la estándar, −40 °C la -LT) como si nada. Importa en emplazamientos muy fríos.</li>'+
      '<li><b>El efecto del viento sobre el consumo del motor sólo se cobra en las maniobras de protección.</b> La bandera de viento, la de nieve y el modo seguridad se cobran a ×'+K_STOW_MOTOR+' de corriente, que es el supuesto del informe de Track N Co sobre este mismo tracker, sin medida propia. El seguimiento con viento por debajo del umbral de bandera sigue sin cargo extra, así que en emplazamientos ventosos el consumo simulado es un <b>límite inferior</b>. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
-     '<li><b>En la posición de nieve el seguidor se queda del lado en que estaba al saltar la alarma</b>, como en la bandera de viento. El gemelo de planta la recalcula con el sol en cada paso; qué hace la NCU real está por confirmar, y pesa: recalcularla obliga a cruzar 110° dos veces al día mientras dure la nieve.</li>'+
+     '<li><b>En la posición de nieve el seguidor se queda del lado en que estaba al saltar la alarma</b>, que es lo que hace la NCU real (confirmado por Factiun, 2026-11-18). El gemelo de planta la recalcula con el sol en cada paso y en eso está mal: obligaría a cruzar 110° dos veces al día mientras dura la nieve.</li>'+
+     '<li><b>El rendimiento del regulador con poca luz es el de P4Q</b> (PS26002_RevA), no el de la TCU SUNNER, que no está disponible. Es el supuesto que más mueve el resultado en invierno, porque decide cuánto se carga en los días cubiertos: rinde el 38 % a 50 W/m² y el 61 % a 100 W/m². Un regulador mejor con poca luz daría bastante más margen.</li>'+
      '<li><b>El abanderamiento se decide con la racha horaria de ERA5</b> (la máxima de la hora, en una rejilla de unos 30 km). La racha local en una ladera o en un valle puede ser bastante distinta. Y la <b>nieve acumulada</b> también es de rejilla: en un valle frío la real puede durar más.</li>'+
      '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
      '<li><b>La reserva para llegar a seguridad se calcula para el peor caso fijo</b>, la maniobra de −'+AXIS_MAX+'° a la defensa en +'+DEFENSE_POS+'°, y no desde la posición de cada momento. '+
