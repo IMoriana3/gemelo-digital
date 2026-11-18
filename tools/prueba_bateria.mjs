@@ -786,13 +786,15 @@ const seg = await pg.evaluate(async () => {
       meteoAlineada: LAST.meteo.length === LAST.mng.length && +LAST.meteo[0].t === +LAST.mng[0].t,
       s30: (LAST.controls || []).every((x) => x.S30 && typeof x.S30.hBajoReserva === 'number'),
       dias: sw.gobierna.dias.length,
+      catalogo: (sw.catalogo || []).length, capMin: (sw.capMin || []).length,
       gobDentro: inviernoDe(sw.gobierna.t) === peor.inv, peorEsPosterior: peor.inv === yEnd - 2,
       primerMinimoAntes: inviernoDe(sw.total.margenMinT) < peor.inv, doc };
   };
   const ok5 = await corre(null), conHueco = await corre(yEnd - 3);
   window.fetchYearDeclarado = fetchReal;
   R.e2e = ok5 && Object.assign({}, ok5, { doc: undefined,
-    informe: ['años seguidos', 'Periodo que gobierna', 'Figura 5', '<svg', 'julio a junio', 'sin reiniciar la batería'].filter((x) => !ok5.doc.includes(x)) });
+    informe: ['años seguidos', 'Periodo que gobierna', 'Figura 5', '<svg', 'julio a junio', 'sin reiniciar la batería',
+      '8.2 Baterías del catálogo y capacidad mínima', 'La capacidad mínima, con la batería al final de su vida'].filter((x) => !ok5.doc.includes(x)) });
   R.hueco = conHueco && { tramos: conHueco.tramos, caidos: conHueco.caidos, dice: conHueco.doc.includes('Faltan años en la fuente') };
   R.gobAno = ok5 && ok5.worst;
   return R;
@@ -829,6 +831,8 @@ ok(seg.e2e && seg.e2e.peorEsPosterior && seg.e2e.primerMinimoAntes,
   JSON.stringify(seg.e2e && { worst: seg.e2e.worst, posterior: seg.e2e.peorEsPosterior, antes: seg.e2e.primerMinimoAntes }));
 ok(seg.e2e && seg.e2e.gobDentro,
   'y el periodo que gobierna cae DENTRO del invierno que gobierna, no en otro que llegó antes al mismo mínimo', JSON.stringify(seg.e2e && { worst: seg.e2e.worst, dentro: seg.e2e.gobDentro }));
+ok(seg.e2e && seg.e2e.catalogo === 3 && seg.e2e.capMin === 2,
+  'el barrido trae las tres baterías del catálogo y la capacidad mínima de las dos químicas', JSON.stringify(seg.e2e && { cat: seg.e2e.catalogo, cm: seg.e2e.capMin }));
 ok(seg.e2e && seg.e2e.informe.length === 0, 'y el informe lo cuenta: años seguidos, inviernos de julio a junio, la figura de márgenes y el periodo que gobierna',
   seg.e2e ? 'falta: ' + seg.e2e.informe.join(', ') : 'sin corrida');
 ok(seg.hueco && seg.hueco.tramos === 2 && seg.hueco.caidos === 1 && seg.hueco.dice,
@@ -861,18 +865,23 @@ const h3 = await pg.evaluate(async () => {
   const nevado = base.map((m, i) => Object.assign({}, m, { wind: 2, gust: 3, snowDepth: i >= 48 && i < 96 ? 0.04 : 0 }));
   const rn = simulate(nevado, seis, loc, 0.9, o);
   const enNieve = rn.filter((r, i) => r.nieve && i > 0 && rn[i - 1].nieve);
+  /* con el lado FIJO, dentro de la nevada no se gira: 48 h que cruzan dos mediodías */
+  R.giroEnNieve = enNieve.reduce((a, r) => a + r.mov, 0);
+  R.ladosEnNieve = new Set(enNieve.map((r) => Math.sign(r.pos))).size;
   R.nieve = { h: rn.filter((r) => r.nieve).length, veces: summarize(rn).nNieve,
     en55: enNieve.every((r) => Math.abs(Math.abs(r.pos) - SNOW_POS) < 1e-9), n: enNieve.length,
     /* «sale al acabar»: después de la alarma, la MISMA posición que la serie sin nieve.
        No vale «no está a 55°»: ±55° es también el tope del seguimiento con el sol bajo. */
     fuera: (() => { const limpio = simulate(nevado.map((m) => Object.assign({}, m, { snowDepth: 0 })), seis, loc, 0.9, o);
       return rn.filter((r, i) => i >= 98 && Math.abs(r.pos - limpio[i].pos) > 1e-9).length; })() };
-  /* c2) jerarquía de la casa: la nieve (SP3) manda sobre la batería. Aparcado por SOC bajo
-         y con nieve, por la mañana va a −55° (lado del sol), no a la defensa fija en +55°. */
-  /* sin carga (tMin 99) y al 45 % con el crítico al 50 %: aparcada, y viva, toda la nevada */
+  /* c2) jerarquía de la casa: la nieve (SP3) manda sobre la batería. Para que las dos
+         posiciones DISCREPEN, la nevada empieza a media mañana con el seguidor mirando al
+         este (lado −) y la batería cae al crítico DURANTE la nevada: la nieve la mantiene
+         en −55°; con la jerarquía al revés iría a la defensa fija, +55°. Sin carga (tMin 99). */
+  const nevMan = base.map((m, i) => Object.assign({}, m, { wind: 2, gust: 3, snowDepth: i >= 33 && i < 96 ? 0.04 : 0 }));
   const oBaja = Object.assign({}, o, { strategy: true, socTgt: 80, socCrit: 50, tMin: 99 });
-  const rj = simulate(nevado, seis, loc, 0.45, oBaja);
-  R.jerarquia = { aparcadoConNieve: rj.filter((r) => r.parked && r.nieve).length,
+  const rj = simulate(nevMan, seis, loc, 0.9, oBaja);
+  R.jerarquia = { ladoAlEntrar: Math.sign(rj[33].pos), aparcadoConNieve: rj.filter((r) => r.parked && r.nieve).length,
     alSol: rj.filter((r) => r.parked && r.nieve && Math.abs(r.pos + SNOW_POS) < 1e-9).length };
   /* d) el ×2 se cobra en las maniobras de PROTECCIÓN y en ninguna otra */
   const kOrig = K_STOW_MOTOR;
@@ -908,11 +917,14 @@ ok(h3.racha.hStow > 0 && h3.racha.nStow >= 1 && h3.racha.sinRacha === 0 && h3.ra
 ok(h3.sinDato.sinRacha === h3.sinDato.horas && h3.sinDato.sinNieve === h3.sinDato.horas,
   'sin racha ni nieve en la fuente, el simulador CUENTA las horas sin ellas (' + h3.sinDato.horas + ' h) en vez de dar un cero por bueno',
   JSON.stringify(h3.sinDato));
+ok(h3.giroEnNieve === 0 && h3.ladosEnNieve === 1,
+  'en nieve el seguidor se queda del lado en que estaba al saltar la alarma: 0° de giro en 48 h que cruzan dos mediodías, no 110° cada uno',
+  JSON.stringify({ giro: h3.giroEnNieve, lados: h3.ladosEnNieve }));
 ok(h3.nieve.h === 48 && h3.nieve.veces === 1 && h3.nieve.n > 0 && h3.nieve.en55 && h3.nieve.fuera === 0,
-  'con 4 cm acumulados dos días, SP3: ' + h3.nieve.h + ' h en la posición de nieve, a ' + 55 + '° del lado del sol, y sale al acabar',
+  'con 4 cm acumulados dos días, SP3: ' + h3.nieve.h + ' h en la posición de nieve, a ' + 55 + '°, y sale al acabar',
   JSON.stringify(h3.nieve));
-ok(h3.jerarquia.aparcadoConNieve > 0 && h3.jerarquia.alSol > 0,
-  'y la nieve manda sobre la batería, como en la casa: aparcado por SOC bajo y con nieve, por la mañana va a −55° y no a la defensa fija',
+ok(h3.jerarquia.ladoAlEntrar === -1 && h3.jerarquia.aparcadoConNieve > 0 && h3.jerarquia.alSol === h3.jerarquia.aparcadoConNieve,
+  'y la nieve manda sobre la batería, como en la casa: si la batería cae al crítico en plena nevada, sigue en −55° (su lado) y no va a la defensa fija',
   JSON.stringify(h3.jerarquia));
 ok(h3.x2.hayProt > 0 && Math.abs(h3.x2.prot - 2) < 1e-9 && Math.abs(h3.x2.segui - 1) < 1e-9,
   'el ×2 de corriente se cobra en las maniobras de protección (×' + h3.x2.prot.toFixed(2) + ') y en el seguimiento no (×' + h3.x2.segui.toFixed(2) + ')',
@@ -930,6 +942,51 @@ ok(h3.llegaPanel && h3.llegaPanelMedia, 'y el selector del panel llega a la simu
     'planta ' + enPlanta + ' / ' + sp3 + ' · batería ' + enBat + ' / ' + posBat);
 }
 
+/* ── 13) CAPACIDAD MÍNIMA Y BATERÍAS DEL CATÁLOGO (hito 4, 2026-11-18) ──
+   Lo cuarto de Track N Co: qué baterías del catálogo bastan en esos años, y cuál es la
+   menor capacidad que basta, en pasos de 0,1 Ah y al final de vida. */
+const h4 = await pg.evaluate(async () => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const seis = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0], lt = PROFILES.filter((p) => p.id === 'SP_45W_6Ah_LT')[0];
+  const strg = PROFILES.filter((p) => p.id === 'STRING_60W_6Ah')[0];
+  const o = { motorModel: 'factiun', soh: SOH_FIN_VIDA, winter: false, strategy: true, socTgt: 80, socCrit: 30, fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const bis = (y) => (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0));
+  const ano = (y, osc, temp) => synthMeteo(loc, bis(y) ? 366 : 365, 1, 40).map((m, i) => {
+    const r = Object.assign({}, m, { t: new Date(Date.UTC(y, 0, 1) + i * 36e5) }), d = Math.floor(i / 24);
+    if (temp != null) r.temp = temp;
+    return osc && d >= osc[0] && d < osc[1] ? Object.assign(r, { ghi: 0, dhi: 0, poa: null }) : r;
+  });
+  const R = {};
+  /* a) la capacidad mínima basta, y 0,1 Ah menos no: comprobado AQUÍ, re-simulando */
+  const tr = tramosContinuos([ano(2001), ano(2002, [10, 17])], [2001, 2002]);
+  const cm = await capacidadMinima(tr, seis, loc, o);
+  const per = (ah) => reservaEnSerie(tr, conCapacidad(seis, ah * 25.6), loc, o).periodosRes;
+  R.cm = { ah: cm.ah, evals: cm.evals, basta: per(cm.ah), menos: per(+(cm.ah - 0.1).toFixed(1)) };
+  /* b) sin carga ninguna, ni 40 Ah bastan: lo dice así, no da un número */
+  const sinCarga = await capacidadMinima(tr, seis, loc, Object.assign({}, o, { tMin: 99 }));
+  R.tope = sinCarga;
+  /* c) el catálogo es el del mismo tipo, sin variantes, con el panel de la evaluada */
+  R.catSP = perfilesDelCatalogo(conPanel(seis, 60)).map((p) => p.id + '@' + p.chgW);
+  R.catSTR = perfilesDelCatalogo(strg).map((p) => p.id);
+  /* d) cada batería con el suelo de SU ficha: a −10 °C todo el año, la -LT carga y la estándar no */
+  const frio = tramosContinuos([ano(2001, null, -10), ano(2002, null, -10)], [2001, 2002]);
+  R.suelo = { lt: opcionesPara(lt, seis, o).tMin, propia: opcionesPara(seis, seis, o) === o };
+  const C = await comparaCatalogo(frio, seis, loc, o);
+  const std = C.filter((c) => c.id === 'SP_45W_6Ah')[0], cLT = C.filter((c) => c.id === 'SP_45W_6Ah_LT')[0];
+  R.frio = { std: std.periodosRes, lt: cLT.periodosRes, evaluado: C.filter((c) => c.evaluado).map((c) => c.id).join(',') };
+  return R;
+});
+ok(h4.cm.ah > 0 && h4.cm.basta === 0 && h4.cm.menos > 0 && h4.cm.evals <= 11,
+  'la capacidad mínima (' + h4.cm.ah + ' Ah) BASTA y 0,1 Ah menos ya no, comprobado re-simulando aquí; ' + h4.cm.evals + ' simulaciones de la serie',
+  JSON.stringify(h4.cm));
+ok(h4.tope.ah === null && h4.tope.tope === 40,
+  'sin carga ninguna, ni 40 Ah bastan, y lo dice así en vez de dar un número: el límite es el panel, no la batería', JSON.stringify(h4.tope));
+ok(h4.catSP.join(',') === 'SP_60W_3Ah@60,SP_60W_6Ah@60,SP_60W_6Ah_LT@60' && h4.catSTR.join(',') === 'STRING_60W_3Ah,STRING_60W_6Ah,STRING_60W_6Ah_LT',
+  'el catálogo comparado es el del mismo tipo, sin variantes repetidas y con el panel de la evaluada', h4.catSP.join(',') + ' | ' + h4.catSTR.join(','));
+ok(h4.suelo.lt === -20 && h4.suelo.propia && h4.frio.lt < h4.frio.std && h4.frio.evaluado === 'SP_45W_6Ah',
+  'cada batería del catálogo carga con el suelo de SU ficha: a −10 °C la -LT (' + h4.frio.lt + ') queda por delante de la estándar (' + h4.frio.std + ')',
+  JSON.stringify({ suelo: h4.suelo, frio: h4.frio }));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa, y se sabe qué batería basta'));
 process.exit(fallos ? 1 : 0);
