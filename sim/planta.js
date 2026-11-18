@@ -853,6 +853,7 @@ function TCU(id, planta, opts) {
   this.ciclos = Math.floor(this.rnd.entre(40, 200));
   this.diasPreservacion = 0; this.cargador = 3; this.calefactor = false;
   this.bajaCapacidad = 0;                  /* 0 normal · 1 baja · 2 muy baja · 3 crítica */
+  this.ladoNieve = null;                   /* lado de SP3, fijado al saltar la alarma */
   this.parked = false;                     /* defensa por SOC crítico (estrategia) */
   this.techoSoc = 100; this.cargaCompletaHoy = false;
   this.whCarga = 0; this.whConsumo = 0;
@@ -1135,6 +1136,16 @@ TCU.prototype.decide = function (dt, ang) {
      de viento la resuelve el módulo, que además FIJA el lado al abanderar. */
   var sSol = ang.dia ? (ang.sol.az < 0 ? -1 : 1) : 1;
   if (e.vientoInvertido) sSol = -sSol;
+  /* SP3 NIEVE: el lado SE FIJA al saltar la alarma, hacia donde estaba el seguidor, y no
+     se mueve hasta que la alarma cae. Lo confirmó el mantenedor el 2026-11-18. Aquí salía
+     de sSol en cada paso: con nieve, el seguidor cruzaba 110° al mediodía y volvía de
+     noche, que es justo lo que la bandera de viento aprendió a no hacer. Con el ángulo a
+     0 exacto no hay lado al que mirar y se toma el del sol. Por lo mismo, la bandera de
+     «viento del este» ya no da la vuelta a SP3: manda donde estaba. */
+  var nieveActiva = e.nieve || e.forzado === SP.NIEVE;
+  if (!nieveActiva) this.ladoNieve = null;
+  else if (this.ladoNieve === null) this.ladoNieve = this.angulo > 0 ? 1 : (this.angulo < 0 ? -1 : sSol);
+  var sNieve = this.ladoNieve !== null ? this.ladoNieve : sSol;
 
   /* La SETA ya no aparece aquí: no decide el objetivo, corta el motor. El algoritmo
      sigue calculando adónde debería ir el seguidor —y por eso la diferencia de 30110
@@ -1155,7 +1166,7 @@ TCU.prototype.decide = function (dt, ang) {
      documenta una safe position de granizo. La decisión vive en CRIT.GRANIZO y
      su ejecución se expone por el contrato del gemelo. */
   } else if (hail.activa && (e.nieve || e.forzado === SP.NIEVE)) {
-    var snowObj = sSol * Math.abs(cfg.spTilt[3]);
+    var snowObj = sNieve * Math.abs(cfg.spTilt[3]);
     if ((hail.target < 0) === (snowObj < 0)) {
       /* Misma dirección: una sola maniobra satisface ambas. SP3 sigue reflejando
          que la nieve está activa; hail.multi dice por qué el target es el de granizo. */
@@ -1174,7 +1185,7 @@ TCU.prototype.decide = function (dt, ang) {
   /* 3 — SP3 NIEVE */
   } else if (e.nieve || e.forzado === SP.NIEVE) {
     sp = SP.NIEVE; fuente = e.forzado === SP.NIEVE ? FUENTE_SP.NCU : FUENTE_SP.HSU;
-    obj = sSol * Math.abs(cfg.spTilt[3]); crit = CRIT.SEGURIDAD;
+    obj = sNieve * Math.abs(cfg.spTilt[3]); crit = CRIT.SEGURIDAD;
 
   /* 4 — SP4 LIMPIEZA */
   } else if (e.limpieza || e.forzado === SP.LIMPIEZA) {
