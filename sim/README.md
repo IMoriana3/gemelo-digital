@@ -415,7 +415,7 @@ Los umbrales **L1/L2/L3** del firmware son otra cosa distinta y conviven con la 
 | `plantas.js` | **generado**, no se toca a mano: las once plantas de la casa con su inventario y su plano, de los layouts del DWG |
 | `campo3d.js` | el campo en 3D, con la geometría de `seguidor.js`: el seguidor **bífila** de la casa —dos vigas, un motor— o monofila si la planta lo es |
 | `servidor.mjs` | publica el motor por HTTP para que `scada/tools/ncu_simulada.py` lo sirva por **Modbus TCP de verdad** |
-| `prueba.mjs` | prueba de humo: 360 comprobaciones sobre un día de planta |
+| `prueba.mjs` | prueba de humo: 364 comprobaciones sobre un día de planta |
 | `../simulador.html` | la interfaz |
 | `../tools/extrae_plantas.mjs` | regenera `plantas.js` desde `cobertura-zigbee/<planta>_layout.json`, contrastando con overcast |
 | `../tools/prueba_simulador.mjs` | banco de la interfaz: renders, mandos y reproductor — lo que no se ve en una captura |
