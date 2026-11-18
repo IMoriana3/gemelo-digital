@@ -735,6 +735,132 @@ ok(peor.F.con.inact === peor.conInact && peor.F.con.dias === peor.conDias && peo
 ok(peor.F0.con.chg === peor.F0.sin.chg && peor.F0.hFrio === 0,
   'y un suelo que no muerde (−99 °C) no cuesta nada', JSON.stringify(peor.F0));
 
+/* ── 11) TREINTA AÑOS SEGUIDOS (hito 2, 2026-11-18) ──
+   Lo segundo que Track N Co hacía mejor: la serie entera de un tirón, sin reiniciar la
+   batería cada enero, en inviernos de julio a junio, y con el periodo que gobierna. */
+const seg = await pg.evaluate(async () => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const seis = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
+  const o = { motorModel: 'factiun', soh: SOH_FIN_VIDA, winter: false, strategy: true, socTgt: 80, socCrit: 30, fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const bis = (y) => (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0));
+  /* un año sintético FECHADO en `y`, con días a oscuras opcionales: [d0, d1) o una lista de ellos */
+  const ano = (y, oscuro) => { const tramosOsc = !oscuro ? [] : Array.isArray(oscuro[0]) ? oscuro : [oscuro];
+    return synthMeteo(loc, bis(y) ? 366 : 365, 1, 40).map((m, i) => {
+      const t = new Date(Date.UTC(y, 0, 1) + i * 36e5), d = Math.floor(i / 24);
+      const r = Object.assign({}, m, { t });
+      return tramosOsc.some((o) => d >= o[0] && d < o[1]) ? Object.assign(r, { ghi: 0, dhi: 0, poa: null }) : r;
+    }); };
+  const R = {};
+  /* a) un hueco parte la serie en tramos; una serie corta también */
+  const T = tramosContinuos([ano(2001), { error: 'HTTP 429', intentos: 4 }, ano(2003), ano(2004), ano(2005).slice(0, 500), ano(2006)],
+    [2001, 2002, 2003, 2004, 2005, 2006]);
+  R.tramos = T.map((t) => t.years.join('+') + ':' + t.meteo.length);
+  /* b) julio a junio */
+  R.inv = [inviernoDe(new Date(Date.UTC(1997, 5, 30, 23))), inviernoDe(new Date(Date.UTC(1997, 6, 1, 0))), etiquetaInvierno(1999)];
+  /* c) el estado PASA de un año al siguiente: 2001 acaba con 20 días a oscuras */
+  const dos = tramosContinuos([ano(2001, [345, 365]), ano(2002)], [2001, 2002]);
+  const rows = simulaSeguido(dos, seis, loc, o);
+  const k = rows.findIndex((r) => r.t.getUTCFullYear() === 2002);
+  R.cruce = { finAno: rows[k - 1].soc, eneroSiguiente: rows[k].soc, arranque: !!rows[k].arranque, primero: !!rows[0].arranque,
+    objetivo: socEstacionario(o), capWh: rows.capWh };
+  /* d) los inviernos cubren la serie entera, contiguos, y sólo el del medio es completo */
+  const W = porInviernos(rows);
+  R.inviernos = W.map((w) => w.label + (w.parcial ? '*' : ''));
+  R.contiguos = W.every((w, i) => i === 0 || w.i0 === W[i - 1].i1) && W[0].i0 === 0 && W[W.length - 1].i1 === rows.length;
+  /* e) el periodo que gobierna: diez días a oscuras a mitad de enero de 2002 */
+  const gTr = tramosContinuos([ano(2001), ano(2002, [10, 20])], [2001, 2002]);
+  const gRows = simulaSeguido(gTr, seis, loc, o), G = periodoQueGobierna(gRows, o), CR = cuentaReserva(gRows, 1);
+  const lleno = o.socTgt / 100 - 0.05;
+  R.gob = { t: G.t.toISOString().slice(0, 10), margen: G.margenMin, global: CR.margenMin, n: G.dias.length,
+    antes: G.i0 > 0 ? gRows[G.i0 - 1].soc : null, despues: gRows[G.i1 - 1].soc, lleno, cortadoFin: G.cortadoFin, enMinimo: G.horasEnMinimo,
+    /* el final de la meseta, calculado AQUÍ y no leído de la función que se prueba */
+    diasTrasMeseta: (() => { let e = 0; gRows.forEach((r, i) => { if (r.eLib <= CR.margenMin + 1e-9) e = i; });
+      const dE = Math.floor(+gRows[e].t / 864e5); return G.dias.filter((d) => d.d > dE).length; })(),
+    subeAlFinal: G.dias[G.dias.length - 1].eFin > G.eMin + 1,
+    finTrasMeseta: Math.floor(+gRows[G.i1 - 1].t / 864e5) - Math.floor(+gRows[G.iMin + G.horasEnMinimo - 1].t / 864e5),
+    contiene: G.dias.some((d) => d.t.toISOString().slice(0, 10) === G.t.toISOString().slice(0, 10)),
+    sumaChg: +G.dias.reduce((a, d) => a + d.chg, 0).toFixed(6), sumaFilas: +gRows.slice(G.i0, G.i1).reduce((a, r) => a + r.chg, 0).toFixed(6) };
+  /* f) el invierno que gobierna: más veces sin reserva y, a igualdad, menos margen */
+  R.peor = peorInvierno([{ label: 'a', periodosRes: 0, margenMin: 3 }, { label: 'b', periodosRes: 1, margenMin: 40 },
+    { label: 'c', periodosRes: 1, margenMin: 9 }, { label: 'd', periodosRes: 0, margenMin: 1 }]).label;
+  /* g) el «más favorable» mira la reserva de los 30 años, no sólo la del invierno que se enseña */
+  const col = (k, h, h30, inact) => ({ c: { k, n: k }, S: { hZero: 0, hBajoReserva: h, inactivePct: inact, cyc: { years: 15 }, prodRelPct: 99 }, S30: { hBajoReserva: h30 } });
+  const e30 = eligeMejor([col('std', 0, 5, 1.0), col('cons', 0, 0, 3.0)]);
+  R.mejor30 = e30.mejor.c.k + ' / ' + e30.descartados.map((x) => x.c.k).join(',');
+  /* h) de punta a punta, por la página: cinco años, y luego con uno que no baja */
+  const yEnd = new Date().getFullYear() - 1;
+  const fetchReal = window.fetchYearDeclarado;
+  const corre = async (falla) => {
+    /* una muerte en el invierno de yEnd−3 y DOS en el de yEnd−1: el que más veces falla es el
+       posterior, pero el primer mínimo de la serie cae en el anterior. Es lo de Casalmaggiore. */
+    window.fetchYearDeclarado = (l, y) => Promise.resolve(y === falla ? { error: 'HTTP 429', intentos: 4 }
+      : ano(y, y === yEnd - 3 ? [5, 16] : y === yEnd - 1 ? [[5, 16], [36, 47]] : null));
+    const idx = PROFILES.map((p, i) => [p.id, i]);
+    $('prof').value = String(idx.filter((x) => x[0] === 'SP_45W_6Ah')[0][1]); $('prof').onchange();
+    $('src').value = 'archive'; if ($('src').onchange) $('src').onchange();
+    $('year').value = 'worst'; $('year').onchange(); $('sweepFrom').value = String(yEnd - 4);
+    $('cmp').checked = true; $('aged').checked = true;
+    window.LAST = null; $('run').click();
+    for (let i = 0; i < 600 && !(window.LAST && LAST.sweep); i++) await new Promise((r) => setTimeout(r, 50));
+    if (!window.LAST || !LAST.sweep) return null;
+    let doc = null; const abre = window.open;
+    window.open = () => ({ document: { write: (d) => { doc = d; }, close: () => {} } });
+    buildReport(); window.open = abre;
+    const sw = LAST.sweep, peor = sw.inviernos.filter((w) => w.label === sw.worst)[0];
+    return { anos: sw.anos, n: sw.inviernos.length, parciales: sw.inviernos.filter((w) => w.parcial).length,
+      tramos: sw.tramos.length, caidos: sw.caidos.length, worst: sw.worst,
+      recorte: LAST.mng.length === peor.i1 - peor.i0 && LAST.mng.capWh === 122.88 && LAST.ref.length === LAST.mng.length,
+      meteoAlineada: LAST.meteo.length === LAST.mng.length && +LAST.meteo[0].t === +LAST.mng[0].t,
+      s30: (LAST.controls || []).every((x) => x.S30 && typeof x.S30.hBajoReserva === 'number'),
+      dias: sw.gobierna.dias.length,
+      gobDentro: inviernoDe(sw.gobierna.t) === peor.inv, peorEsPosterior: peor.inv === yEnd - 2,
+      primerMinimoAntes: inviernoDe(sw.total.margenMinT) < peor.inv, doc };
+  };
+  const ok5 = await corre(null), conHueco = await corre(yEnd - 3);
+  window.fetchYearDeclarado = fetchReal;
+  R.e2e = ok5 && Object.assign({}, ok5, { doc: undefined,
+    informe: ['años seguidos', 'Periodo que gobierna', 'Figura 5', '<svg', 'julio a junio', 'sin reiniciar la batería'].filter((x) => !ok5.doc.includes(x)) });
+  R.hueco = conHueco && { tramos: conHueco.tramos, caidos: conHueco.caidos, dice: conHueco.doc.includes('Faltan años en la fuente') };
+  R.gobAno = ok5 && ok5.worst;
+  return R;
+});
+ok(seg.tramos.join(' | ') === '2001:8760 | 2003+2004:17544 | 2006:8760',
+  'un año que no baja, o que baja corto, PARTE la serie en tramos: no se pega por encima del hueco', seg.tramos.join(' | '));
+ok(seg.inv.join(',') === '1996,1997,1999/00', 'los inviernos van de julio a junio: el 30 de junio es del anterior y el 1 de julio del siguiente', seg.inv.join(','));
+ok(seg.cruce.primero && !seg.cruce.arranque && Math.abs(seg.cruce.eneroSiguiente - seg.cruce.finAno) < 0.02 && seg.cruce.eneroSiguiente < seg.cruce.objetivo - 0.1,
+  'el estado PASA de un año al siguiente: tras un diciembre a oscuras, el 1 de enero arranca con ' + (seg.cruce.eneroSiguiente * 100).toFixed(0) +
+  ' % y no con el ' + (seg.cruce.objetivo * 100).toFixed(0) + ' % del objetivo', JSON.stringify(seg.cruce));
+ok(seg.inviernos.join(',') === '2000/01*,2001/02,2002/03*' && seg.contiguos,
+  'y los inviernos cubren la serie entera, contiguos, con el primero y el último marcados parciales', seg.inviernos.join(','));
+ok(seg.gob.enMinimo > 24, 'el banco llega a dejar la batería plana en su mínimo más de un día (' + seg.gob.enMinimo + ' h): la meseta que cortaba la tabla', String(seg.gob.enMinimo));
+ok(seg.gob.diasTrasMeseta >= 1 && seg.gob.subeAlFinal,
+  'y la tabla ENSEÑA la recuperación: ' + seg.gob.diasTrasMeseta + ' día(s) completos después de la meseta, acabando por encima del mínimo',
+  JSON.stringify({ tras: seg.gob.diasTrasMeseta, sube: seg.gob.subeAlFinal }));
+ok(seg.gob.contiene && seg.gob.t >= '2002-01-11' && seg.gob.t <= '2002-01-21' && Math.abs(seg.gob.margen - seg.gob.global) < 1e-9,
+  'el periodo que gobierna cae en los diez días a oscuras (' + seg.gob.t + ') y su mínimo es el de toda la serie', JSON.stringify(seg.gob));
+ok(seg.gob.antes >= seg.gob.lleno && seg.gob.sumaChg === seg.gob.sumaFilas &&
+   (seg.gob.despues >= seg.gob.lleno ? !seg.gob.cortadoFin : seg.gob.cortadoFin && seg.gob.finTrasMeseta === 5),
+  'y va de la última vez que la batería estuvo en su objetivo a la primera que vuelve —o, si no vuelve, 5 días después de la meseta del mínimo, y lo DECLARA—, ' +
+  'con la tabla diaria sumando lo mismo que las horas (' + seg.gob.n + ' días)',
+  JSON.stringify(seg.gob));
+ok(seg.peor === 'c', 'gobierna el invierno con más veces sin reserva y, a igualdad, el de menor margen', seg.peor);
+ok(seg.mejor30 === 'cons / std',
+  'el «más favorable» mira la reserva en TODOS los inviernos: una columna limpia en el que se enseña pero que falla en otro no sale recomendada', seg.mejor30);
+ok(seg.e2e && seg.e2e.n === 6 && seg.e2e.parciales === 2 && seg.e2e.tramos === 1 && seg.e2e.caidos === 0 && seg.e2e.anos[1] - seg.e2e.anos[0] === 4,
+  'por la página: cinco años seguidos son seis inviernos, dos de ellos parciales, en un solo tramo', JSON.stringify(seg.e2e));
+ok(seg.e2e && seg.e2e.recorte && seg.e2e.meteoAlineada && seg.e2e.s30 && seg.e2e.dias > 0,
+  'el detalle es el invierno que gobierna RECORTADO de la serie seguida, con su meteo alineada, y cada columna trae su reserva de los 30 años',
+  JSON.stringify(seg.e2e));
+ok(seg.e2e && seg.e2e.peorEsPosterior && seg.e2e.primerMinimoAntes,
+  'el banco reproduce lo de Casalmaggiore: gobierna el invierno con dos muertes, pero el primer mínimo de la serie cae en uno anterior',
+  JSON.stringify(seg.e2e && { worst: seg.e2e.worst, posterior: seg.e2e.peorEsPosterior, antes: seg.e2e.primerMinimoAntes }));
+ok(seg.e2e && seg.e2e.gobDentro,
+  'y el periodo que gobierna cae DENTRO del invierno que gobierna, no en otro que llegó antes al mismo mínimo', JSON.stringify(seg.e2e && { worst: seg.e2e.worst, dentro: seg.e2e.gobDentro }));
+ok(seg.e2e && seg.e2e.informe.length === 0, 'y el informe lo cuenta: años seguidos, inviernos de julio a junio, la figura de márgenes y el periodo que gobierna',
+  seg.e2e ? 'falta: ' + seg.e2e.informe.join(', ') : 'sin corrida');
+ok(seg.hueco && seg.hueco.tramos === 2 && seg.hueco.caidos === 1 && seg.hueco.dice,
+  'con un año que no baja, la página parte la serie en dos tramos y el informe lo DICE', JSON.stringify(seg.hueco));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER y ninguna estrategia sigue al sol sin reserva para ponerse a salvo'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo y los treinta años corren seguidos'));
 process.exit(fallos ? 1 : 0);
