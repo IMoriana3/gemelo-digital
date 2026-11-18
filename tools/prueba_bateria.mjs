@@ -509,7 +509,8 @@ const mod = await pg.evaluate(() => {
   R.str = PROFILES.filter((p) => p.string).map((p) => p.n);
   /* b) el desplegable ofrece modelos, no parejas: una entrada por batería */
   R.opciones = [].map.call($('prof').options, (o) => PROFILES[+o.value].id);
-  R.whsOfrecidos = R.opciones.map((id) => { const p = PROFILES.filter((q) => q.id === id)[0]; return p.string + '|' + p.wh + '|' + !!p.lt; });
+  /* la clave lleva el CONTROLADOR: una Track de 6 Ah y una SUNNER de 6 Ah son dos TCU, no una pareja repetida */
+  R.whsOfrecidos = R.opciones.map((id) => { const p = PROFILES.filter((q) => q.id === id)[0]; return p.string + '|' + p.wh + '|' + !!p.lt + '|' + (p.control || 'sunner'); });
   R.duplicados = R.whsOfrecidos.length !== new Set(R.whsOfrecidos).size;
   /* c) la variante oculta sigue en el catálogo, que es quien decide producto/estudio */
   const seis = PROFILES.filter((p) => p.id === 'SP_45W_6Ah')[0];
@@ -517,7 +518,7 @@ const mod = await pg.evaluate(() => {
                  esProducto: enCatalogo(conPanel(seis, 60)),
                  treintaEsEstudio: !enCatalogo(conPanel(seis, 30)) };
   /* d) el arranque elige SP_45W_6Ah por id, no por un índice que se mueve */
-  R.nPerfiles = PROFILES.length;
+  R.nPerfiles = PROFILES.length; R.nVariantes = PROFILES.filter((p) => p.variante).length;
   /* e) el selector de panel marca cuáles son producto */
   R.etiquetas = [].map.call($('panel').options, (o) => o.text);
   return R;
@@ -529,8 +530,8 @@ ok(mod.variantesNombranPanel.length > 0 && mod.variantesNombranPanel.every((n) =
   mod.variantesNombranPanel.join(' · '));
 ok(mod.str.every((n) => /regulador 60 W/.test(n)),
   'y los STRING sí conservan su regulador, que no se elige aparte', mod.str.join(' · '));
-ok(!mod.duplicados && mod.opciones.indexOf('SP_60W_6Ah') < 0 && mod.opciones.length === mod.nPerfiles - 1,
-  'el desplegable ofrece una entrada por batería (' + mod.opciones.length + ' de ' + mod.nPerfiles + '): la pareja repetida SP_60W_6Ah se cae',
+ok(!mod.duplicados && mod.opciones.indexOf('SP_60W_6Ah') < 0 && mod.nVariantes === 4 && mod.opciones.length === mod.nPerfiles - mod.nVariantes,
+  'el desplegable ofrece una entrada por batería y TCU (' + mod.opciones.length + ' de ' + mod.nPerfiles + '): las ' + mod.nVariantes + ' parejas con otro panel se caen',
   mod.opciones.join(', '));
 ok(mod.variante.estaEnProfiles && mod.variante.esProducto && mod.variante.treintaEsEstudio,
   'pero sigue en el catálogo: SP 6 Ah + 60 W es PRODUCTO y + 30 W es ESTUDIO',
@@ -831,8 +832,8 @@ ok(seg.e2e && seg.e2e.peorEsPosterior && seg.e2e.primerMinimoAntes,
   JSON.stringify(seg.e2e && { worst: seg.e2e.worst, posterior: seg.e2e.peorEsPosterior, antes: seg.e2e.primerMinimoAntes }));
 ok(seg.e2e && seg.e2e.gobDentro,
   'y el periodo que gobierna cae DENTRO del invierno que gobierna, no en otro que llegó antes al mismo mínimo', JSON.stringify(seg.e2e && { worst: seg.e2e.worst, dentro: seg.e2e.gobDentro }));
-ok(seg.e2e && seg.e2e.catalogo === 3 && seg.e2e.capMin === 2,
-  'el barrido trae las tres baterías del catálogo y la capacidad mínima de las dos químicas', JSON.stringify(seg.e2e && { cat: seg.e2e.catalogo, cm: seg.e2e.capMin }));
+ok(seg.e2e && seg.e2e.catalogo === 6 && seg.e2e.capMin === 3,
+  'el barrido trae las tres baterías SUNNER y las tres de Track N Co, y la capacidad mínima de SUNNER estándar, SUNNER -LT y Track N Co', JSON.stringify(seg.e2e && { cat: seg.e2e.catalogo, cm: seg.e2e.capMin }));
 ok(seg.e2e && seg.e2e.informe.length === 0, 'y el informe lo cuenta: años seguidos, inviernos de julio a junio, la figura de márgenes y el periodo que gobierna',
   seg.e2e ? 'falta: ' + seg.e2e.informe.join(', ') : 'sin corrida');
 ok(seg.hueco && seg.hueco.tramos === 2 && seg.hueco.caidos === 1 && seg.hueco.dice,
@@ -981,12 +982,104 @@ ok(h4.cm.ah > 0 && h4.cm.basta === 0 && h4.cm.menos > 0 && h4.cm.evals <= 11,
   JSON.stringify(h4.cm));
 ok(h4.tope.ah === null && h4.tope.tope === 40,
   'sin carga ninguna, ni 40 Ah bastan, y lo dice así en vez de dar un número: el límite es el panel, no la batería', JSON.stringify(h4.tope));
-ok(h4.catSP.join(',') === 'SP_60W_3Ah@60,SP_60W_6Ah@60,SP_60W_6Ah_LT@60' && h4.catSTR.join(',') === 'STRING_60W_3Ah,STRING_60W_6Ah,STRING_60W_6Ah_LT',
-  'el catálogo comparado es el del mismo tipo, sin variantes repetidas y con el panel de la evaluada', h4.catSP.join(',') + ' | ' + h4.catSTR.join(','));
+ok(h4.catSP.join(',') === 'SP_60W_3Ah@60,SP_60W_6Ah@60,SP_60W_6Ah_LT@60,TNC_60W_3.8Ah@60,TNC_60W_6Ah@60,TNC_60W_8Ah@60' &&
+   h4.catSTR.join(',') === 'STRING_60W_3Ah,STRING_60W_6Ah,STRING_60W_6Ah_LT',
+  'el catálogo comparado es el del mismo tipo, sin variantes repetidas y con el panel de la evaluada; Track N Co entra con las SP, no con las STRING', h4.catSP.join(',') + ' | ' + h4.catSTR.join(','));
 ok(h4.suelo.lt === -20 && h4.suelo.propia && h4.frio.lt < h4.frio.std && h4.frio.evaluado === 'SP_45W_6Ah',
   'cada batería del catálogo carga con el suelo de SU ficha: a −10 °C la -LT (' + h4.frio.lt + ') queda por delante de la estándar (' + h4.frio.std + ')',
   JSON.stringify({ suelo: h4.suelo, frio: h4.frio }));
 
+/* ── 14) LA TCU DE TRACK N CO, CON SUS PARÁMETROS Y SIN MEZCLAS (2026-11-18) ──
+   Otro controlador, no otra batería. Todo sale de SU informe (BAA-2611-0004/0005), sin
+   datos de SUNNER, IED ni P4Q: lo pidió el mantenedor. Lo común es la planta. */
+const tn = await pg.evaluate(async () => {
+  const loc = { n: 'Banco', lat: 45.57, lon: 8.63 };
+  const T = PROFILES.filter((p) => p.id === 'TNC_45W_6Ah')[0];
+  const R = {};
+  /* a) los números, contra su informe: tabla 3-3 y tabla 3-2 */
+  R.ctes = [TRACK_N_CO.idleW, TRACK_N_CO.eta, TRACK_N_CO.util.join('-'), TRACK_N_CO.frio.t, TRACK_N_CO.frio.w, TRACK_N_CO.tMaxCarga, TRACK_N_CO.eIn, TRACK_N_CO.eOut].join(' ');
+  R.reserva = +reservaWh('curva', T).toFixed(2);                 /* su 5,37 Wh, sea cual sea el motor del panel */
+  R.dia = +diaOperacionWh('curva', T).toFixed(2);
+  R.cat = PROFILES.filter((p) => p.control === 'tracknco').map((p) => p.id + '@' + p.wh).join(',');
+  /* b) su motor, con el sentido */
+  R.motor = [motorTrackWh(-55, 0), motorTrackWh(0, 55), motorTrackWh(-20, 30)].map((x) => +x.toFixed(4));
+  /* c) el simulador obedece: ventana útil, electrónica, cargador, frío, su motor y su temperatura */
+  const o = { motorModel: 'curva', soh: SOH_FIN_VIDA, vientoStow: 'racha', winter: false, strategy: true, socTgt: 80, socCrit: 30, fcDays: 5, tMin: 0, poaMin: 0, mountTilt: null };
+  const tibio = synthMeteo(loc, 3, 172, 0).map((m) => Object.assign({}, m, { temp: 20, wind: 2, gust: 3, snowDepth: 0 }));
+  const r = simulate(tibio, T, loc, 0.3, o);
+  R.cap = r.capWh;
+  R.base = [...new Set(r.map((x) => +x.base.toFixed(6)))];
+  const carga = r.filter((x) => x.chg > 0.5 && !x.stow && x.soc < 0.9 && x.poaPot > 50);
+  R.eta = carga.length ? [Math.min(...carga.map((x) => x.chg / (45 * x.poaPot / 1000))), Math.max(...carga.map((x) => x.chg / (45 * x.poaPot / 1000)))].map((v) => +v.toFixed(6)) : null;
+  R.aparcaPorSoc = r.filter((x) => x.parked && !x.seg).length;
+  /* la posición REAL es la de la última fila que se movió: las filas sin maniobra apuntan
+     al objetivo, que no se alcanza mientras no supere la histéresis */
+  let real = r[0].pos, errMax = 0, nMov = 0;
+  r.forEach((x, i) => { if (i > 0 && x.mov > 0) { if (!x.stow && !x.nieve && !x.seg) { errMax = Math.max(errMax, Math.abs(x.motor - motorTrackWh(real, x.pos))); nMov++; } real = x.pos; } });
+  R.motorErr = errMax; R.nMovs = nMov;
+  const frio = synthMeteo(loc, 2, 172, 0).map((m, i) => Object.assign({}, m, { temp: i < 24 ? 5 : -2, wind: 2, gust: 3, snowDepth: 0 }));
+  const rf = simulate(frio, T, loc, 0.3, o);
+  R.frio5 = +Math.max(...rf.slice(4, 24).map((x) => x.chg)).toFixed(4);           /* tras 3 h a 5 °C */
+  R.bajoCero = +rf.slice(28).reduce((a, x) => a + x.chg, 0).toFixed(6);          /* tras 3 h a −2 °C */
+  const vari = synthMeteo(loc, 1, 172, 0).map((m, i) => Object.assign({}, m, { temp: [10, 4, 8, 12, 15, 9, 7, 11][i % 8], wind: 2, gust: 3, snowDepth: 0 }));
+  const rv = simulate(vari, T, loc, 0.5, o);
+  R.tBat = rv.every((x, i) => Math.abs(x.tCell - vari[i].temp) < 1e-9);
+  /* d) seguridad: al final de carrera MÁS CERCANO, del lado en que estaba */
+  const oscuro = synthMeteo(loc, 6, 172, 0).map((m) => Object.assign({}, m, { ghi: 0, dhi: 0, poa: null, temp: 15, wind: 2, gust: 3, snowDepth: 0 }));
+  /* varias cargas de partida, para que haya entradas con el seguidor en los DOS lados: en
+     el lado + el final más cercano coincide con la defensa fija y no distingue nada */
+  const entradas = [];
+  for (let k = 10; k <= 40; k++) {
+    const ro = simulate(oscuro, T, loc, k / 100, o);
+    let real = ro[0].pos;
+    ro.forEach((x, i) => { if (i > 0 && x.seg && !ro[i - 1].seg) entradas.push({ antes: real, despues: x.pos }); if (x.mov > 0) real = x.pos; });
+  }
+  R.seg = { n: entradas.length, este: entradas.filter((e) => e.antes < 0).length,
+    bien: entradas.every((e) => Math.abs(e.despues - (e.antes < 0 ? -1 : 1) * AXIS_MAX) < 1e-9) };
+  R.cols = controlesPara(T).map((c) => c.k).join(',');
+  /* d2) decide con la energía al FINAL de la hora, panel incluido (su figura 4-1): a
+         mediodía, 1 Wh POR DEBAJO de la reserva, sin contar el panel entraría; contándolo, no */
+  const mediodia = synthMeteo(loc, 1, 172, 0).slice(11).map((m) => Object.assign({}, m, { temp: 20, wind: 2, gust: 3, snowDepth: 0 }));
+  const capT = 153.6 * 0.7 * 0.8, eResT = reservaWh('curva', T);
+  const r12 = simulate(mediodia, T, loc, (eResT - 1) / capT, o);
+  R.mediodia = { seg: r12[0].seg, chg: +r12[0].chg.toFixed(2) };
+  /* e) un informe de Track por la página: ni rastro de IED, P4Q ni de la TCU 33 */
+  const idx = PROFILES.map((p, i) => [p.id, i]);
+  $('prof').value = String(idx.filter((x) => x[0] === 'TNC_45W_6Ah')[0][1]); $('prof').onchange();
+  $('src').value = 'synth'; if ($('src').onchange) $('src').onchange();
+  window.LAST = null; $('run').click();
+  for (let i = 0; i < 300 && !window.LAST; i++) await new Promise((res) => setTimeout(res, 50));
+  let doc = null; const abre = window.open; window.open = () => ({ document: { write: (d) => { doc = d; }, close: () => {} } });
+  buildReport(); window.open = abre;
+  /* en el TEXTO del informe: las figuras van en base64 y sus bytes pueden deletrear cualquier cosa */
+  const texto = doc.replace(/<img[^>]*>/g, ' ').replace(/<[^>]+>/g, ' ');
+  R.mezcla = ['IED', 'P4Q', 'PS26002', 'TCU 33'].filter((x) => texto.includes(x));
+  R.dice = ['mediana medida por Track N Co', '0,90 plano', 'temperatura del aire de cada hora', 'Wh/° hacia el final de carrera', 'inferido', 'no se modela', 'final de carrera más cercano'].filter((x) => !doc.includes(x));
+  R.nota = $('profNote').textContent.includes('otra TCU') && !/IED|P4Q|0,64/.test($('profNote').textContent);
+  $('prof').value = String(idx.filter((x) => x[0] === 'SP_45W_6Ah')[0][1]); $('prof').onchange();
+  return R;
+});
+ok(tn.ctes === '0.21 0.9 0.1-0.8 10.2 7.68 50 0.0488 0.1026',
+  'los números del perfil Track N Co son los de su informe: 0,21 W, 0,9, ventana 10–80 %, 300 mA (7,68 W) bajo 10,2 °C, hasta 50 °C, 0,0488/0,1026 Wh/°', tn.ctes);
+ok(tn.reserva === 5.37 && Math.abs(tn.dia - 18.5) < 0.05,
+  'su reserva es la de su informe, 5,37 Wh, aunque el panel diga otro motor; y el día de operación inferido, 18,5 Wh', JSON.stringify({ r: tn.reserva, d: tn.dia }));
+ok(tn.cat === 'TNC_45W_3.8Ah@97.28,TNC_45W_6Ah@153.6,TNC_45W_8Ah@204.8,TNC_60W_3.8Ah@97.28,TNC_60W_6Ah@153.6,TNC_60W_8Ah@204.8',
+  'las tres baterías de su informe, 3,8, 6 y 8 Ah, con 45 W de serie y 60 W de catálogo', tn.cat);
+ok(tn.motor.join(',') === '5.643,2.684,3.516', 'su motor tiene sentido: alejarse del final de carrera cuesta 0,1026 Wh/° y acercarse 0,0488', tn.motor.join(','));
+ok(Math.abs(tn.cap - 153.6 * 0.7 * 0.8) < 1e-9, 'simula con su ventana útil: el 70 % de la nominal, al 80 % al final de vida (' + tn.cap.toFixed(2) + ' Wh)', String(tn.cap));
+ok(tn.base.length === 1 && tn.base[0] === 0.21, 'con su electrónica: 0,21 Wh cada hora, de día y de noche', JSON.stringify(tn.base));
+ok(tn.eta && tn.eta[0] === 0.9 && tn.eta[1] === 0.9, 'y su cargador: 0,9 plano a cualquier irradiancia, sin la curva de P4Q', JSON.stringify(tn.eta));
+ok(Math.abs(tn.frio5 - 7.68) < 1e-9 && tn.bajoCero === 0,
+  'a 5 °C entran como mucho 300 mA × 25,6 V = 7,68 Wh/h —el tope va después del 0,9, como en su fórmula— y bajo cero nada', JSON.stringify({ a5: tn.frio5, bajo0: tn.bajoCero }));
+ok(tn.motorErr < 1e-9 && tn.nMovs > 10, 'cada maniobra de seguimiento se cobra con SU motor (' + tn.nMovs + ' maniobras comprobadas)', String(tn.motorErr));
+ok(tn.tBat, 'su batería sin calefactor está a la temperatura del aire de cada hora —la que reproduce sus 20 días sin carga—, no a nuestra inercia');
+ok(tn.aparcaPorSoc === 0 && tn.cols === 'tnc', 'su firmware no aparca por SOC y no tiene las estrategias SUNNER: una sola columna, la suya', tn.cols);
+ok(tn.mediodia.seg === false && tn.mediodia.chg > 1,
+  'y decide con la energía al final de la hora, con lo que carga el panel en ella: a mediodía y 1 Wh bajo la reserva, no entra en seguridad', JSON.stringify(tn.mediodia));
+ok(tn.seg.n > 0 && tn.seg.este > 0 && tn.seg.bien, 'en modo seguridad va al final de carrera MÁS CERCANO al lado en que estaba (' + tn.seg.n + ' entradas)', JSON.stringify(tn.seg));
+ok(tn.mezcla.length === 0, 'el informe de una Track no mezcla: ni IED, ni P4Q, ni PS26002, ni la TCU 33', 'aparece: ' + tn.mezcla.join(', '));
+ok(tn.dice.length === 0 && tn.nota, 'y dice de dónde sale cada dato suyo, lo que es inferencia y que su calefactor no se modela', 'falta: ' + tn.dice.join(', '));
+
 await nav.close();
-console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa, y se sabe qué batería basta'));
+console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa, se sabe qué batería basta y la TCU de Track N Co se compara con lo suyo'));
 process.exit(fallos ? 1 : 0);
