@@ -865,18 +865,23 @@ const h3 = await pg.evaluate(async () => {
   const nevado = base.map((m, i) => Object.assign({}, m, { wind: 2, gust: 3, snowDepth: i >= 48 && i < 96 ? 0.04 : 0 }));
   const rn = simulate(nevado, seis, loc, 0.9, o);
   const enNieve = rn.filter((r, i) => r.nieve && i > 0 && rn[i - 1].nieve);
+  /* con el lado FIJO, dentro de la nevada no se gira: 48 h que cruzan dos mediodías */
+  R.giroEnNieve = enNieve.reduce((a, r) => a + r.mov, 0);
+  R.ladosEnNieve = new Set(enNieve.map((r) => Math.sign(r.pos))).size;
   R.nieve = { h: rn.filter((r) => r.nieve).length, veces: summarize(rn).nNieve,
     en55: enNieve.every((r) => Math.abs(Math.abs(r.pos) - SNOW_POS) < 1e-9), n: enNieve.length,
     /* «sale al acabar»: después de la alarma, la MISMA posición que la serie sin nieve.
        No vale «no está a 55°»: ±55° es también el tope del seguimiento con el sol bajo. */
     fuera: (() => { const limpio = simulate(nevado.map((m) => Object.assign({}, m, { snowDepth: 0 })), seis, loc, 0.9, o);
       return rn.filter((r, i) => i >= 98 && Math.abs(r.pos - limpio[i].pos) > 1e-9).length; })() };
-  /* c2) jerarquía de la casa: la nieve (SP3) manda sobre la batería. Aparcado por SOC bajo
-         y con nieve, por la mañana va a −55° (lado del sol), no a la defensa fija en +55°. */
-  /* sin carga (tMin 99) y al 45 % con el crítico al 50 %: aparcada, y viva, toda la nevada */
+  /* c2) jerarquía de la casa: la nieve (SP3) manda sobre la batería. Para que las dos
+         posiciones DISCREPEN, la nevada empieza a media mañana con el seguidor mirando al
+         este (lado −) y la batería cae al crítico DURANTE la nevada: la nieve la mantiene
+         en −55°; con la jerarquía al revés iría a la defensa fija, +55°. Sin carga (tMin 99). */
+  const nevMan = base.map((m, i) => Object.assign({}, m, { wind: 2, gust: 3, snowDepth: i >= 33 && i < 96 ? 0.04 : 0 }));
   const oBaja = Object.assign({}, o, { strategy: true, socTgt: 80, socCrit: 50, tMin: 99 });
-  const rj = simulate(nevado, seis, loc, 0.45, oBaja);
-  R.jerarquia = { aparcadoConNieve: rj.filter((r) => r.parked && r.nieve).length,
+  const rj = simulate(nevMan, seis, loc, 0.9, oBaja);
+  R.jerarquia = { ladoAlEntrar: Math.sign(rj[33].pos), aparcadoConNieve: rj.filter((r) => r.parked && r.nieve).length,
     alSol: rj.filter((r) => r.parked && r.nieve && Math.abs(r.pos + SNOW_POS) < 1e-9).length };
   /* d) el ×2 se cobra en las maniobras de PROTECCIÓN y en ninguna otra */
   const kOrig = K_STOW_MOTOR;
@@ -912,11 +917,14 @@ ok(h3.racha.hStow > 0 && h3.racha.nStow >= 1 && h3.racha.sinRacha === 0 && h3.ra
 ok(h3.sinDato.sinRacha === h3.sinDato.horas && h3.sinDato.sinNieve === h3.sinDato.horas,
   'sin racha ni nieve en la fuente, el simulador CUENTA las horas sin ellas (' + h3.sinDato.horas + ' h) en vez de dar un cero por bueno',
   JSON.stringify(h3.sinDato));
+ok(h3.giroEnNieve === 0 && h3.ladosEnNieve === 1,
+  'en nieve el seguidor se queda del lado en que estaba al saltar la alarma: 0° de giro en 48 h que cruzan dos mediodías, no 110° cada uno',
+  JSON.stringify({ giro: h3.giroEnNieve, lados: h3.ladosEnNieve }));
 ok(h3.nieve.h === 48 && h3.nieve.veces === 1 && h3.nieve.n > 0 && h3.nieve.en55 && h3.nieve.fuera === 0,
-  'con 4 cm acumulados dos días, SP3: ' + h3.nieve.h + ' h en la posición de nieve, a ' + 55 + '° del lado del sol, y sale al acabar',
+  'con 4 cm acumulados dos días, SP3: ' + h3.nieve.h + ' h en la posición de nieve, a ' + 55 + '°, y sale al acabar',
   JSON.stringify(h3.nieve));
-ok(h3.jerarquia.aparcadoConNieve > 0 && h3.jerarquia.alSol > 0,
-  'y la nieve manda sobre la batería, como en la casa: aparcado por SOC bajo y con nieve, por la mañana va a −55° y no a la defensa fija',
+ok(h3.jerarquia.ladoAlEntrar === -1 && h3.jerarquia.aparcadoConNieve > 0 && h3.jerarquia.alSol === h3.jerarquia.aparcadoConNieve,
+  'y la nieve manda sobre la batería, como en la casa: si la batería cae al crítico en plena nevada, sigue en −55° (su lado) y no va a la defensa fija',
   JSON.stringify(h3.jerarquia));
 ok(h3.x2.hayProt > 0 && Math.abs(h3.x2.prot - 2) < 1e-9 && Math.abs(h3.x2.segui - 1) < 1e-9,
   'el ×2 de corriente se cobra en las maniobras de protección (×' + h3.x2.prot.toFixed(2) + ') y en el seguimiento no (×' + h3.x2.segui.toFixed(2) + ')',

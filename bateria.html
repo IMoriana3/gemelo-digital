@@ -949,6 +949,7 @@ function simulate(meteo,prof,loc,soc0,opts){
   var t0Day=Math.floor((+meteo[0].t)/864e5);
   var soc=soc0, parked=false, prevPos=null, stow=0;
   var eRes=reservaWh(opts.motorModel), eDia=diaOperacionWh(opts.motorModel), seguridad=false;
+  var ladoNieve=null;                                  /* el lado de SP3 se fija al empezar la alarma */
   /* Temperatura de la BATERÍA, no la ambiente: es la que decide el calefactor y
      la que limita el C-rate. Hasta 2026-10-21 aquí se pasaba `m.temp` crudo —el
      gemelo sí modelaba la inercia (sim/planta.js), así que la MISMA regla tenía
@@ -996,6 +997,14 @@ function simulate(meteo,prof,loc,soc0,opts){
     var ab=AB.paso(dtH*3600,vf===0?m.gust:m.wind,trackPos,180+sun.az/D2R);
     stow=ab.estado;
     var nieve=m.snowDepth!=null && m.snowDepth>=SNOW_ALARM_M;
+    /* EL LADO DE LA NIEVE SE FIJA AL EMPEZAR, como el de la bandera de viento (sim/viento.js:
+       «el lado se fija al abanderar», lección del equipo real). La primera versión lo
+       recalculaba cada hora con el signo del seguimiento, y con nieve el seguidor cruzaba
+       de −55° a +55° al mediodía y volvía de noche: 110° a doble corriente, dos veces al
+       día. En Casalmaggiore eran 1822° de giro al año en nieve contra 117°, y por sí solo
+       subía la capacidad mínima de 14,4 a 20 Ah. Se queda del lado en que estaba. */
+    if(!nieve)ladoNieve=null;
+    else if(ladoNieve==null)ladoNieve=(prevPos!=null&&prevPos!==0)?Math.sign(prevPos):1;
     tBat=FISICA.retardo1(tBat,m.temp,dtH*3600,FISICA.e.TAU_BAT_S);
     /* La hora se PLANIFICA antes de comprometerla —posición, movimiento y consumo—, porque
        el modo seguridad necesita saber lo que costaría para decidir si se la puede permitir.
@@ -1004,7 +1013,7 @@ function simulate(meteo,prof,loc,soc0,opts){
     function planifica(aparcado){
     /* Jerarquía de la casa: viento (SP1) > nieve (SP3) > batería > seguimiento */
     var target=stow>0?Math.max(-AXIS_MAX,Math.min(AXIS_MAX,ab.objetivo))
-                     :nieve?(trackPos<0?-1:1)*Math.min(SNOW_POS,AXIS_MAX)
+                     :nieve?ladoNieve*Math.min(SNOW_POS,AXIS_MAX)
                      :(aparcado?(opts.defPos!=null?opts.defPos:DEFENSE_POS):trackPos);
     if(prevPos==null)prevPos=target;
     /* BATERÍA AGOTADA: la TCU no mueve nada. Antes, con SOC 0 % el seguidor
@@ -2254,7 +2263,7 @@ function buildReport(){
         :'la <b>racha</b> a 10 m, que es lo que compara la NCU')+' (umbrales en el apartado 4)'+
         (S.hSinRacha>0?'. <b>La fuente no trae racha en '+fmt(S.hSinRacha)+' h</b>: en esas horas se abandera con la media, que se queda corta':''),
         cls:S.hSinRacha>0?'wn':''}],
-     ['Abanderamiento por nieve',{v:'SP3, la regla de la HSU: nieve acumulada ≥ '+fmt(SNOW_ALARM_M*100)+' cm → '+SNOW_POS+'° del lado del sol mientras dure la alarma'+
+     ['Abanderamiento por nieve',{v:'SP3, la regla de la HSU: nieve acumulada ≥ '+fmt(SNOW_ALARM_M*100)+' cm → '+SNOW_POS+'° del lado en que estaba al saltar la alarma, mientras dure'+
         (S.hSinNieve>0?'. <b>La fuente no trae nieve acumulada en '+fmt(S.hSinNieve)+' h</b>: en esas horas no se abandera por nieve':''),
         cls:S.hSinNieve>0?'wn':''}],
      ['Efecto del viento sobre el consumo',{v:'las maniobras de protección —viento, nieve y modo seguridad— se cobran ×'+K_STOW_MOTOR+'; el seguimiento con viento, no — ver limitaciones',cls:'wn'}],
@@ -2440,6 +2449,7 @@ function buildReport(){
      '<li><b>La vida que da este informe es CALCULADA y no es la de la ficha.</b> Sale del conteo rainflow más Palmgren-Miner y de la degradación calendaria, sobre la serie meteorológica de este emplazamiento. SUNNER estima la suya por otro camino en <i>SUNNER TCU SP 6Ah Battery Life Estimation</i> (18/09/2024): 2000 ciclos de ensayo entre 80 ciclos/año dan 25 años por ciclado, la calendaria a 25 °C con SoC por debajo del 70 % da más de 12 años, y concluye <b>más de 10 años</b>; en emplazamientos calientes, con tres horas diarias a 45 °C, baja a <b>7 años</b> en el peor caso, que es de donde sale el «&gt; 6 años» de la ficha. Las dos estimaciones no son comparables sin más: los 80 ciclos/año de SUNNER son el caso SIN aportación del panel —su medida es explícitamente «under the worst conditions, when there is no input energy from the solar panel»— mientras que aquí el panel recarga durante el día y el ciclado efectivo sale menor. <b>La cifra de este apartado no debe citarse como garantía</b>: para eso manda la ficha.</li>'+
      '<li><b>El límite superior de carga de la -LT (60 °C) no se modela</b>: se le aplica el derate JEITA de la celda estándar (recorte desde 35 °C, nulo a 45 °C), que para la -LT es conservador. Y el límite de DESCARGA no se modela en ninguna de las dos variantes: la batería entrega por debajo de su mínimo (−10 °C la estándar, −40 °C la -LT) como si nada. Importa en emplazamientos muy fríos.</li>'+
      '<li><b>El efecto del viento sobre el consumo del motor sólo se cobra en las maniobras de protección.</b> La bandera de viento, la de nieve y el modo seguridad se cobran a ×'+K_STOW_MOTOR+' de corriente, que es el supuesto del informe de Track N Co sobre este mismo tracker, sin medida propia. El seguimiento con viento por debajo del umbral de bandera sigue sin cargo extra, así que en emplazamientos ventosos el consumo simulado es un <b>límite inferior</b>. Cerrarlo exige el ensayo de consumo con viento registrado.</li>'+
+     '<li><b>En la posición de nieve el seguidor se queda del lado en que estaba al saltar la alarma</b>, como en la bandera de viento. El gemelo de planta la recalcula con el sol en cada paso; qué hace la NCU real está por confirmar, y pesa: recalcularla obliga a cruzar 110° dos veces al día mientras dure la nieve.</li>'+
      '<li><b>El abanderamiento se decide con la racha horaria de ERA5</b> (la máxima de la hora, en una rejilla de unos 30 km). La racha local en una ladera o en un valle puede ser bastante distinta. Y la <b>nieve acumulada</b> también es de rejilla: en un valle frío la real puede durar más.</li>'+
      '<li>El consumo de motor procede de la campaña de medida sobre una unidad (TCU 33) a 24 V y no recoge la dispersión entre unidades. No se le aplica ningún tope de potencia: el pico de 50 W que figura en las constantes canónicas es un envolvente de diseño y la propia curva medida lo supera (67,2 W a 55°), de modo que recortar por ahí truncaba consumo real. El límite del consumo por paso lo pone la velocidad de giro. Queda por dirimir con el ensayo crudo si el motor supera de verdad los 50 W o si gira más despacio a ángulos altos.</li>'+
      '<li><b>La reserva para llegar a seguridad se calcula para el peor caso fijo</b>, la maniobra de −'+AXIS_MAX+'° a la defensa en +'+DEFENSE_POS+'°, y no desde la posición de cada momento. '+
