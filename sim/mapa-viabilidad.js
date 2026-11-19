@@ -107,6 +107,8 @@ function pin(site){
              color:site.id===(mv.selected&&mv.selected.id)?'#f6f0db':'#0f1824',fillColor:MV_COLORS[s],fillOpacity:.95};
   if(existing){existing.setLatLng([site.lat,site.lon]);existing.setStyle(style);return;}
   var mark=L.circleMarker([site.lat,site.lon],style).addTo(mv.map);
+  var title=document.createElement('span');title.textContent=site.n;
+  mark.bindTooltip(title,{direction:'top',opacity:.95});
   mark.on('click',function(){selectSite(site,true);});
   mv.markers[site.id]=mark;
 }
@@ -135,6 +137,14 @@ function listSites(){
     var span=document.createElement('span');span.style.flex='1';span.textContent=site.n;b.appendChild(span);
     var cr=document.createElement('small');cr.textContent=dec(site.lat,3)+', '+dec(site.lon,3);b.appendChild(cr);
     b.onclick=function(){selectSite(site,true);};host.appendChild(b);
+  });
+  /* La cartera también contiene plantas sin coordenadas: no asignarles
+     las del municipio por parecido del nombre. */
+  var missingCoord=(typeof SIN_COORD!=='undefined'&&Array.isArray(SIN_COORD)?SIN_COORD:[])
+    .filter(function(p){return !search||_rotulo(p).toLocaleLowerCase('es-ES').includes(search);});
+  missingCoord.slice(0,20).forEach(function(p){
+    var b=document.createElement('button');b.type='button';b.className='viab-site';b.disabled=true;
+    b.textContent=_rotulo(p)+' · sin coordenadas de planta';host.appendChild(b);
   });
 }
 function resultLine(host,name,value){
@@ -258,7 +268,13 @@ function outcome(S,c,met,opts,worst,profile,thermal){
   if(profile.tCarga&&Number.isFinite(profile.tCarga[1])&&thermal.max>profile.tCarga[1])
     issues.push('se alcanzan temperaturas fuera del límite superior de carga; revisar inhibiciones del modelo');
   var status='pendiente',conclusion='';
-  if(S.hZero>0){
+  var datosCriticos=met.qa.sin_irradiancia||met.qa.sin_temperatura||met.qa.sin_viento||
+    profile.tDescarga&&(thermal.min<profile.tDescarga[0]||Number.isFinite(profile.tDescarga[1])&&thermal.max>profile.tDescarga[1])||
+    profile.tCarga&&Number.isFinite(profile.tCarga[1])&&thermal.max>profile.tCarga[1];
+  if(datosCriticos){
+    status='pendiente';
+    conclusion='Hay datos meteorológicos incompletos o temperaturas fuera de las condiciones de uso modeladas. No se emite veredicto.';
+  }else if(S.hZero>0){
     status='no_apto';
     conclusion='El equipo se queda sin batería durante '+dec(S.hZero,1)+' h; no se puede garantizar la maniobra de seguridad.';
   }else if(issues.length){
@@ -392,7 +408,10 @@ function initialize(){
     setTimeout(function(){mv.map.invalidateSize();},50);
     if(!mv.selected){var loc=typeof getLoc==='function'?getLoc():null;
       var same=loc&&mv.sites.find(function(s){return Math.abs(s.lat-loc.lat)<.000001&&Math.abs(s.lon-loc.lon)<.000001;});
-      selectSite(same||mv.sites[0],false);
+      if(same)selectSite(same,true);
+      else if(loc&&e('loc').value==='custom'&&coordOK(num(loc.lat),num(loc.lon)))
+        addLocation(loc.n,loc.lat,loc.lon);
+      else selectSite(mv.sites[0],false);
     }else updateView();
   };
   root.addEventListener('keydown',function(ev){if(ev.key==='Escape'&&!mv.busy){root.hidden=true;document.body.style.overflow='';button.focus();}});
