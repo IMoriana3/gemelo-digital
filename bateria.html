@@ -676,7 +676,7 @@ function parseOM(j){
       gust:(H.wind_gusts_10m&&H.wind_gusts_10m[i]!=null)?Math.max(0,H.wind_gusts_10m[i]):null,
       snowDepth:(H.snow_depth&&H.snow_depth[i]!=null)?Math.max(0,H.snow_depth[i]):null});
   }
-  out.mapaQA=qa;  /* solo trazabilidad, sin alterar los datos ni el balance */
+  Object.defineProperty(out,'mapaQA',{value:qa,enumerable:false});  /* metadatos, no una fila ni serie nueva */
   return out;
 }
 var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m,wind_gusts_10m,snow_depth&windspeed_unit=ms";
