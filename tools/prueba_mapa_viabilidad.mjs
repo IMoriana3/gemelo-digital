@@ -73,4 +73,26 @@ assert.equal(outcome(S,control,met,opts,'2017/18',profile,{min:Infinity,max:-Inf
 assert.equal(outcome(S,control,met,opts,'2017/18',profile,thermal,1).status,'pendiente');
 assert.equal(outcome(S,control,{...met,ok:29},opts,'2017/18',profile,thermal).status,'pendiente');
 assert.equal(outcome({...S,hZero:3},control,met,opts,'2017/18',profile,thermal,0).status,'no_apto');
+// El lector histórico no puede esconder NaN ni valores negativos convirtiéndolos
+// en «cero viento / cero nieve» y, con ello, declarar el punto apto.
+const start=html.indexOf('function parseOM(j){');
+const end=html.indexOf('\nvar OM_VARS=',start);
+assert.ok(start>0&&end>start,'No se localiza el parser meteorológico');
+const parseCtx={};
+vm.createContext(parseCtx);
+vm.runInContext(html.slice(start,end)+'\nglobalThis.__parse=parseOM;',parseCtx);
+const series=parseCtx.__parse({hourly:{
+  time:['2025-01-01T00:00','2025-01-01T01:00','2025-01-01T02:00'],
+  shortwave_radiation:[0,NaN,-1],diffuse_radiation:[0,10,-2],
+  temperature_2m:[-1,NaN,-5],windspeed_10m:[0,NaN,-1],
+  wind_gusts_10m:[3,NaN,-2],snow_depth:[0,NaN,-0.01]
+}});
+assert.equal(series.mapaQA.sin_irradiancia,2);
+assert.equal(series.mapaQA.sin_temperatura,1);
+assert.equal(series.mapaQA.sin_viento,2);
+assert.equal(series[1].gust,null);
+assert.equal(series[2].snowDepth,null);
+assert.equal(series[0].wind,0);
+assert.equal(Object.keys(series).includes('mapaQA'),false);
+
 console.log('Mapa TCU: integridad, clasificación y cierres conservadores correctos.');
