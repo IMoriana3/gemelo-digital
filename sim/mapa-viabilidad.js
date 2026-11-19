@@ -450,7 +450,7 @@ function initialize(){
   setInterval(function(){if(!root.hidden)refreshNAS();},20000);
 }
 
-window.FACTIUN_MAPA_NAS={
+if(typeof window!=='undefined')window.FACTIUN_MAPA_NAS={
   async run(job){
     var src=job.site||{},site=siteOf(src.n,src.lat,src.lon,src.id,src.fuente);
     if(!coordOK(site.lat,site.lon))throw new Error('Coordenadas NAS inválidas');
