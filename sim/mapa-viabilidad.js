@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-19-v1';
+var MV_VERSION='viabilidad-2026-11-19-v2';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -53,7 +53,17 @@ function signature(){
     mountTilt:e('mount').value==='fix'?num(e('tilt').value):null,
     strategy:true,winter:e('winter').checked
   };
-  return {key:JSON.stringify({v:MV_VERSION,engine:MV_ENGINE_HASH,p:p&&p.id,w:p&&p.chgW,period:e('mv-period').value,base:base,physics:physics}),base:base,profile:p};
+  /* La validez depende también de la ficha y química, no solo de las funciones:
+     cambiar la celda no debe conservar un resultado verde anterior. */
+  var specs={profile:p?{id:p.id,wh:p.wh,chgW:p.chgW,string:!!p.string,lt:!!p.lt,
+    control:p.control||null,tCarga:p.tCarga,tDescarga:p.tDescarga,sinFicha:!!p.sinFicha}:null,
+    physics:typeof FISICA==='object'?FISICA.e:null,
+    trackNC:typeof TRACK_N_CO!=='undefined'?TRACK_N_CO:null,
+    snowAlarm:typeof SNOW_ALARM_M==='number'?SNOW_ALARM_M:null,
+    stowMotor:typeof K_STOW_MOTOR==='number'?K_STOW_MOTOR:null,
+    stringFull:typeof POA_STRING_FULL==='number'?POA_STRING_FULL:null};
+  return {key:JSON.stringify({v:MV_VERSION,engine:MV_ENGINE_HASH,p:p&&p.id,w:p&&p.chgW,
+    period:e('mv-period').value,base:base,physics:physics,specs:specs}),base:base,profile:p};
 }
 function selectedPageProfile(){
   return PROFILES[e('prof').value]||null;
@@ -255,8 +265,22 @@ async function meteoForSite(site,period){
   if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
   return {years:years,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo histórico por coordenadas'};
 }
-function outcome(S,c,met,opts,worst,profile,thermal){
+function outcome(S,c,met,opts,worst,profile,thermal,modelBad){
   var issues=[];
+  /* Fail-closed: un NaN o Infinity daría APTO con comparaciones «> 0». */
+  var metricas=['reservaWh','margenMin','periodosRes','diasRes','hBajoReserva',
+    'socMin','hZero','hStow','hNieve','hSinRacha','hSinNieve','inactivePct'];
+  var invalidSummary=metricas.some(function(k){return !Number.isFinite(S[k]);}) ||
+    S.socMin<0||S.socMin>1||S.inactivePct<0||S.inactivePct>100||
+    ['periodosRes','diasRes','hBajoReserva','hZero','hStow','hNieve','hSinRacha','hSinNieve']
+      .some(function(k){return S[k]<0;});
+  var invalidThermal=!thermal||!Number.isFinite(thermal.min)||
+    !Number.isFinite(thermal.max)||thermal.min>thermal.max;
+  if(invalidSummary)issues.push('indicadores de disponibilidad incompletos o no finitos');
+  if(invalidThermal)issues.push('temperatura de celda no verificable');
+  if(modelBad>0)issues.push('salida física inconsistente: '+modelBad+' registros');
+  if(Number.isFinite(met.ok)&&met.ok!==met.years.length)
+    issues.push('número de años verificados distinto del solicitado');
   if(met.missing.length)issues.push('años sin meteorología');
   if(met.qa.sin_irradiancia)issues.push('irradiancia incompleta: '+met.qa.sin_irradiancia+' registros');
   if(met.qa.sin_temperatura)issues.push('temperatura incompleta: '+met.qa.sin_temperatura+' registros');
@@ -274,12 +298,14 @@ function outcome(S,c,met,opts,worst,profile,thermal){
   if(profile.tCarga&&Number.isFinite(profile.tCarga[1])&&thermal.max>profile.tCarga[1])
     issues.push('se alcanzan temperaturas fuera del límite superior de carga; revisar inhibiciones del modelo');
   var status='pendiente',conclusion='';
-  var datosCriticos=met.qa.sin_irradiancia||met.qa.sin_temperatura||met.qa.sin_viento||
+  var datosCriticos=invalidSummary||invalidThermal||modelBad>0||
+    (Number.isFinite(met.ok)&&met.ok!==met.years.length)||
+    met.qa.sin_irradiancia||met.qa.sin_temperatura||met.qa.sin_viento||
     profile.tDescarga&&(thermal.min<profile.tDescarga[0]||Number.isFinite(profile.tDescarga[1])&&thermal.max>profile.tDescarga[1])||
     profile.tCarga&&Number.isFinite(profile.tCarga[1])&&thermal.max>profile.tCarga[1];
   if(datosCriticos){
     status='pendiente';
-    conclusion='Hay datos meteorológicos incompletos o temperaturas fuera de las condiciones de uso modeladas. No se emite veredicto.';
+    conclusion='Faltan datos verificables o la salida del modelo no es físicamente válida. No se emite veredicto.';
   }else if(S.hZero>0){
     status='no_apto';
     conclusion='El equipo se queda sin batería durante '+dec(S.hZero,1)+' h; no se puede garantizar la maniobra de seguridad.';
@@ -318,13 +344,22 @@ async function evaluateSite(){
       else rows=simulate(met.tramos[0].meteo,derived.p,site,socEstacionario(derived.o),derived.o);
       if(!rows||!rows.length)throw new Error('El simulador no devolvió datos para '+control.n);
       var s=summarize(rows),win=null;
-      var tmin=Infinity,tmax=-Infinity;
-      for(var ti=0;ti<rows.length;ti++){var tc=rows[ti].tCell;
-        if(Number.isFinite(tc)){tmin=Math.min(tmin,tc);tmax=Math.max(tmax,tc);}
-      }
+      var tmin=Infinity,tmax=-Infinity,modelBad=0;
+       for(var ti=0;ti<rows.length;ti++){
+         var r=rows[ti],tc=r.tCell;
+         if(Number.isFinite(tc)){tmin=Math.min(tmin,tc);tmax=Math.max(tmax,tc);}
+         if(!Number.isFinite(r.soc)||r.soc<0||r.soc>1||
+            !Number.isFinite(r.eLib)||!Number.isFinite(tc)||
+            !Number.isFinite(r.chg)||r.chg<0||
+            !Number.isFinite(r.base)||r.base<0||
+            !Number.isFinite(r.motor)||r.motor<0||
+            !Number.isFinite(r.ghi)||!Number.isFinite(r.temp)||
+            !Number.isFinite(r.wind)||![0,1,2].includes(r.vf)||
+            typeof r.nd!=='boolean')modelBad++;
+       }
       if(met.years.length>1){var inv=resumenInviernos(rows);win=inv.length?peorInvierno(inv).label:null;}
       else win=String(met.years[0]);
-      results.push(outcome(s,control,met,derived.o,win,derived.p,{min:tmin,max:tmax}));rows=null;
+      results.push(outcome(s,control,met,derived.o,win,derived.p,{min:tmin,max:tmax},modelBad));rows=null;
     }
     var record={sig:cfg.key,source:met.source,yearsOK:met.ok,yearsAsked:met.years.length,
       missingYears:met.missing,results:results,date:new Date().toLocaleString('es-ES')};
