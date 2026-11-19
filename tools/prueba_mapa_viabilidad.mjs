@@ -75,6 +75,9 @@ assert.equal(outcome(S,control,met,opts,'2017/18',profile,{min:Infinity,max:-Inf
 assert.equal(outcome(S,control,met,opts,'2017/18',profile,thermal,1).status,'pendiente');
 assert.equal(outcome(S,control,{...met,ok:29},opts,'2017/18',profile,thermal).status,'pendiente');
 assert.equal(outcome({...S,hZero:3},control,met,opts,'2017/18',profile,thermal,0).status,'no_apto');
+assert.equal(outcome({...S,hStow:4},control,met,opts,'2017/18',profile,thermal,0,0).status,'condicionado');
+assert.equal(outcome(S,control,met,opts,'2017/18',profile,thermal,0,5).status,'condicionado');
+assert.match(outcome(S,control,met,opts,'2017/18',profile,thermal,0,5).limitations.join(' '),/nieve en suelo/);
 // El lector histórico no puede esconder NaN ni valores negativos convirtiéndolos
 // en «cero viento / cero nieve» y, con ello, declarar el punto apto.
 const start=html.indexOf('function parseOM(j){');
