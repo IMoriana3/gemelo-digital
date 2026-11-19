@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-19-v2';
+var MV_VERSION='viabilidad-2026-11-19-v3';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -245,11 +245,14 @@ async function meteoForSite(site,period){
      puede ser de OTRO emplazamiento: no puede dar un falso mapa verde. */
   var finalYear=new Date().getFullYear()-1;
   var years=period==='30'?Array.from({length:30},function(_,i){return finalYear-29+i;}):[Number(period)];
+  /* Misma familia de reanálisis en todos los inviernos. La celda
+     meteorológica no equivale a una estación en las coordenadas exactas. */
+  var weatherSite=Object.assign({},site,{meteoModel:'era5_land'});
   var list=[];
   for(var i=0;i<years.length;i+=4){
     note('Descargando meteorología del punto · '+Math.min(i+4,years.length)+'/'+years.length+' años…');
     var batch=years.slice(i,i+4);
-    var got=await Promise.all(batch.map(function(y){return fetchYearDeclarado(site,y);}));
+    var got=await Promise.all(batch.map(function(y){return fetchYearDeclarado(weatherSite,y);}));
     list.push.apply(list,got);
   }
   var missing=[],ok=0,qa={sin_irradiancia:0,sin_temperatura:0,sin_viento:0};
@@ -263,7 +266,7 @@ async function meteoForSite(site,period){
   });
   var tramos=tramosContinuos(list,years);
   if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
-  return {years:years,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo histórico por coordenadas'};
+  return {years:years,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo · ERA5-Land (reanálisis homogéneo; forzamiento ERA5 para viento e irradiación)'};
 }
 function outcome(S,c,met,opts,worst,profile,thermal,modelBad){
   var issues=[];
