@@ -9,8 +9,17 @@ var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
 var mv={sites:[],selected:null,map:null,markers:{},busy:false,records:{},custom:[],config:null};
+/* Una conclusión guardada deja de ser vigente si cambia el motor de la página. */
+var MV_ENGINE_HASH=(function(){
+  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesPara,
+                 FISICA.consumoTCU,Abanderamiento.prototype.paso];
+  var src=functions.map(function(f){return typeof f==='function'?Function.prototype.toString.call(f):'missing';}).join('|');
+  var hash=2166136261;
+  for(var i=0;i<src.length;i++){hash^=src.charCodeAt(i);hash=Math.imul(hash,16777619);}
+  return (hash>>>0).toString(16);
+})();
 function e(id){return document.getElementById(id);}
-function num(x){return Number.isFinite(Number(x))?Number(x):NaN;}
+function num(x){if(x==null||String(x).trim()==='')return NaN;var n=Number(String(x).trim().replace(',','.'));return Number.isFinite(n)?n:NaN;}
 function coordOK(lat,lon){return Number.isFinite(lat)&&Number.isFinite(lon)&&lat>=-89&&lat<=89&&lon>=-180&&lon<=180;}
 function dec(x,d){return Number(x||0).toLocaleString('es-ES',{maximumFractionDigits:d==null?1:d,minimumFractionDigits:0});}
 function saved(key,fallback){try{var data=JSON.parse(localStorage.getItem(key));return data&&typeof data==='object'?data:fallback;}catch(_){return fallback;}}
@@ -44,7 +53,7 @@ function signature(){
     mountTilt:e('mount').value==='fix'?num(e('tilt').value):null,
     strategy:true,winter:e('winter').checked
   };
-  return {key:JSON.stringify({v:MV_VERSION,p:p&&p.id,w:p&&p.chgW,period:e('mv-period').value,base:base,physics:physics}),base:base,profile:p};
+  return {key:JSON.stringify({v:MV_VERSION,engine:MV_ENGINE_HASH,p:p&&p.id,w:p&&p.chgW,period:e('mv-period').value,base:base,physics:physics}),base:base,profile:p};
 }
 function selectedPageProfile(){
   return PROFILES[e('prof').value]||null;
@@ -179,6 +188,14 @@ function addFromForm(){
     note('Seleccionado: '+item.n+'. Pulsa «Calcular conclusiones» para evaluar el punto.');
   }catch(err){note(err.message);}
 }
+function fullYear(m,year){
+  if(!m||m.error||!Array.isArray(m))return false;
+  var leap=year%4===0&&(year%100!==0||year%400===0),hours=leap?8784:8760;
+  if(m.length!==hours)return false;
+  if(+m[0].t!==Date.UTC(year,0,1,0)||+m[hours-1].t!==Date.UTC(year+1,0,1,0)-3600000)return false;
+  for(var i=1;i<m.length;i++)if(+m[i].t-(+m[i-1].t)!==3600000)return false;
+  return true;
+}
 function searchOnMap(){
   var q=cleanName(e('mv-search').value);if(!q){note('Escribe un nombre para buscar.');return;}
   var host=e('mv-search-remote');host.replaceChildren();note('Buscando '+q+'…');
@@ -211,20 +228,28 @@ async function meteoForSite(site,period){
   }
   var missing=[],ok=0;
   list.forEach(function(m,i){
-    if(!m||m.error||!Array.isArray(m)||m.length<8000){missing.push(years[i]);}
+    if(!fullYear(m,years[i])){missing.push(years[i]);}
     else ok++;
   });
   var tramos=tramosContinuos(list,years);
   if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
   return {years:years,tramos:tramos,missing:missing,ok:ok,source:'Open-Meteo histórico por coordenadas'};
 }
-function outcome(S,c,met,opts,worst){
+function outcome(S,c,met,opts,worst,profile,thermal){
   var issues=[];
   if(met.missing.length)issues.push('años sin meteorología');
   if(S.hSinRacha>0&&opts.vientoStow!=='media')issues.push('faltan ráfagas en parte del periodo');
   if(opts.vientoStow==='media')issues.push('abanderamiento calculado con viento medio, no racha');
   if(S.hSinNieve>0)issues.push('faltan datos de profundidad de nieve');
   if(met.years.length===1)issues.push('solo un año histórico');
+  if(profile.sinFicha||(!profile.string&&!enCatalogo(profile)))
+    issues.push('combinación de estudio o sin ficha comercial');
+  if(profile.tDescarga&&(
+       Number.isFinite(profile.tDescarga[0])&&thermal.min<profile.tDescarga[0]||
+       Number.isFinite(profile.tDescarga[1])&&thermal.max>profile.tDescarga[1]))
+    issues.push('temperaturas fuera de los límites de descarga declarados en la ficha');
+  if(profile.tCarga&&Number.isFinite(profile.tCarga[1])&&thermal.max>profile.tCarga[1])
+    issues.push('se alcanzan temperaturas fuera del límite superior de carga; revisar inhibiciones del modelo');
   var status='pendiente',conclusion='';
   if(S.hZero>0){
     status='no_apto';
@@ -233,12 +258,12 @@ function outcome(S,c,met,opts,worst){
     status='pendiente';
     conclusion='No se puede confirmar la viabilidad con los datos disponibles.';
     if(S.periodosRes>0||S.inactivePct>0)conclusion+=' Hay episodios con reserva comprometida o seguimiento detenido.';
-  }else if(S.periodosRes>0||S.inactivePct>0){
+  }else if(S.periodosRes>0||S.inactivePct>0||c.k==='none'){
     status='condicionado';
-    conclusion='No se agota la batería, pero se compromete la reserva o el seguimiento durante el periodo evaluado.';
+    conclusion=c.k==='none'?'La simulación no agota la batería, pero esta referencia carece de protección por SOC. No se considera una estrategia de seguridad validada.':'No se agota la batería, pero se compromete la reserva o el seguimiento durante el periodo evaluado.';
   }else{
     status='apto';
-    conclusion='Mantiene la reserva y el seguimiento en todos los años y eventos meteorológicos evaluados.';
+    conclusion='Mantiene la reserva y no registra indisponibilidad por batería durante el histórico evaluado. Las maniobras de viento y nieve se contabilizan por separado.';
   }
   return {k:c.k,name:c.n,status:status,conclusion:conclusion,worst:worst,
     periodosRes:S.periodosRes,diasRes:S.diasRes,inactivePct:S.inactivePct,
@@ -264,9 +289,13 @@ async function evaluateSite(){
       else rows=simulate(met.tramos[0].meteo,derived.p,site,socEstacionario(derived.o),derived.o);
       if(!rows||!rows.length)throw new Error('El simulador no devolvió datos para '+control.n);
       var s=summarize(rows),win=null;
+      var tmin=Infinity,tmax=-Infinity;
+      for(var ti=0;ti<rows.length;ti++){var tc=rows[ti].tCell;
+        if(Number.isFinite(tc)){tmin=Math.min(tmin,tc);tmax=Math.max(tmax,tc);}
+      }
       if(met.years.length>1){var inv=resumenInviernos(rows);win=inv.length?peorInvierno(inv).label:null;}
       else win=String(met.years[0]);
-      results.push(outcome(s,control,met,derived.o,win));rows=null;
+      results.push(outcome(s,control,met,derived.o,win,derived.p,{min:tmin,max:tmax}));rows=null;
     }
     var record={sig:cfg.key,source:met.source,yearsOK:met.ok,yearsAsked:met.years.length,
       missingYears:met.missing,results:results,date:new Date().toLocaleString('es-ES')};
@@ -283,7 +312,7 @@ function initialize(){
     mv.sites.push(siteOf(p.n,p.lat,p.lon,'portfolio:'+i,p.fuente||''));});
   mv.custom=saved(MV_CUSTOM,[]);
   if(!Array.isArray(mv.custom))mv.custom=[];
-  mv.custom=mv.custom.filter(function(s){return s&&isCustom(s)&&coordOK(num(s.lat),num(s.lon));});
+  mv.custom=mv.custom.filter(function(s){return s&&typeof s.id==='string'&&isCustom(s)&&coordOK(num(s.lat),num(s.lon));});
   mv.custom.forEach(function(s){if(!mv.sites.some(function(x){return x.id===s.id;}))mv.sites.push(s);});
   mv.records=saved(MV_RESULTS,{});if(Array.isArray(mv.records))mv.records={};
   var root=document.createElement('section');root.id='mv-root';root.className='viab-overlay';
