@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0E1826">
 <link rel="icon" href="favicon.svg">
+<link rel="stylesheet" href="sim/mapa-viabilidad.css">
 <title>Simulador de batería — Factiun</title>
 <!-- Gráficas en canvas 2D sin librerías. Leaflet LOCAL (lib/) solo para elegir emplazamiento. -->
 <link rel="stylesheet" href="lib/leaflet.css">
@@ -143,6 +144,7 @@ table.cmp th{color:var(--tx3)}
   <div class="brand"><span class="dot"></span>Factiun · <b>Gestión de Batería TCU</b></div>
   <a href="index.html">← Gemelo Seguidor + TCU</a>
   <a href="simulador.html">Planta + Modbus →</a>
+  <button type="button" id="mv-open" class="viab-nav" title="Conclusiones de viabilidad por emplazamiento">Mapa mundial de viabilidad</button>
   <div class="right"><span id="motorTag" title="Quién ha calculado el balance que estás viendo" style="margin-right:10px;padding:2px 8px;border-radius:8px;border:1px solid var(--line2);font-size:12px;color:var(--warn)">— comprobando motor</span><span id="srcTag">—</span><span id="clock"></span></div>
 </nav>
 <div class="main">
@@ -3020,5 +3022,6 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   out.appendChild(c5);
 }
 </script>
+<script src="sim/mapa-viabilidad.js"></script>
 </body>
 </html>
