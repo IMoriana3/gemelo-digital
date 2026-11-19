@@ -393,6 +393,17 @@ async function evaluateSite(){
     persist();updateView();
     note('Evaluación terminada para '+site.n+'. Los resultados proceden del simulador de batería.');
   }catch(err){
+    /* Si el usuario pide recalcular y falla la fuente o el motor, no dejamos
+       el antiguo verde bajo la misma firma como si fuera un nuevo resultado.
+       Otras TCUs, estrategias y emplazamientos permanecen intactos. */
+    var prev=mv.records[site.id];
+    if(prev){
+      var all=Array.isArray(prev)?prev:[prev];
+      var keep=all.filter(function(x){return x&&x.sig!==cfg.key;});
+      if(keep.length)mv.records[site.id]=keep;
+      else delete mv.records[site.id];
+      persist();updateView();
+    }
     note('No se ha asignado viabilidad: '+String(err&&err.message||err));
   }finally{mv.busy=false;btn.disabled=false;}
 }
