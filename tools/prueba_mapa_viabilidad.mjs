@@ -50,7 +50,9 @@ const control={k:'std',n:'Estrategia estándar'};
 const opts={vientoStow:'racha'};
 const profile={tCarga:[0,45],tDescarga:[-10,60]};
 const thermal={min:5,max:30};
-const S={hZero:0,periodosRes:0,inactivePct:0,hSinRacha:0,hSinNieve:0,diasRes:0,hStow:0,hNieve:0};
+const S={reservaWh:5.37,margenMin:8.2,hBajoReserva:0,socMin:0.65,
+  hZero:0,periodosRes:0,inactivePct:0,hSinRacha:0,hSinNieve:0,
+  diasRes:0,hStow:0,hNieve:0};
 assert.equal(outcome(S,control,met,opts,'2017/18',profile,thermal).status,'apto');
 assert.equal(outcome({...S,hZero:3},control,met,opts,'2017/18',profile,thermal).status,'no_apto');
 assert.equal(outcome({...S,periodosRes:1},control,met,opts,'2017/18',profile,thermal).status,'condicionado');
@@ -61,4 +63,14 @@ assert.equal(outcome(S,control,met,opts,'2017/18',{...profile,sinFicha:true},the
 assert.equal(outcome(S,control,met,opts,'2017/18',profile,{min:-20,max:30}).status,'pendiente');
 assert.equal(outcome(S,control,met,{vientoStow:'media'},'2017/18',profile,thermal).status,'pendiente');
 assert.equal(outcome(S,control,{...met,qa:{sin_irradiancia:2,sin_temperatura:0,sin_viento:0}},opts,'2017/18',profile,thermal).status,'pendiente');
-console.log('Mapa TCU: pruebas de integridad y clasificación correctas.');
+// Regresiones críticas: una simulación con NaN, métricas ausentes o
+// temperatura sin medir NUNCA puede colorearse «apta» por defecto.
+assert.equal(outcome({...S,hZero:NaN},control,met,opts,'2017/18',profile,thermal).status,'pendiente');
+assert.equal(outcome({...S,socMin:Infinity},control,met,opts,'2017/18',profile,thermal).status,'pendiente');
+assert.equal(outcome({...S,margenMin:undefined},control,met,opts,'2017/18',profile,thermal).status,'pendiente');
+assert.equal(outcome({...S,inactivePct:-1},control,met,opts,'2017/18',profile,thermal).status,'pendiente');
+assert.equal(outcome(S,control,met,opts,'2017/18',profile,{min:Infinity,max:-Infinity}).status,'pendiente');
+assert.equal(outcome(S,control,met,opts,'2017/18',profile,thermal,1).status,'pendiente');
+assert.equal(outcome(S,control,{...met,ok:29},opts,'2017/18',profile,thermal).status,'pendiente');
+assert.equal(outcome({...S,hZero:3},control,met,opts,'2017/18',profile,thermal,0).status,'no_apto');
+console.log('Mapa TCU: integridad, clasificación y cierres conservadores correctos.');
