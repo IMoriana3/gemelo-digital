@@ -40,7 +40,8 @@ identificada por el mapa. No se crea un registro externo de autoridad.
   ni indisponibilidad por batería en el histórico completo, sin faltantes
   meteorológicos detectados y con una configuración de catálogo.
 - **Condicionado**: sin agotamiento total, pero con episodios de reserva
-  comprometida, indisponibilidad o estrategia sin protección por SOC.
+  comprometida, indisponibilidad, estrategia sin protección por SOC o eventos
+  de nieve/viento cuya física de cobertura/par del motor aún no está validada.
 - **No apto**: hay horas de batería agotada en un año observado; no queda
   garantizada la energía para maniobras de protección.
 - **Sin evaluación completa**: ubicación no simulada, histórico insuficiente,
@@ -58,10 +59,22 @@ a través del lector existente del simulador. Se hace explícitamente así porqu
 un WeatherContract histórico activo podría corresponder a otra ubicación; no
 se reutiliza sin validar su emplazamiento.
 
+En el barrido geográfico se fija **ERA5-Land** (parámetro `models=era5_land`)
+para evitar que el modo «Best Match» mezcle IFS, ERA5 y ERA5-Land de distintas
+épocas. ERA5-Land aporta variables terrestres a unos 0,1° (~11 km), mientras que
+el viento y la irradiancia proceden de variables atmosféricas forzantes de ERA5,
+de escala más gruesa. La coordenada de entrada NO identifica una estación
+meteorológica exacta; los datos son una representación de rejilla espacial.
+La nieve de `snow_depth` es profundidad **sobre el suelo**, y el proveedor
+advierte que puede estar sobreestimada. Fuente primaria:
+https://open-meteo.com/en/docs/historical-weather-api
+
 Se exigen años horarios cronológicamente completos. El lector anota si faltan
 irradiancia, temperatura o viento que el simulador antiguo sustituye por
 defaults; el mapa no puede dar un veredicto verde en ese caso. La propia
-simulación contabiliza la ausencia de racha o profundidad de nieve.
+simulación contabiliza la ausencia de racha o profundidad de nieve. Los valores
+no finitos o negativos también son datos inválidos, nunca horas de calma
+meteorológica ni de ausencia de nieve.
 
 Una consulta externa fallida deja el punto sin evaluar; no se sustituye
 automáticamente por un año sintético.
@@ -74,6 +87,14 @@ automáticamente por un año sintético.
   exhaustivamente el incremento de par aerodinámico ni todos los límites de
   batería caliente/fría. Cuando se observan temperaturas fuera de límites
   declarados no se asigna «Apto».
+- El sistema aplica la protección de nieve SP3, pero no dispone de un modelo
+  validado de la pérdida óptica del panel auxiliar o del string por nieve
+  adherida. **Cualquier nieve observada deja el veredicto como condicionado**
+  si los datos son completos; no se inventa una eficiencia de limpieza.
+- Si el periodo contiene maniobras de viento, el par aerodinámico real requiere
+  validación de campo: el veredicto no se presenta como «Apto» sin ella.
+- Indicadores o temperaturas NaN/Infinity, salidas físicamente inconsistentes
+  o un número de años verificados distinto del solicitado bloquean «Apto».
 - Un equipo sin ficha comercial o una pareja panel–batería de estudio no recibe
   un verde comercial.
 - Un solo año no es suficiente para una conclusión de disponibilidad climática.
@@ -88,7 +109,8 @@ Ejecutar desde la raíz del repositorio: node tools/prueba_mapa_viabilidad.mjs.
 
 Esta prueba bloqueante verifica el enlace, la reutilización del simulador, el
 rechazo de años horarios incompletos y la clasificación conservadora de
-falta de datos, agotamiento, falta de reserva y límites térmicos.
+falta de datos, agotamiento, falta de reserva, límites térmicos,
+no-finitos y riesgos de viento/nieve sin caracterización completa.
 
 **No se fusiona a main sin revisar y probar manualmente la interfaz y una
 ejecución meteorológica real en navegador.**
