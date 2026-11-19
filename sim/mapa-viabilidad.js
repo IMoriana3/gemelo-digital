@@ -1,0 +1,381 @@
+/* Factiun · mapa mundial de viabilidad del control TCU.
+   Solo presentación/selección: utiliza simulate(), simulaSeguido(), summarize(),
+   controlesPara() y los lectores meteo YA existentes en bateria.html.
+   No hay otro balance energético ni se publican zonas extrapoladas. */
+(function(){
+'use strict';
+var MV_VERSION='viabilidad-2026-11-19-v1';
+var MV_CUSTOM='bateria_mapa_puntos_v1';
+var MV_RESULTS='bateria_mapa_conclusiones_v1';
+var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
+var mv={sites:[],selected:null,map:null,markers:{},busy:false,records:{},custom:[],config:null};
+function e(id){return document.getElementById(id);}
+function num(x){return Number.isFinite(Number(x))?Number(x):NaN;}
+function coordOK(lat,lon){return Number.isFinite(lat)&&Number.isFinite(lon)&&lat>=-89&&lat<=89&&lon>=-180&&lon<=180;}
+function dec(x,d){return Number(x||0).toLocaleString('es-ES',{maximumFractionDigits:d==null?1:d,minimumFractionDigits:0});}
+function saved(key,fallback){try{var data=JSON.parse(localStorage.getItem(key));return data&&typeof data==='object'?data:fallback;}catch(_){return fallback;}}
+function persist(){try{localStorage.setItem(MV_CUSTOM,JSON.stringify(mv.custom));localStorage.setItem(MV_RESULTS,JSON.stringify(mv.records));}catch(_){}}
+function note(s){e('mv-progress').textContent=s;}
+function setText(id,s){e(id).textContent=s;}
+function statusWord(s){return s==='apto'?'APTO':s==='condicionado'?'CONDICIONADO':s==='no_apto'?'NO APTO':'SIN EVALUACIÓN COMPLETA';}
+function statusDot(s){var z=document.createElement('span');z.className='viab-dot viab-dot--'+(s||'pendiente');return z;}
+function siteOf(name,lat,lon,id,src){
+  return {id:id,n:String(name||'Emplazamiento').trim(),lat:Number(lat),lon:Number(lon),fuente:src||''};
+}
+function saveCustom(site){
+  var at=mv.custom.findIndex(function(x){return x.id===site.id;});
+  if(at>=0)mv.custom[at]=site;else mv.custom.push(site);
+  if(!mv.sites.some(function(x){return x.id===site.id;}))mv.sites.push(site);
+  persist();pin(site);listSites();
+}
+function getSite(id){return mv.sites.find(function(x){return x.id===id;})||null;}
+function isCustom(x){return x&&x.id.indexOf('custom:')===0;}
+function cleanName(x){return String(x||'').trim();}
+function signature(){
+  var p=activeProfile(), page=selectedPageProfile(), isSelected=page&&p&&page.id===p.id&&num(e('panel').value)===num(p.chgW);
+  var tmin=isSelected?num(e('tmin').value):p&&p.tCarga?num(p.tCarga[0]):num(e('tmin').value);
+  var physics=typeof tocadosFis==='function'?tocadosFis():{};
+  var base={
+    motorModel:['factiun','curva'].includes(e('motor').value)?e('motor').value:num(e('motor').value),
+    soh:e('aged').checked?SOH_FIN_VIDA:1,
+    vientoStow:e('vientoStow').value,
+    socTgt:num(e('socTgt').value),socCrit:num(e('socCrit').value),fcDays:num(e('fc').value),
+    poaMin:num(e('poaMin').value),tMin:tmin,
+    mountTilt:e('mount').value==='fix'?num(e('tilt').value):null,
+    strategy:true,winter:e('winter').checked
+  };
+  return {key:JSON.stringify({v:MV_VERSION,p:p&&p.id,w:p&&p.chgW,period:e('mv-period').value,base:base,physics:physics}),base:base,profile:p};
+}
+function selectedPageProfile(){
+  return PROFILES[e('prof').value]||null;
+}
+function activeProfile(){
+  var id=e('mv-profile').value;
+  var p=PROFILES.find(function(x){return x.id===id;});
+  if(!p)return null;
+  return p.string?p:conPanel(p,num(e('mv-panel').value)||p.chgW);
+}
+function effectiveResult(site){
+  if(!site)return null;
+  var item=mv.records[site.id];
+  if(!item)return null;
+  return item.sig===signature().key?item:null;
+}
+function controlsFor(p){
+  return controlesPara(p).filter(function(c){return !c.prof;});
+}
+function syncControls(){
+  var profile=activeProfile();
+  var ctrls=profile?controlsFor(profile):[],sel=e('mv-control'),old=sel.value;
+  sel.innerHTML='';
+  ctrls.forEach(function(c){var o=document.createElement('option');o.value=c.k;o.textContent=c.n;sel.appendChild(o);});
+  sel.value=ctrls.some(function(c){return c.k===old;})?old:ctrls.some(function(c){return c.k==='std';})?'std':ctrls[0]?ctrls[0].k:'';
+}
+function syncPanel(){
+  var p=PROFILES.find(function(x){return x.id===e('mv-profile').value;});
+  var fld=e('mv-panel-field'),sel=e('mv-panel'),old=num(sel.value);
+  if(!p||p.string){fld.hidden=true;sel.innerHTML='';syncControls();return;}
+  fld.hidden=false;sel.innerHTML='';
+  var opts=Array.from(new Set(PANELES.concat([p.chgW]))).sort(function(a,b){return a-b;});
+  opts.forEach(function(w){var o=document.createElement('option');o.value=w;
+    o.textContent=w+' W'+(enCatalogo(conPanel(p,w))?' · catálogo':' · estudio');
+    sel.appendChild(o);
+  });
+  sel.value=opts.includes(old)?old:p.chgW;
+  syncControls();
+}
+function mapStatus(site){
+  var record=effectiveResult(site);
+  if(!record)return 'pendiente';
+  var ctl=e('mv-control').value;
+  var r=record.results.find(function(x){return x.k===ctl;});
+  return r?r.status:'pendiente';
+}
+function pin(site){
+  if(!mv.map||!coordOK(site.lat,site.lon))return;
+  var s=mapStatus(site),existing=mv.markers[site.id];
+  var style={radius:site.id===(mv.selected&&mv.selected.id)?9:6,weight:site.id===(mv.selected&&mv.selected.id)?3:1.5,
+             color:site.id===(mv.selected&&mv.selected.id)?'#f6f0db':'#0f1824',fillColor:MV_COLORS[s],fillOpacity:.95};
+  if(existing){existing.setLatLng([site.lat,site.lon]);existing.setStyle(style);return;}
+  var mark=L.circleMarker([site.lat,site.lon],style).addTo(mv.map);
+  mark.on('click',function(){selectSite(site,true);});
+  mv.markers[site.id]=mark;
+}
+function drawPins(){mv.sites.forEach(pin);}
+function selectSite(site,fly){
+  if(!site)return;
+  mv.selected=site;
+  setText('mv-selected',site.n);
+  e('mv-name').value=site.n;
+  e('mv-lat').value=site.lat;
+  e('mv-lon').value=site.lon;
+  if(mv.map&&fly)mv.map.setView([site.lat,site.lon],Math.max(mv.map.getZoom(),5),{animate:true});
+  drawPins();listSites();renderResult();
+}
+function listSites(){
+  var search=cleanName(e('mv-search').value).toLocaleLowerCase('es-ES');
+  var visible=mv.sites.filter(function(x){return x.n.toLocaleLowerCase('es-ES').includes(search)||
+                         (''+x.lat+','+x.lon).includes(search);});
+  var host=e('mv-sites');host.replaceChildren();
+  setText('mv-count',mv.sites.length+' ubicaciones con coordenadas');
+  if(!visible.length){var d=document.createElement('div');d.className='viab-blank';d.textContent='Ninguna ubicación del catálogo coincide. Busca en OpenStreetMap o introduce coordenadas.';host.appendChild(d);}
+  visible.slice(0,120).forEach(function(site){
+    var b=document.createElement('button');b.type='button';b.className='viab-site';
+    b.setAttribute('aria-current',String(!!mv.selected&&mv.selected.id===site.id));
+    b.appendChild(statusDot(mapStatus(site)));
+    var span=document.createElement('span');span.style.flex='1';span.textContent=site.n;b.appendChild(span);
+    var cr=document.createElement('small');cr.textContent=dec(site.lat,3)+', '+dec(site.lon,3);b.appendChild(cr);
+    b.onclick=function(){selectSite(site,true);};host.appendChild(b);
+  });
+}
+function resultLine(host,name,value){
+  var p=document.createElement('div');p.className='viab-stat';
+  var b=document.createElement('strong');b.textContent=name+': ';p.appendChild(b);
+  p.appendChild(document.createTextNode(value));host.appendChild(p);
+}
+function renderResult(){
+  var site=mv.selected,holder=e('mv-result');
+  holder.replaceChildren();
+  if(!site){var h=document.createElement('div');h.className='viab-blank';h.textContent='Selecciona una ubicación en el mapa o busca por nombre.';holder.appendChild(h);return;}
+  var record=effectiveResult(site),selectedCtrl=e('mv-control').value,choice=record&&record.results.find(function(x){return x.k===selectedCtrl;});
+  var intro=document.createElement('div');intro.className='viab-brief';intro.dataset.status=choice?choice.status:'pendiente';
+  var ttl=document.createElement('span');ttl.className='viab-status';ttl.textContent=choice?statusWord(choice.status):'SIN EVALUAR';intro.appendChild(ttl);
+  var desc=document.createElement('div');desc.textContent=choice?choice.conclusion:
+    'Este punto todavía no tiene conclusiones para el equipo, periodo y ajustes seleccionados. No se ha inferido su viabilidad por proximidad a otras plantas.';
+  intro.appendChild(desc);holder.appendChild(intro);
+  if(!record)return;
+  var met=document.createElement('p');met.className='viab-meta';
+  met.textContent=record.source+' · '+record.yearsOK+'/'+record.yearsAsked+' años completos · '+record.date;
+  holder.appendChild(met);
+  if(record.missingYears.length){var err=document.createElement('p');err.className='viab-note';err.textContent='Años no disponibles: '+record.missingYears.join(', ')+'. La conclusión no se considera certificada.';holder.appendChild(err);}
+  record.results.forEach(function(item){
+    var div=document.createElement('section');div.className='viab-outcome';
+    var h=document.createElement('div');h.appendChild(statusDot(item.status));var b=document.createElement('b');b.textContent=item.name+' · '+statusWord(item.status);h.appendChild(b);div.appendChild(h);
+    resultLine(div,'Conclusión',item.conclusion);
+    resultLine(div,'Peor invierno',item.worst||'No determinado');
+    resultLine(div,'Reserva comprometida',item.periodosRes+' episodios, '+dec(item.diasRes,0)+' días');
+    resultLine(div,'Indisponibilidad',dec(item.inactivePct,3)+' %; batería agotada '+dec(item.hZero,1)+' h');
+    resultLine(div,'Protección ambiental','Viento '+dec(item.hStow,0)+' h; nieve '+dec(item.hNieve,0)+' h');
+    if(item.limitations.length)resultLine(div,'Limitaciones',item.limitations.join('; '));
+    holder.appendChild(div);
+  });
+}
+function updateView(){
+  if(!mv.map)return;
+  drawPins();listSites();renderResult();
+}
+function addLocation(name,lat,lon){
+  if(!coordOK(lat,lon))throw new Error('Introduce coordenadas válidas: latitud −89…89, longitud −180…180.');
+  var near=mv.sites.find(function(x){return Math.abs(x.lat-lat)<.000001&&Math.abs(x.lon-lon)<.000001;});
+  if(near){selectSite(near,true);return near;}
+  var id='custom:'+lat.toFixed(6)+':'+lon.toFixed(6);
+  var site=siteOf(name||'Coordenadas '+lat.toFixed(4)+', '+lon.toFixed(4),lat,lon,id,'Coordenadas indicadas por el usuario');
+  saveCustom(site);selectSite(site,true);return site;
+}
+function addFromForm(){
+  try{
+    var lat=num(String(e('mv-lat').value).replace(',','.')),lon=num(String(e('mv-lon').value).replace(',','.'));
+    var item=addLocation(cleanName(e('mv-name').value),lat,lon);
+    note('Seleccionado: '+item.n+'. Pulsa «Calcular conclusiones» para evaluar el punto.');
+  }catch(err){note(err.message);}
+}
+function searchOnMap(){
+  var q=cleanName(e('mv-search').value);if(!q){note('Escribe un nombre para buscar.');return;}
+  var host=e('mv-search-remote');host.replaceChildren();note('Buscando '+q+'…');
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=5&q='+encodeURIComponent(q),{
+      headers:{'Accept':'application/json'}
+    })
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(items){
+      note(items.length?'Selecciona el lugar correcto. Sus coordenadas se conservarán en tu navegador.':'No se han encontrado lugares. Usa coordenadas.');
+      items.forEach(function(item){
+        var lat=num(item.lat),lon=num(item.lon);if(!coordOK(lat,lon))return;
+        var b=document.createElement('button');b.type='button';b.className='viab-site';
+        b.textContent=item.display_name||q;
+        b.onclick=function(){addLocation(item.display_name||q,lat,lon);host.replaceChildren();};
+        host.appendChild(b);
+      });
+    }).catch(function(err){note('Búsqueda externa no disponible: '+err.message+'. Puedes introducir las coordenadas.');});
+}
+async function meteoForSite(site,period){
+  /* Siempre meteo local para las coordenadas del punto. Un WeatherContract activo
+     puede ser de OTRO emplazamiento: no puede dar un falso mapa verde. */
+  var finalYear=new Date().getFullYear()-1;
+  var years=period==='30'?Array.from({length:30},function(_,i){return finalYear-29+i;}):[Number(period)];
+  var list=[];
+  for(var i=0;i<years.length;i+=4){
+    note('Descargando meteorología del punto · '+Math.min(i+4,years.length)+'/'+years.length+' años…');
+    var batch=years.slice(i,i+4);
+    var got=await Promise.all(batch.map(function(y){return fetchYearDeclarado(site,y);}));
+    list.push.apply(list,got);
+  }
+  var missing=[],ok=0;
+  list.forEach(function(m,i){
+    if(!m||m.error||!Array.isArray(m)||m.length<8000){missing.push(years[i]);}
+    else ok++;
+  });
+  var tramos=tramosContinuos(list,years);
+  if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
+  return {years:years,tramos:tramos,missing:missing,ok:ok,source:'Open-Meteo histórico por coordenadas'};
+}
+function outcome(S,c,met,opts,worst){
+  var issues=[];
+  if(met.missing.length)issues.push('años sin meteorología');
+  if(S.hSinRacha>0&&opts.vientoStow!=='media')issues.push('faltan ráfagas en parte del periodo');
+  if(opts.vientoStow==='media')issues.push('abanderamiento calculado con viento medio, no racha');
+  if(S.hSinNieve>0)issues.push('faltan datos de profundidad de nieve');
+  if(met.years.length===1)issues.push('solo un año histórico');
+  var status='pendiente',conclusion='';
+  if(S.hZero>0){
+    status='no_apto';
+    conclusion='El equipo se queda sin batería durante '+dec(S.hZero,1)+' h; no se puede garantizar la maniobra de seguridad.';
+  }else if(issues.length){
+    status='pendiente';
+    conclusion='No se puede confirmar la viabilidad con los datos disponibles.';
+    if(S.periodosRes>0||S.inactivePct>0)conclusion+=' Hay episodios con reserva comprometida o seguimiento detenido.';
+  }else if(S.periodosRes>0||S.inactivePct>0){
+    status='condicionado';
+    conclusion='No se agota la batería, pero se compromete la reserva o el seguimiento durante el periodo evaluado.';
+  }else{
+    status='apto';
+    conclusion='Mantiene la reserva y el seguimiento en todos los años y eventos meteorológicos evaluados.';
+  }
+  return {k:c.k,name:c.n,status:status,conclusion:conclusion,worst:worst,
+    periodosRes:S.periodosRes,diasRes:S.diasRes,inactivePct:S.inactivePct,
+    hZero:S.hZero,hStow:S.hStow,hNieve:S.hNieve,limitations:issues};
+}
+function pause(){return new Promise(function(resolve){setTimeout(resolve,0);});}
+async function evaluateSite(){
+  if(mv.busy)return;
+  var site=mv.selected;
+  if(!site){note('Selecciona un emplazamiento.');return;}
+  var cfg=signature(),profile=cfg.profile;
+  if(!profile){note('Selecciona una TCU.');return;}
+  var period=e('mv-period').value, controls=controlsFor(profile);
+  if(!controls.length){note('Este perfil no tiene estrategia disponible.');return;}
+  var btn=e('mv-evaluate');btn.disabled=true;mv.busy=true;
+  try{
+    var met=await meteoForSite(site,period),rows,results=[];
+    for(var j=0;j<controls.length;j++){
+      var control=controls[j],derived=opcionesPara(control,profile,cfg.base);
+      note('Evaluando '+site.n+' · '+control.n+' ('+(j+1)+'/'+controls.length+')…');
+      await pause();
+      if(met.years.length>1)rows=simulaSeguido(met.tramos,derived.p,site,derived.o);
+      else rows=simulate(met.tramos[0].meteo,derived.p,site,socEstacionario(derived.o),derived.o);
+      if(!rows||!rows.length)throw new Error('El simulador no devolvió datos para '+control.n);
+      var s=summarize(rows),win=null;
+      if(met.years.length>1){var inv=resumenInviernos(rows);win=inv.length?peorInvierno(inv).label:null;}
+      else win=String(met.years[0]);
+      results.push(outcome(s,control,met,derived.o,win));rows=null;
+    }
+    var record={sig:cfg.key,source:met.source,yearsOK:met.ok,yearsAsked:met.years.length,
+      missingYears:met.missing,results:results,date:new Date().toLocaleString('es-ES')};
+    mv.records[site.id]=record;persist();updateView();
+    note('Evaluación terminada para '+site.n+'. Los resultados proceden del simulador de batería.');
+  }catch(err){
+    note('No se ha asignado viabilidad: '+String(err&&err.message||err));
+  }finally{mv.busy=false;btn.disabled=false;}
+}
+function initialize(){
+  var button=e('mv-open');if(!button||typeof L==='undefined'||typeof LOCS==='undefined')return;
+  var all=(Array.isArray(LOCS)?LOCS:[]);
+  all.forEach(function(p,i){if(coordOK(num(p.lat),num(p.lon)))
+    mv.sites.push(siteOf(p.n,p.lat,p.lon,'portfolio:'+i,p.fuente||''));});
+  mv.custom=saved(MV_CUSTOM,[]);
+  if(!Array.isArray(mv.custom))mv.custom=[];
+  mv.custom=mv.custom.filter(function(s){return s&&isCustom(s)&&coordOK(num(s.lat),num(s.lon));});
+  mv.custom.forEach(function(s){if(!mv.sites.some(function(x){return x.id===s.id;}))mv.sites.push(s);});
+  mv.records=saved(MV_RESULTS,{});if(Array.isArray(mv.records))mv.records={};
+  var root=document.createElement('section');root.id='mv-root';root.className='viab-overlay';
+  root.hidden=true;root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');
+  root.setAttribute('aria-labelledby','mv-title');
+  root.innerHTML=[
+    '<div class="viab-frame">',
+      '<header class="viab-head"><h2 id="mv-title">Mapa mundial · viabilidad TCU</h2>',
+      '<span class="viab-sub">Conclusiones por emplazamiento, sin fórmulas ni interpolaciones</span>',
+      '<span class="viab-spacer"></span><button class="viab-close" id="mv-close" type="button">Cerrar</button></header>',
+      '<div class="viab-grid">',
+       '<aside class="viab-panel viab-panel--left">',
+        '<div class="viab-field"><label for="mv-search">Seleccionar por nombre</label><input id="mv-search" type="search" placeholder="Planta, ciudad o número de proyecto">',
+        '<button class="viab-act viab-secondary" id="mv-geosearch" type="button">Buscar lugar fuera del catálogo</button>',
+        '<div class="viab-search-results viab-list" id="mv-search-remote"></div></div>',
+        '<div class="viab-field"><label>Seleccionar por coordenadas (o pulsar el mapa)</label>',
+          '<div class="viab-pair"><input id="mv-lat" type="text" inputmode="decimal" aria-label="Latitud" placeholder="Latitud">',
+          '<input id="mv-lon" type="text" inputmode="decimal" aria-label="Longitud" placeholder="Longitud"></div>',
+          '<input style="margin-top:6px" id="mv-name" type="text" placeholder="Nombre del emplazamiento" aria-label="Nombre">',
+          '<button class="viab-act viab-secondary" id="mv-add" type="button">Añadir / seleccionar ubicación</button></div>',
+        '<h3 class="viab-section">Escenario de la TCU</h3>',
+        '<div class="viab-field"><label for="mv-profile">Equipo</label><select id="mv-profile"></select></div>',
+        '<div class="viab-field" id="mv-panel-field"><label for="mv-panel">Panel</label><select id="mv-panel"></select></div>',
+        '<div class="viab-field"><label for="mv-control">Control mostrado en el mapa</label><select id="mv-control"></select></div>',
+        '<div class="viab-field"><label for="mv-period">Histórico meteorológico</label><select id="mv-period"></select></div>',
+        '<button class="viab-act" id="mv-evaluate" type="button">Calcular conclusiones del punto</button>',
+        '<p class="viab-progress" id="mv-progress" role="status">Selecciona un punto y evalúalo.</p>',
+        '<h3 class="viab-section">Emplazamientos</h3><p class="viab-meta" id="mv-count"></p>',
+        '<div class="viab-list" id="mv-sites"></div>',
+       '</aside>',
+       '<div class="viab-map-shell"><div id="viab-map" aria-label="Mapa mundial de emplazamientos"></div>',
+       '<div class="viab-map-hint">Pulsa un marcador para abrir la ficha; pulsa el mapa para elegir nuevas coordenadas</div></div>',
+       '<aside class="viab-panel viab-panel--right">',
+        '<div class="viab-legend"><span><i class="viab-dot viab-dot--apto"></i>Apto</span>',
+         '<span><i class="viab-dot viab-dot--condicionado"></i>Condicionado</span>',
+         '<span><i class="viab-dot viab-dot--no_apto"></i>No apto</span>',
+         '<span><i class="viab-dot viab-dot--pendiente"></i>Sin evaluación completa</span></div>',
+        '<h3 id="mv-selected" class="viab-picked">Selecciona un emplazamiento</h3>',
+        '<div id="mv-result"></div>',
+       '</aside>',
+      '</div>',
+      '<footer class="viab-footer">Origen del cálculo: simulador de batería de Factiun · meteo Open-Meteo histórica del punto exacto · sin veredicto automático por proximidad. Un resultado energético no sustituye las comprobaciones estructurales.</footer>',
+    '</div>'
+  ].join('');
+  document.body.appendChild(root);
+  PROFILES.forEach(function(p){if(!p.variante){
+    var o=document.createElement('option');o.value=p.id;o.textContent=(p.comercial||p.n)+(p.sinFicha?' · sin ficha comercial':'');e('mv-profile').appendChild(o);
+  }});
+  var active=selectedPageProfile();
+  if(active)e('mv-profile').value=active.id;
+  syncPanel();
+  e('mv-panel').value=e('panel').value;
+  syncControls();
+  var year=new Date().getFullYear()-1,period=e('mv-period');
+  period.add(new Option('30 años seguidos · estudio de viabilidad','30'));
+  for(var y=year;y>=year-10;y--)period.add(new Option(y+' · comprobación preliminar (1 año)',String(y)));
+  period.value='30';
+  mv.map=L.map('viab-map',{worldCopyJump:true,zoomControl:true}).setView([20,0],2);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {maxZoom:18,attribution:'© OpenStreetMap contributors',className:'osm-oscuro'}).addTo(mv.map);
+  mv.map.on('click',function(ev){
+    e('mv-lat').value=ev.latlng.lat.toFixed(6);
+    e('mv-lon').value=ev.latlng.lng.toFixed(6);
+    e('mv-name').value='Coordenadas '+ev.latlng.lat.toFixed(3)+', '+ev.latlng.lng.toFixed(3);
+    note('Coordenadas seleccionadas. Pulsa «Añadir / seleccionar ubicación» para guardar el punto.');
+  });
+  e('mv-close').onclick=function(){root.hidden=true;document.body.style.overflow='';button.focus();};
+  button.onclick=function(){
+    root.hidden=false;document.body.style.overflow='hidden';
+    setTimeout(function(){mv.map.invalidateSize();},50);
+    if(!mv.selected){var loc=typeof getLoc==='function'?getLoc():null;
+      var same=loc&&mv.sites.find(function(s){return Math.abs(s.lat-loc.lat)<.000001&&Math.abs(s.lon-loc.lon)<.000001;});
+      selectSite(same||mv.sites[0],false);
+    }else updateView();
+  };
+  root.addEventListener('keydown',function(ev){if(ev.key==='Escape'&&!mv.busy){root.hidden=true;document.body.style.overflow='';button.focus();}});
+  e('mv-add').onclick=addFromForm;
+  e('mv-search').oninput=listSites;
+  e('mv-search').onkeydown=function(ev){if(ev.key==='Enter'){
+    ev.preventDefault();
+    var query=cleanName(e('mv-search').value).toLocaleLowerCase('es-ES');
+    var site=mv.sites.find(function(s){return s.n.toLocaleLowerCase('es-ES').includes(query);});
+    if(site)selectSite(site,true);else searchOnMap();
+  }};
+  e('mv-geosearch').onclick=searchOnMap;
+  e('mv-profile').onchange=function(){syncPanel();updateView();};
+  e('mv-panel').onchange=function(){syncControls();updateView();};
+  e('mv-control').onchange=updateView;
+  e('mv-period').onchange=updateView;
+  e('mv-evaluate').onclick=evaluateSite;
+  drawPins();listSites();renderResult();
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialize,{once:true});
+else initialize();
+})();
