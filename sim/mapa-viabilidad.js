@@ -66,9 +66,11 @@ function activeProfile(){
 }
 function effectiveResult(site){
   if(!site)return null;
-  var item=mv.records[site.id];
-  if(!item)return null;
-  return item.sig===signature().key?item:null;
+  var entries=mv.records[site.id];
+  if(!entries)return null;
+  var all=Array.isArray(entries)?entries:[entries]; /* compatibilidad con 1ª versión */
+  var sig=signature().key;
+  return all.find(function(item){return item&&item.sig===sig;})||null;
 }
 function controlsFor(p){
   return controlesPara(p).filter(function(c){return !c.prof;});
@@ -322,7 +324,13 @@ async function evaluateSite(){
     }
     var record={sig:cfg.key,source:met.source,yearsOK:met.ok,yearsAsked:met.years.length,
       missingYears:met.missing,results:results,date:new Date().toLocaleString('es-ES')};
-    mv.records[site.id]=record;persist();updateView();
+    var entries=mv.records[site.id],all=Array.isArray(entries)?entries:(entries?[entries]:[]);
+    var previous=all.findIndex(function(item){return item.sig===record.sig;});
+    if(previous>=0)all.splice(previous,1);
+    all.push(record);
+    /* Varias TCUs por ubicación, pero solo resúmenes: nunca las 262.800 filas */
+    mv.records[site.id]=all.slice(-32);
+    persist();updateView();
     note('Evaluación terminada para '+site.n+'. Los resultados proceden del simulador de batería.');
   }catch(err){
     note('No se ha asignado viabilidad: '+String(err&&err.message||err));
