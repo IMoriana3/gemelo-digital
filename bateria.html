@@ -663,18 +663,30 @@ function parseOM(j){
      cuyas entradas meteorológicas esenciales fueron sustituidas por defaults. */
   var qa={sin_irradiancia:0,sin_temperatura:0,sin_viento:0};
   for(var i=0;i<H.time.length;i++){
-    if(!H.shortwave_radiation||H.shortwave_radiation[i]==null||!H.diffuse_radiation||H.diffuse_radiation[i]==null)qa.sin_irradiancia++;
-    if(!H.temperature_2m||H.temperature_2m[i]==null)qa.sin_temperatura++;
-    if(!H.windspeed_10m||H.windspeed_10m[i]==null)qa.sin_viento++;
+    /* NaN y negativos también son FALTANTES: antes se convertían en cero,
+       que equivale a inventar cielo oscuro, ausencia de viento o de nieve. */
+    var ghi=H.shortwave_radiation&&H.shortwave_radiation[i],
+        dhi=H.diffuse_radiation&&H.diffuse_radiation[i],
+        temp=H.temperature_2m&&H.temperature_2m[i],
+        wind=H.windspeed_10m&&H.windspeed_10m[i],
+        gust=H.wind_gusts_10m&&H.wind_gusts_10m[i],
+        snow=H.snow_depth&&H.snow_depth[i];
+    var badG=!Number.isFinite(ghi)||ghi<0,
+        badD=!Number.isFinite(dhi)||dhi<0,
+        badT=!Number.isFinite(temp),
+        badW=!Number.isFinite(wind)||wind<0;
+    if(badG||badD)qa.sin_irradiancia++;
+    if(badT)qa.sin_temperatura++;
+    if(badW)qa.sin_viento++;
     out.push({t:new Date(H.time[i]+"Z"),
-      ghi:Math.max(0,H.shortwave_radiation[i]||0),
-      dhi:Math.max(0,(H.diffuse_radiation&&H.diffuse_radiation[i])||0),
-      temp:(H.temperature_2m[i]==null?15:H.temperature_2m[i]),
-      wind:(H.windspeed_10m&&H.windspeed_10m[i])||0,
-      /* null, NO 0, cuando la fuente no los trae: un 0 abandera nunca y nieva nunca
-         sin que nada lo diga. El simulador cuenta las horas sin ellos y el informe lo declara. */
-      gust:(H.wind_gusts_10m&&H.wind_gusts_10m[i]!=null)?Math.max(0,H.wind_gusts_10m[i]):null,
-      snowDepth:(H.snow_depth&&H.snow_depth[i]!=null)?Math.max(0,H.snow_depth[i]):null});
+      ghi:badG?0:ghi,
+      dhi:badD?0:dhi,
+      temp:badT?15:temp,
+      wind:badW?0:wind,
+      /* Datos inválidos de racha/nieve se dejan en null; la serie los
+         contabiliza y bloquea la conclusión geográfica «apto». */
+      gust:Number.isFinite(gust)&&gust>=0?gust:null,
+      snowDepth:Number.isFinite(snow)&&snow>=0?snow:null});
   }
   Object.defineProperty(out,'mapaQA',{value:qa,enumerable:false});  /* metadatos, no una fila ni serie nueva */
   return out;
