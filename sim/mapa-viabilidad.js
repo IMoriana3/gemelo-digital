@@ -268,7 +268,7 @@ async function meteoForSite(site,period){
   if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
   return {years:years,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo · ERA5-Land (reanálisis homogéneo; forzamiento ERA5 para viento e irradiación)'};
 }
-function outcome(S,c,met,opts,worst,profile,thermal,modelBad){
+function outcome(S,c,met,opts,worst,profile,thermal,modelBad,snowPresenceHours){
   var issues=[];
   /* Fail-closed: un NaN o Infinity daría APTO con comparaciones «> 0». */
   var metricas=['reservaWh','margenMin','periodosRes','diasRes','hBajoReserva',
@@ -300,6 +300,14 @@ function outcome(S,c,met,opts,worst,profile,thermal,modelBad){
     issues.push('temperaturas fuera de los límites de descarga declarados en la ficha');
   if(profile.tCarga&&Number.isFinite(profile.tCarga[1])&&thermal.max>profile.tCarga[1])
     issues.push('se alcanzan temperaturas fuera del límite superior de carga; revisar inhibiciones del modelo');
+  /* La nieve del reanálisis es manto en el SUELO. El simulador sí ejecuta
+     SP3, pero no valida cuánta nieve tapa el mini-panel ni el incremento de
+     par aerodinámico real. Estos casos son CONDICIONADOS, no falsos verdes. */
+  var physicalWarnings=[];
+  if(snowPresenceHours>0)physicalWarnings.push(
+    'nieve en suelo: falta validar la cobertura y recarga del panel auxiliar/string');
+  if(S.hStow>0)physicalWarnings.push(
+    'maniobras de viento: par aerodinámico del motor no caracterizado en campo');
   var status='pendiente',conclusion='';
   var datosCriticos=invalidSummary||invalidThermal||modelBad>0||
     (Number.isFinite(met.ok)&&met.ok!==met.years.length)||
@@ -316,16 +324,20 @@ function outcome(S,c,met,opts,worst,profile,thermal,modelBad){
     status='pendiente';
     conclusion='No se puede confirmar la viabilidad con los datos disponibles.';
     if(S.periodosRes>0||S.inactivePct>0)conclusion+=' Hay episodios con reserva comprometida o seguimiento detenido.';
-  }else if(S.periodosRes>0||S.inactivePct>0||c.k==='none'){
+  }else if(S.periodosRes>0||S.inactivePct>0||c.k==='none'||physicalWarnings.length){
     status='condicionado';
-    conclusion=c.k==='none'?'La simulación no agota la batería, pero esta referencia carece de protección por SOC. No se considera una estrategia de seguridad validada.':'No se agota la batería, pero se compromete la reserva o el seguimiento durante el periodo evaluado.';
+    conclusion=c.k==='none'
+      ?'La simulación no agota la batería, pero esta referencia carece de protección por SOC. No se considera una estrategia de seguridad validada.'
+      :S.periodosRes>0||S.inactivePct>0
+      ?'No se agota la batería, pero se compromete la reserva o el seguimiento durante el periodo evaluado.'
+      :'La disponibilidad energética simulada supera el histórico, pero hay efectos físicos de viento o nieve que requieren validación adicional.';
   }else{
     status='apto';
     conclusion='Mantiene la reserva y no registra indisponibilidad por batería durante el histórico evaluado. Las maniobras de viento y nieve se contabilizan por separado.';
   }
   return {k:c.k,name:c.n,status:status,conclusion:conclusion,worst:worst,
     periodosRes:S.periodosRes,diasRes:S.diasRes,inactivePct:S.inactivePct,
-    hZero:S.hZero,hStow:S.hStow,hNieve:S.hNieve,limitations:issues};
+    hZero:S.hZero,hStow:S.hStow,hNieve:S.hNieve,limitations:issues.concat(physicalWarnings)};
 }
 function pause(){return new Promise(function(resolve){setTimeout(resolve,0);});}
 async function evaluateSite(){
@@ -338,7 +350,13 @@ async function evaluateSite(){
   if(!controls.length){note('Este perfil no tiene estrategia disponible.');return;}
   var btn=e('mv-evaluate');btn.disabled=true;mv.busy=true;
   try{
-    var met=await meteoForSite(site,period),rows,results=[];
+    var met=await meteoForSite(site,period),rows,results=[],snowPresenceHours=0;
+    /* El riesgo sobre el panel existe incluso con menos de 3 cm: SP3 sólo
+       dispara a partir de ese umbral, pero una película de nieve puede tapar
+       el panel de alimentación. Se avisa sin inventar su transmisión óptica. */
+    met.tramos.forEach(function(tr){
+      tr.meteo.forEach(function(m){if(Number.isFinite(m.snowDepth)&&m.snowDepth>0)snowPresenceHours++;});
+    });
     for(var j=0;j<controls.length;j++){
       var control=controls[j],derived=opcionesPara(control,profile,cfg.base);
       note('Evaluando '+site.n+' · '+control.n+' ('+(j+1)+'/'+controls.length+')…');
@@ -362,7 +380,7 @@ async function evaluateSite(){
        }
       if(met.years.length>1){var inv=resumenInviernos(rows);win=inv.length?peorInvierno(inv).label:null;}
       else win=String(met.years[0]);
-      results.push(outcome(s,control,met,derived.o,win,derived.p,{min:tmin,max:tmax},modelBad));rows=null;
+      results.push(outcome(s,control,met,derived.o,win,derived.p,{min:tmin,max:tmax},modelBad,snowPresenceHours));rows=null;
     }
     var record={sig:cfg.key,source:met.source,yearsOK:met.ok,yearsAsked:met.years.length,
       missingYears:met.missing,results:results,date:new Date().toLocaleString('es-ES')};
