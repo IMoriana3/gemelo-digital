@@ -159,6 +159,10 @@ function renderResult(){
   holder.replaceChildren();
   if(!site){var h=document.createElement('div');h.className='viab-blank';h.textContent='Selecciona una ubicación en el mapa o busca por nombre.';holder.appendChild(h);return;}
   var record=effectiveResult(site),selectedCtrl=e('mv-control').value,choice=record&&record.results.find(function(x){return x.k===selectedCtrl;});
+  var coords=document.createElement('p');coords.className='viab-meta';
+  coords.textContent='Lat '+site.lat.toFixed(6)+' · Lon '+site.lon.toFixed(6)+
+    ' · Coordenadas: '+(site.fuente||'referencia del simulador, sin procedencia adicional');
+  holder.appendChild(coords);
   var intro=document.createElement('div');intro.className='viab-brief';intro.dataset.status=choice?choice.status:'pendiente';
   var ttl=document.createElement('span');ttl.className='viab-status';ttl.textContent=choice?statusWord(choice.status):'SIN EVALUAR';intro.appendChild(ttl);
   var desc=document.createElement('div');desc.textContent=choice?choice.conclusion:
