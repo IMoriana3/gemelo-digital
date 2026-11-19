@@ -14,6 +14,7 @@ assert.match(html,/<script src="sim\/mapa-viabilidad.js"><\/script>/);
 assert.match(css,/#viab-map/);
 assert.match(js,/fetchYearDeclarado\(weatherSite,y\)/);
 assert.match(js,/meteoModel:'era5_land'/);
+assert.match(js,/var keep=all\.filter\(function\(x\)\{return x&&x\.sig!==cfg\.key;\}\);/);
 assert.match(html,/if\(loc&&loc\.meteoModel==='era5_land'\)u\+='&models=era5_land'/);
 assert.match(js,/simulaSeguido\(met.tramos,derived.p,site,derived.o\)/);
 assert.match(js,/simulate\(met.tramos\[0\].meteo,derived.p,site,socEstacionario\(derived.o\),derived.o\)/);
