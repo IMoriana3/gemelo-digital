@@ -659,7 +659,13 @@ function cRateSafeLFP(t){
 /* ═══════════ Meteo — filas {t, ghi, dhi, temp, wind, poa?, phi?, el?, az?} ═══════════ */
 function parseOM(j){
   var H=j.hourly, out=[];
+  /* Metadatos de calidad: el mapa nunca puede llamar "apto" a una serie
+     cuyas entradas meteorológicas esenciales fueron sustituidas por defaults. */
+  var qa={sin_irradiancia:0,sin_temperatura:0,sin_viento:0};
   for(var i=0;i<H.time.length;i++){
+    if(!H.shortwave_radiation||H.shortwave_radiation[i]==null||!H.diffuse_radiation||H.diffuse_radiation[i]==null)qa.sin_irradiancia++;
+    if(!H.temperature_2m||H.temperature_2m[i]==null)qa.sin_temperatura++;
+    if(!H.windspeed_10m||H.windspeed_10m[i]==null)qa.sin_viento++;
     out.push({t:new Date(H.time[i]+"Z"),
       ghi:Math.max(0,H.shortwave_radiation[i]||0),
       dhi:Math.max(0,(H.diffuse_radiation&&H.diffuse_radiation[i])||0),
@@ -670,6 +676,7 @@ function parseOM(j){
       gust:(H.wind_gusts_10m&&H.wind_gusts_10m[i]!=null)?Math.max(0,H.wind_gusts_10m[i]):null,
       snowDepth:(H.snow_depth&&H.snow_depth[i]!=null)?Math.max(0,H.snow_depth[i]):null});
   }
+  out.mapaQA=qa;  /* solo trazabilidad, sin alterar los datos ni el balance */
   return out;
 }
 var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m,wind_gusts_10m,snow_depth&windspeed_unit=ms";
