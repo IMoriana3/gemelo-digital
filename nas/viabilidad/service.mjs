@@ -114,8 +114,10 @@ async function compute(job){
     args:['--disable-dev-shm-usage','--js-flags=--max-old-space-size=2048']});
   try{
     const context=await browser.newContext({viewport:{width:1200,height:800}});
+    const weatherEvidence=[];
     await context.route(/^https:\/\/archive-api\.open-meteo\.com\/v1\/archive\?/,async route=>{
       try{const txt=await historicLicensed(route.request().url());
+        weatherEvidence.push({request_hash:hash(route.request().url()),payload_hash:hash(txt)});
         await route.fulfill({status:200,contentType:'application/json',
           headers:{'access-control-allow-origin':'*'},body:txt});
       }catch(e){await route.fulfill({status:503,contentType:'application/json',
@@ -129,7 +131,13 @@ async function compute(job){
       {waitUntil:'domcontentloaded',timeout:60000});
     await page.waitForFunction(()=>!!window.FACTIUN_MAPA_NAS,{timeout:30000});
     if(errors.length)throw Error('Error inicial del simulador: '+errors[0]);
-    return await page.evaluate(async j=>window.FACTIUN_MAPA_NAS.run(j),job);
+    const record=await page.evaluate(async j=>window.FACTIUN_MAPA_NAS.run(j),job);
+    weatherEvidence.sort((a,b)=>a.request_hash.localeCompare(b.request_hash));
+    record.meteo_auditoria={fuente:'Open-Meteo histórica, API comercial',
+      ficheros:weatherEvidence.length,
+      sha256:hash(JSON.stringify(weatherEvidence)),
+      detalle:'Hash compuesto de los datos horarios descargados, sin guardar la clave API'};
+    return record;
   }finally{await browser.close();}
 }
 let running=false,snapshotCache=null;
