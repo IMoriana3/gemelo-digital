@@ -1,0 +1,56 @@
+/* Mapa mundial de viabilidad · capa de visualización del simulador de batería.
+   No contiene fórmulas ni un segundo cálculo energético. */
+.viab-nav{border:1px solid var(--line2);background:var(--card2);color:var(--tx);font:600 12px "Barlow",sans-serif;border-radius:8px;padding:7px 11px;cursor:pointer}
+.viab-nav:hover{border-color:var(--warn)}
+.viab-overlay[hidden]{display:none!important}
+.viab-overlay{position:fixed;inset:0;z-index:2500;background:rgba(5,11,19,.95);display:flex;align-items:center;justify-content:center;padding:12px}
+.viab-frame{display:flex;flex-direction:column;max-width:1660px;width:100%;height:min(94vh,1050px);background:var(--bg,#0e1826);color:var(--tx,#e7edf5);border:1px solid var(--line2,#293c53);border-radius:15px;overflow:hidden;font-family:"Barlow",sans-serif}
+.viab-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 18px;border-bottom:1px solid var(--line2);background:var(--card,#132032)}
+.viab-head h2{margin:0;font:600 20px "Barlow Condensed","Barlow",sans-serif}
+.viab-head .viab-sub{font-size:12px;color:var(--tx3,#a4b3c5)}
+.viab-head .viab-spacer{flex:1}
+.viab-close{background:transparent;border:1px solid var(--line2);border-radius:8px;color:var(--tx);padding:7px 13px;font:inherit;cursor:pointer}
+.viab-grid{display:grid;grid-template-columns:305px minmax(340px,1fr) 310px;min-height:0;flex:1}
+.viab-panel{padding:15px;overflow:auto;background:var(--card,#162335)}
+.viab-panel--right{border-left:1px solid var(--line2)}
+.viab-panel--left{border-right:1px solid var(--line2)}
+.viab-field{margin-bottom:11px}
+.viab-field label{display:block;font-size:12px;color:var(--tx3);margin-bottom:5px}
+.viab-field input,.viab-field select{box-sizing:border-box;width:100%;min-height:34px;padding:6px 9px;background:var(--card2,#1b2b40);color:var(--tx);border:1px solid var(--line2);border-radius:7px;font:400 13px "Barlow",sans-serif}
+.viab-field input:focus,.viab-field select:focus{outline:2px solid rgba(246,176,38,.4);outline-offset:0}
+.viab-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.viab-act{width:100%;background:#c68e2f;border:1px solid #e3a943;color:#111a25;font:600 13px "Barlow",sans-serif;border-radius:8px;padding:9px 10px;cursor:pointer}
+.viab-act:disabled{opacity:.5;cursor:progress}
+.viab-secondary{background:var(--card2);border:1px solid var(--line2);color:var(--tx);margin-top:6px}
+.viab-section{font-weight:600;font-size:13px;letter-spacing:.02em;margin:16px 0 9px;padding-top:12px;border-top:1px solid var(--line2)}
+.viab-note,.viab-meta{font-size:12px;line-height:1.45;color:var(--tx3);margin:7px 0}
+.viab-list{display:flex;flex-direction:column;gap:5px}
+.viab-site{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--line2);border-radius:8px;background:var(--card2);color:var(--tx);padding:7px 8px;text-align:left;font:400 12px "Barlow",sans-serif;cursor:pointer}
+.viab-site[aria-current="true"]{border-color:#d59a33}
+.viab-site small{color:var(--tx3);font-size:10px;white-space:nowrap}
+.viab-site:disabled{opacity:.45;cursor:default}
+.viab-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#8392a2;flex:none;vertical-align:middle;margin-right:6px}
+.viab-dot--apto{background:#36d399}.viab-dot--condicionado{background:#e8b451}
+.viab-dot--no_apto{background:#e46569}.viab-dot--pendiente{background:#8392a2}
+.viab-map-shell{position:relative;min-height:240px}
+#viab-map{position:absolute;inset:0;background:#0f2031}
+.viab-map-hint{position:absolute;left:10px;bottom:10px;z-index:501;background:rgba(12,22,35,.88);padding:7px 10px;color:#e4edf5;font-size:11px;border-radius:6px;pointer-events:none}
+.viab-legend{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;margin-bottom:12px;color:var(--tx3)}
+.viab-legend .viab-dot{margin-right:2px}
+.viab-picked{font-weight:600;font-size:16px;margin:0 0 8px;overflow-wrap:anywhere}
+.viab-brief{border-left:3px solid #8392a2;padding:10px 11px;background:var(--card2);border-radius:0 8px 8px 0;font-size:13px;line-height:1.55}
+.viab-brief[data-status="apto"]{border-color:#36d399}
+.viab-brief[data-status="condicionado"]{border-color:#e8b451}
+.viab-brief[data-status="no_apto"]{border-color:#e46569}
+.viab-brief .viab-status{display:block;font-weight:700;margin-bottom:4px}
+.viab-outcome{border-top:1px solid var(--line2);padding:10px 0;font-size:12px;line-height:1.5}
+.viab-outcome b{font-size:13px}
+.viab-stat{margin:5px 0;color:var(--tx3)}
+.viab-search-results{max-height:160px;overflow:auto;margin-top:5px}
+.viab-blank{padding:10px;background:var(--card2);border-radius:8px;font-size:12px;color:var(--tx3)}
+.viab-footer{padding:8px 14px;border-top:1px solid var(--line2);font-size:11px;color:var(--tx3);background:var(--card)}
+.viab-progress{min-height:33px;color:var(--tx3);font-size:12px;line-height:1.4}
+.leaflet-container .viab-pop{color:#222;font:13px Arial,sans-serif}
+.leaflet-container .viab-pop strong{display:block;margin-bottom:4px}
+@media(max-width:1040px){.viab-grid{grid-template-columns:270px minmax(240px,1fr)}.viab-panel--right{grid-column:1/-1;border-left:0;border-top:1px solid var(--line2);max-height:225px}.viab-frame{height:96vh}}
+@media(max-width:680px){.viab-overlay{padding:0}.viab-frame{height:100dvh;border-radius:0}.viab-head{padding:9px 12px;gap:7px}.viab-head h2{font-size:18px}.viab-grid{grid-template-columns:1fr;overflow:auto}.viab-panel{overflow:visible;padding:12px}.viab-panel--left{border-right:0}.viab-map-shell{height:43vh;min-height:260px}.viab-panel--right{max-height:none}.viab-map-hint{bottom:6px}}
