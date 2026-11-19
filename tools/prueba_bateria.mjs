@@ -1080,6 +1080,45 @@ ok(tn.seg.n > 0 && tn.seg.este > 0 && tn.seg.bien, 'en modo seguridad va al fina
 ok(tn.mezcla.length === 0, 'el informe de una Track no mezcla: ni IED, ni P4Q, ni PS26002, ni la TCU 33', 'aparece: ' + tn.mezcla.join(', '));
 ok(tn.dice.length === 0 && tn.nota, 'y dice de dónde sale cada dato suyo, lo que es inferencia y que su calefactor no se modela', 'falta: ' + tn.dice.join(', '));
 
+/* ── 15) MAPA MUNDIAL DE VIABILIDAD: interacción real, sin red ni veredictos inventados ── */
+const mv = await pg.evaluate(() => {
+  const $id = (id) => document.getElementById(id);
+  const btn = $id('mv-open');
+  if (!btn) return {visible:false};
+  btn.click();
+  const root = $id('mv-root');
+  const abierto = !root.hidden;
+  const conocidos = [...$id('mv-sites').querySelectorAll('button:not(:disabled)')].length;
+  const sinEvaluar = $id('mv-result').textContent.includes('SIN EVALUAR');
+  $id('mv-lat').value = '-33,456789';
+  $id('mv-lon').value = '-70,651234';
+  $id('mv-name').value = 'QA Santiago temporal';
+  $id('mv-add').click();
+  const coordenadas = $id('mv-selected').textContent === 'QA Santiago temporal' &&
+    $id('mv-lat').value.includes('-33.456789') &&
+    $id('mv-lon').value.includes('-70.651234');
+  $id('mv-search').value = 'QA Santiago';
+  $id('mv-search').dispatchEvent(new Event('input',{bubbles:true}));
+  const encontrados = [...$id('mv-sites').querySelectorAll('button:not(:disabled)')]
+    .filter((b) => b.textContent.includes('QA Santiago')).length;
+  $id('mv-profile').value = 'TNC_45W_6Ah';
+  $id('mv-profile').dispatchEvent(new Event('change',{bubbles:true}));
+  const firmware = $id('mv-control').value === 'tnc';
+  const sigueSinEvaluar = $id('mv-result').textContent.includes('SIN EVALUAR');
+  $id('mv-close').click();
+  return {visible:true,abierto,conocidos,sinEvaluar,coordenadas,encontrados,firmware,
+    sigueSinEvaluar,cerrado:root.hidden};
+});
+ok(mv.visible&&mv.abierto&&mv.conocidos>0&&mv.cerrado,
+  'el mapa abre/cierra en la página y muestra ubicaciones del catálogo',
+  JSON.stringify(mv));
+ok(mv.sinEvaluar&&mv.sigueSinEvaluar,
+  'ninguna TCU se marca apta por defecto: sin ejecutar la meteo queda SIN EVALUAR');
+ok(mv.coordenadas&&mv.encontrados===1,
+  'se puede seleccionar por coordenadas con coma decimal y recuperar el lugar por nombre');
+ok(mv.firmware,
+  'la selección Track N Co muestra SU firmware y no las estrategias de SUNNER');
+
 await nav.close();
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa, se sabe qué batería basta y la TCU de Track N Co se compara con lo suyo'));
 process.exit(fallos ? 1 : 0);
