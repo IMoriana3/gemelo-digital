@@ -226,18 +226,25 @@ async function meteoForSite(site,period){
     var got=await Promise.all(batch.map(function(y){return fetchYearDeclarado(site,y);}));
     list.push.apply(list,got);
   }
-  var missing=[],ok=0;
+  var missing=[],ok=0,qa={sin_irradiancia:0,sin_temperatura:0,sin_viento:0};
   list.forEach(function(m,i){
-    if(!fullYear(m,years[i])){missing.push(years[i]);}
-    else ok++;
+    if(!fullYear(m,years[i])){missing.push(years[i]);list[i]={error:'año incompleto'};}
+    else{
+      ok++;
+      if(m.mapaQA)Object.keys(qa).forEach(function(k){qa[k]+=Number(m.mapaQA[k])||0;});
+      else qa.sin_irradiancia++; /* Sin metadatos: la fuente queda sin certificar */
+    }
   });
   var tramos=tramosContinuos(list,years);
   if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
-  return {years:years,tramos:tramos,missing:missing,ok:ok,source:'Open-Meteo histórico por coordenadas'};
+  return {years:years,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo histórico por coordenadas'};
 }
 function outcome(S,c,met,opts,worst,profile,thermal){
   var issues=[];
   if(met.missing.length)issues.push('años sin meteorología');
+  if(met.qa.sin_irradiancia)issues.push('irradiancia incompleta: '+met.qa.sin_irradiancia+' registros');
+  if(met.qa.sin_temperatura)issues.push('temperatura incompleta: '+met.qa.sin_temperatura+' registros');
+  if(met.qa.sin_viento)issues.push('viento incompleto: '+met.qa.sin_viento+' registros');
   if(S.hSinRacha>0&&opts.vientoStow!=='media')issues.push('faltan ráfagas en parte del periodo');
   if(opts.vientoStow==='media')issues.push('abanderamiento calculado con viento medio, no racha');
   if(S.hSinNieve>0)issues.push('faltan datos de profundidad de nieve');
