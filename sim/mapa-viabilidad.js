@@ -441,8 +441,87 @@ function initialize(){
   e('mv-control').onchange=updateView;
   e('mv-period').onchange=updateView;
   e('mv-evaluate').onclick=evaluateSite;
+  var nasButton=document.createElement('button');nasButton.id='mv-nas-submit';
+  nasButton.type='button';nasButton.className='viab-act viab-secondary';
+  nasButton.textContent='Enviar cálculo al NAS';nasButton.hidden=true;
+  nasButton.onclick=sendToNAS;e('mv-evaluate').after(nasButton);
   drawPins();listSites();renderResult();
+  refreshNAS();
+  setInterval(function(){if(!root.hidden)refreshNAS();},20000);
 }
+
+window.FACTIUN_MAPA_NAS={
+  async run(job){
+    var src=job.site||{},site=siteOf(src.n,src.lat,src.lon,src.id,src.fuente);
+    if(!coordOK(site.lat,site.lon))throw new Error('Coordenadas NAS inválidas');
+    var p=PROFILES.find(function(x){return x.id===job.profileId;});
+    if(!p)throw new Error('Perfil NAS no presente en batería');
+    var selected=p.variante?PROFILES.find(function(x){
+      return !x.variante&&x.wh===p.wh&&!!x.string===!!p.string&&!!x.lt===!!p.lt;
+    }):p;
+    if(!selected)throw new Error('No existe perfil equivalente visible');
+    if(!mv.sites.some(function(x){return x.id===site.id;}))mv.sites.push(site);
+    selectSite(site,false);
+    e('mv-profile').value=selected.id;syncPanel();
+    if(!p.string){
+      e('mv-panel').value=String(job.panelW||p.chgW);
+      if(!e('mv-panel').value)throw new Error('Panel NAS no ofertado en el selector');
+    }
+    syncControls();e('mv-period').value=String(job.period||'30');
+    if(!e('mv-period').value)throw new Error('Periodo NAS no reconocido');
+    await evaluateSite();
+    var result=effectiveResult(site);
+    if(!result)throw new Error(e('mv-progress').textContent||'Sin resultado');
+    return result;
+  }
+};
+async function refreshNAS(){
+  try{
+    var response=await fetch('/api/mapa/snapshot',{cache:'no-store'});
+    if(!response.ok)return;
+    var data=await response.json();
+    if(!data||!data.ok||!Array.isArray(data.items))return;
+    var changed=false;
+    data.items.forEach(function(item){
+      var s=item.site,r=item.record;
+      if(!s||!r||!r.sig||!coordOK(Number(s.lat),Number(s.lon)))return;
+      if(!mv.sites.some(function(x){return x.id===s.id;})){
+        mv.sites.push(siteOf(s.n,s.lat,s.lon,s.id,s.fuente));changed=true;
+      }
+      var entries=mv.records[s.id],all=Array.isArray(entries)?entries:(entries?[entries]:[]);
+      if(!all.some(function(x){return x.sig===r.sig;})){
+        all.push(r);mv.records[s.id]=all.slice(-32);changed=true;
+      }
+    });
+    if(changed)updateView();
+    mv.nasOnline=true;
+    e('mv-evaluate').hidden=true; // Cálculo largo y descargas, exclusivamente en NAS
+    if(e('mv-nas-submit')){
+      var st=await fetch('/api/mapa/health',{cache:'no-store'});
+      if(st.ok){
+        var health=await st.json();
+        e('mv-nas-submit').hidden=!health.puede_encolar;
+      }
+    }
+  }catch(_){/* Fuera de NAS se conserva el modo normal del simulador. */}
+}
+async function sendToNAS(){
+  if(!mv.selected){note('Selecciona antes un emplazamiento.');return;}
+  if(!mv.nasToken)mv.nasToken=window.prompt('Clave privada del NAS (solo esta sesión):')||'';
+  if(!mv.nasToken)return;
+  var p=activeProfile();
+  try{
+    var resp=await fetch('/api/mapa/jobs',{
+      method:'POST',headers:{'content-type':'application/json','x-factiun-token':mv.nasToken},
+      body:JSON.stringify({site:mv.selected,profileId:e('mv-profile').value,
+        period:e('mv-period').value,panelW:p&&!p.string?p.chgW:null})
+    });
+    var j=await resp.json();
+    if(!resp.ok){if(resp.status===403)mv.nasToken='';throw new Error(j.error||'No autorizado');}
+    note('Trabajo NAS '+j.id+' · '+(j.already||'en cola')+'. El marcador se actualizará al recibir conclusiones.');
+  }catch(err){note('No se ha encolado: '+err.message);}
+}
+
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialize,{once:true});
 else initialize();
 })();

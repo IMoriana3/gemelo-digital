@@ -261,6 +261,8 @@ jobs:
         run: node tools/test_weather_contract.mjs
       - name: Mapa mundial · series completas, veredictos conservadores
         run: node tools/prueba_mapa_viabilidad.mjs
+      - name: NAS Synology · validación de trabajos y rejilla (sin simulaciones)
+        run: node tools/test_nas_viabilidad.mjs
 
   # ─────────────────────────────────────────────────────────────────────────
   # NO BLOQUEA, y es una decisión. Perder de vista que el hermano evoluciona es
