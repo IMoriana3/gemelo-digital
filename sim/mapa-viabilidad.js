@@ -235,9 +235,81 @@ function updateParityButton(){
   var btn=e('mv-use-same-meteo');
   if(btn)btn.hidden=!parityAvailable();
 }
+/* El mapamundi no se basa en cuatro marcadores: carga nodos del plan
+   GLOBAL 5°/2°/1° en función del zoom y la ventana visible.
+   Un nodo sin resultado sigue gris. El azul significa CALCULADO CON OTROS
+   AJUSTES; NUNCA equivale a apto. Sólo una firma idéntica colorea
+   según la viabilidad calculada por el motor único de batería. */
+async function refreshGlobalCoverage(){
+  if(!mv.map||e('mv-root').hidden)return;
+  const profileId=e('mv-profile').value,ctrl=e('mv-control').value;
+  if(!profileId||!ctrl)return;
+  const zoom=mv.map.getZoom(),step=zoom<4?5:zoom<6?2:1;
+  const b=mv.map.getBounds(),south=Math.max(-90,b.getSouth()),
+    north=Math.min(90,b.getNorth()),
+    west=Math.max(-180,b.getWest()),east=Math.min(180,b.getEast());
+  const bbox=(south<north&&west<east)
+    ?[south,west,north,east]:[-90,-180,90,180];
+  const query=new URLSearchParams({step:String(step),period:e('mv-period').value,
+    profile:profileId,control:ctrl,bounds:bbox.join(','),limit:'1600'});
+  const seq=(mv.worldRequestSeq||0)+1;mv.worldRequestSeq=seq;
+  try{
+    const response=await fetch('/api/mapa/world?'+query.toString(),{cache:'no-store'});
+    if(!response.ok)return;
+    const data=await response.json();
+    if(seq!==mv.worldRequestSeq||!e('mv-root')||e('mv-root').hidden)return;
+    if(!mv.worldLayer)mv.worldLayer=L.layerGroup().addTo(mv.map);
+    mv.worldLayer.clearLayers();
+    const label=e('mv-global-status');
+    if(!data.configured){
+      if(label)label.textContent='Cobertura mundial: el plan global no está registrado en el NAS. Ningún punto se presume apto.';
+      return;
+    }
+    const sig=signature().key;
+    const colors={sin_evaluar:'#8798aa',en_cola:'#a6b1c2',
+      calculando:'#d29d57',fallido:'#d97070',
+      calculado:'#5e9fda',apto:MV_COLORS.apto,
+      condicionado:MV_COLORS.condicionado,
+      no_apto:MV_COLORS.no_apto,pendiente:MV_COLORS.pendiente};
+    (data.nodes||[]).forEach(function(item){
+      const node=item.site;
+      if(!node||!coordOK(node.lat,node.lon))return;
+      const exact=item.record&&item.record.sig===sig;
+      const stat=exact&&item.record.result?item.record.result.status:item.state;
+      const color=colors[stat]||'#8798aa';
+      const marker=L.circleMarker([node.lat,node.lon],{
+        radius:zoom<4?2.4:3.5,weight:0.8,
+        color:'#1e2834',fillColor:color,fillOpacity:0.88
+      }).addTo(mv.worldLayer);
+      const tip=document.createElement('span');
+      const category=stat==='calculado'?'CALCULADO PARA OTRA CONFIGURACIÓN':
+        stat==='en_cola'?'EN COLA':stat==='calculando'?'CALCULANDO':
+        stat==='fallido'?'FALLÓ':statusWord(stat);
+      tip.textContent=node.n+' · '+category+' · muestra puntual, sin extrapolación';
+      marker.bindTooltip(tip,{direction:'top'});
+      marker.on('click',function(){
+        const site=siteOf(node.n,node.lat,node.lon,node.id,node.fuente);
+        const found=getSite(site.id);
+        if(!found)mv.sites.push(site);
+        selectSite(found||site,true);
+      });
+    });
+    if(label){
+      const stages=(data.stages||[]).sort((a,b)=>b.step-a.step);
+      const totals=stages.map(p=>p.step+'° '+p.assigned+'/'+p.jobs+' trabajos programados').join(' · ');
+      label.textContent='Cobertura terrestre mundial · nivel '+step+'°: '+
+        data.planned_cells+' nodos terrestres · '+data.nodes.length+
+        ' visibles'+(data.truncated?' (amplía el zoom para ver más)':'')+
+        '. '+totals+'. Gris: sin evaluar; azul: otra configuración. Sólo coloreado puntual, sin regiones aptas interpoladas.';
+    }
+  }catch(_){
+    // Modo local del simulador sin NAS: el mapa y sus puntos de cartera siguen operativos.
+  }
+}
 function updateView(){
   if(!mv.map)return;
   drawPins();listSites();renderResult();updateParityButton();
+  refreshGlobalCoverage();
 }
 function useSameScenarioInSimulator(){
   if(!parityAvailable()){note('Primero calcula el emplazamiento exacto en el mapa.');return;}
@@ -581,6 +653,7 @@ function initialize(){
         '<div class="viab-field" id="mv-panel-field"><label for="mv-panel">Panel</label><select id="mv-panel"></select></div>',
         '<div class="viab-field"><label for="mv-control">Control mostrado en el mapa</label><select id="mv-control"></select></div>',
         '<div class="viab-field"><label for="mv-period">Histórico meteorológico</label><select id="mv-period"></select></div>',
+        '<p class="viab-meta" id="mv-global-status">Cobertura mundial: sin datos calculados todavía.</p>',
         '<button class="viab-act" id="mv-evaluate" type="button">Calcular conclusiones del punto</button>',
         '<button class="viab-act viab-secondary" id="mv-use-same-meteo" type="button" hidden>Usar mismos datos en el simulador</button>',
         '<p class="viab-progress" id="mv-progress" role="status">Selecciona un punto y evalúalo.</p>',
@@ -617,6 +690,7 @@ function initialize(){
   mv.map=L.map('viab-map',{worldCopyJump:true,zoomControl:true}).setView([20,0],2);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     {maxZoom:18,attribution:'© OpenStreetMap contributors',className:'osm-oscuro'}).addTo(mv.map);
+  mv.map.on('moveend zoomend',refreshGlobalCoverage);
   mv.map.on('click',function(ev){
     e('mv-lat').value=ev.latlng.lat.toFixed(6);
     e('mv-lon').value=ev.latlng.lng.toFixed(6);
@@ -627,6 +701,7 @@ function initialize(){
   button.onclick=function(){
     root.hidden=false;document.body.style.overflow='hidden';
     setTimeout(function(){mv.map.invalidateSize();},50);
+    refreshGlobalCoverage();
     if(!mv.selected){var loc=typeof getLoc==='function'?getLoc():null;
       var same=loc&&mv.sites.find(function(s){return Math.abs(s.lat-loc.lat)<.000001&&Math.abs(s.lon-loc.lon)<.000001;});
       if(same)selectSite(same,true);
@@ -658,7 +733,7 @@ function initialize(){
   drawPins();listSites();renderResult();
   loadPrioritySites();
   refreshNAS();
-  setInterval(function(){if(!root.hidden)refreshNAS();},20000);
+  setInterval(function(){if(!root.hidden){refreshNAS();refreshGlobalCoverage();}},20000);
 }
 
 /* Verificación accesible al botón Simular: la igualdad exige misma fuente,
