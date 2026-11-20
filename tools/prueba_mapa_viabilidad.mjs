@@ -118,8 +118,8 @@ const westPacific=worldBoundsForViewport(viewport(-190,-155));
 assert.deepEqual(Array.from(westPacific[0]),[-50,170,50,180]);
 assert.deepEqual(Array.from(westPacific[1]),[-50,-180,50,-155]);
 assert.equal(worldLongitudeNearViewport(175,viewport(-190,-155)),-185);
-assert.deepEqual(Array.from(worldBoundsForViewport(viewport(-20,20))),[[-50,-20,50,20]]);
-assert.deepEqual(Array.from(worldBoundsForViewport(viewport(-240,240))),[[-90,-180,90,180]]);
+assert.deepEqual(Array.from(worldBoundsForViewport(viewport(-20,20)),x=>Array.from(x)),[[-50,-20,50,20]]);
+assert.deepEqual(Array.from(worldBoundsForViewport(viewport(-240,240)),x=>Array.from(x)),[[-90,-180,90,180]]);
 const clima=meteoSummary([{meteo:[
   {t:new Date('2024-01-01T00:00:00Z'),ghi:100,temp:-10,wind:3,gust:5,snowDepth:0.02},
   {t:new Date('2024-01-01T01:00:00Z'),ghi:300,temp:12,wind:5,gust:9,snowDepth:0.06}
