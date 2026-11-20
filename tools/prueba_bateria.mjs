@@ -1285,7 +1285,7 @@ await pg.evaluate(()=>{
 await pg.waitForFunction(()=>{
   const msg=document.getElementById('mv-progress').textContent;
   return /Evaluación terminada|No se ha asignado viabilidad/.test(msg);
-},{timeout:120000});
+},null,{timeout:120000});
 const evaluated=await pg.evaluate(()=>{
   const text=document.getElementById('mv-progress').textContent;
   const data=window.BAT_METEO_PARIDAD;
@@ -1305,7 +1305,7 @@ if(evaluated.canCompare){
     const data=window.BAT_METEO_PARIDAD;
     return data&&window.LAST&&LAST.meteo===data.list[0]&&
       LAST.loc.lat===data.site.lat&&LAST.loc.lon===data.site.lon;
-  },{timeout:120000});
+  },null,{timeout:120000});
   const compared=await pg.evaluate(()=>{
     const data=window.BAT_METEO_PARIDAD;
     const all=JSON.parse(localStorage.getItem('bateria_mapa_conclusiones_v1')||'{}');
