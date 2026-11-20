@@ -5,6 +5,14 @@ on:
     paths:
       - nas/viabilidad/mundo.mjs
       - nas/viabilidad/seed.mjs
+      - nas/viabilidad/service.mjs
+      - sim/mapa-viabilidad.js
+      - bateria.html
+      - sim/fisica.js
+      - sim/viento.js
+      - sim/canon.js
+      - sim/cartera.js
+      - pines.json
       - .github/workflows/world-grid-preview.yml
   workflow_dispatch:
 jobs:
@@ -31,6 +39,8 @@ jobs:
             r.etapas.forEach(x=>console.log(x.step+"°",x.sitios,"nodos",x.trabajos,"trabajos"));
           '
           cp /tmp/mundo-factiun.json "${FACTIUN_MAPA_DATA}/world/resumen-mundial.json"
+          echo "Git SHA: $(git rev-parse HEAD)"
+          echo "Firma del código y año incluidos en el nombre de los planes; no usar con otra revisión"
       - name: Guardar geometría mundial y manifiestos, SIN simulaciones inventadas
         uses: actions/upload-artifact@v4
         with:
