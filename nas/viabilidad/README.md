@@ -203,7 +203,10 @@ de trabajos interrumpidos pertenece al arranque del servidor NAS.
 
 - /data/pending: trabajos pendientes.
 - /data/running: trabajo actual; vuelve a pending tras reinicio.
-- /data/done: registros terminados, con conclusiones y firma del motor.
+- /data/done: informes de plantas concretas y sus firmas de motor.
+- /data/world-done/00…ff: resultados mundiales divididos en 256 subcarpetas SHA,
+  para no crear 170.435 ficheros en el mismo directorio. Se puede reutilizar
+  un cálculo de planta en una celda con iguales coordenadas, equipo y años.
 - /data/failed: fallos después de 3 intentos.
 - /data/meteo: caché de respuestas históricas, sin token de acceso.
 
