@@ -54,12 +54,65 @@ export function geometries(geo){
   if(!polys.length)throw Error('Máscara terrestre sin polígonos');
   return polys;
 }
+/* Preparación espacial por banda de latitud y por celda.
+   Natural Earth 10m contiene anillos con miles de vértices. Comprobar
+   cada costa de Eurasia para cada celda exterior al continente sería
+   O(celdas * vértices), inviable a escala mundial. Aquí sólo se
+   consultan segmentos que cruzan la banda/celda correspondiente. */
+function preparePolygon(p,step,nlat,nlon){
+  p.bandRings=p.rings.map(ring=>{
+    const bands=new Map(),n=ring.length-1;
+    for(let i=0;i<n;i++){
+      const a=ring[i],b=ring[i+1];
+      if(a[1]===b[1])continue; // jamás cruza el rayo horizontal
+      const lo=Math.max(0,Math.floor((Math.min(a[1],b[1])+90)/step)-1);
+      const hi=Math.min(nlat-1,Math.floor((Math.max(a[1],b[1])+90)/step)+1);
+      for(let k=lo;k<=hi;k++){
+        if(!bands.has(k))bands.set(k,[]);
+        bands.get(k).push([a,b]);
+      }
+    }
+    return bands;
+  });
+  const cells=new Map();
+  for(const ring of p.rings){
+    const n=ring.length-1;
+    for(let i=0;i<n;i++){
+      const a=ring[i],b=ring[i+1],before=ring[(i+n-1)%n];
+      const imin=Math.max(0,Math.floor((Math.min(a[1],b[1])+90)/step)-1),
+        imax=Math.min(nlat-1,Math.floor((Math.max(a[1],b[1])+90)/step)+1);
+      const jmin=Math.max(0,Math.floor((Math.min(a[0],b[0])+180)/step)-1),
+        jmax=Math.min(nlon-1,Math.floor((Math.max(a[0],b[0])+180)/step)+1);
+      const segment={a,b,before};
+      for(let row=imin;row<=imax;row++)
+        for(let col=jmin;col<=jmax;col++){
+          const key=row+':'+col;
+          if(!cells.has(key))cells.set(key,[]);
+          cells.get(key).push(segment);
+        }
+    }
+  }
+  p.edgeCells=cells;
+}
+function inPolygonPrepared(x,y,p){
+  const k=Math.floor((y+90)/p.step),rings=p.bandRings;
+  function within(bands){
+    let inside=false;
+    for(const [a,b] of bands.get(k)||[]){
+      if((a[1]>y)!==(b[1]>y)&&x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0])
+        inside=!inside;
+    }
+    return inside;
+  }
+  return rings.length>0&&within(rings[0])&&
+    !rings.slice(1).some(within);
+}
 function insideCell(x,y,c){
   return x>=c.xmin-EPS&&x<=c.xmax+EPS&&
     y>=c.ymin-EPS&&y<=c.ymax+EPS&&Math.abs(y)<90;
 }
 function pointIn(x,y,p,c){
-  return insideCell(x,y,c)&&inPolygon(x,y,p.rings);
+  return insideCell(x,y,c)&&inPolygonPrepared(x,y,p);
 }
 function sample(p,c){
   const cx=(c.xmin+c.xmax)/2,cy=(c.ymin+c.ymax)/2;
@@ -77,9 +130,11 @@ function sample(p,c){
     }
   }
   // Costas muy estrechas: puntos interiores cerca de vértices/segmentos.
-  const ring=p.rings[0],n=ring.length-1;
-  for(let i=0;i<n;i++){
-    const a=ring[(i+n-1)%n],b=ring[i],d=ring[(i+1)%n];
+  const row=Math.floor((c.ymin+90)/p.step),col=Math.floor((c.xmin+180)/p.step);
+  const segments=p.edgeCells.get(row+':'+col)||[];
+  if(!segments.length)return null;
+  for(const seg of segments){
+    const a=seg.before,b=seg.a,d=seg.b;
     const tx=(a[0]+b[0]+d[0])/3,ty=(a[1]+b[1]+d[1])/3;
     if(pointIn(tx,ty,p,c))return [tx,ty];
     const x=(b[0]+d[0])/2,y=(b[1]+d[1])/2;
@@ -114,6 +169,8 @@ export function worldGrid(geo,step,limits){
   const nodes=new Map();
   let candidates=0;
   for(const p of polys){
+    p.step=step;
+    preparePolygon(p,step,nlat,nlon);
     const b=p.bb;
     let imin=Math.max(0,Math.floor((b.ymin+90)/step)-1),
         imax=Math.min(nlat-1,Math.floor((b.ymax+90)/step)+1);
@@ -141,6 +198,7 @@ export function worldGrid(geo,step,limits){
         });
       }
     }
+    p.edgeCells=null;p.bandRings=null; // no retener decenas de miles de aristas
   }
   const res=[...nodes.values()].sort((a,b)=>a.cell[0]-b.cell[0]||a.cell[1]-b.cell[1]);
   return {step,nodes:res,candidateChecks:candidates,
