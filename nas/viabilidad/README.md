@@ -36,16 +36,68 @@ Desde terminal del proyecto:
 Este comando solo presenta una VISTA PREVIA. Para ejecutar:
   docker compose -f nas/viabilidad/compose.yaml exec viabilidad-tcu node nas/viabilidad/seed.mjs --cartera --limit 5 --period 30 --enqueue
 
-Para el mapa mundial, primero una rejilla terrestre *exploratoria* de 5°:
-  node nas/viabilidad/seed.mjs --grid 5 --download-land --limit 20 --period 30
-  node nas/viabilidad/seed.mjs --grid 5 --limit 20 --period 30 --enqueue
+## Cobertura GLOBAL terrestre: todas las celdas, no una muestra de 20
 
-La máscara se obtiene explícitamente de Natural Earth 110m, dominio público.
-La cuadrícula no abarca cada isla pequeña y sus puntos no son polígonos
-certificados. Posteriormente refinar zonas prioritarias con --grid 2 o
---grid 1 y --bounds latMin,lonMin,latMax,lonMax. Lotes de más de 200
-trabajos requieren --confirm-large. No se pone en marcha el mundo entero
-automáticamente.
+El objetivo es un **mapamundi de referencia mundial**, no una colección
+de cuatro plantas. La máscara [Natural Earth 1:10m](https://github.com/nvkelso/natural-earth-vector)
+incluye costas e islas mucho menores que la cartografía antigua de 110m.
+La cuadrícula se genera con un punto real **sobre tierra en cada celda
+detectable**, con tres niveles sucesivos:
+
+1. **5°**: primera pasada terrestre global, incluidos islotes cuando aparecen
+   en Natural Earth 10m
+2. **2°**: segunda pasada mundial más densa
+3. **1°**: refinamiento mundial, no solo de las zonas prioritarias
+
+Los puntos en la costa pueden estar desplazados dentro de su celda para
+caer en tierra; las coordenadas geográficas de las plantas reales NO se
+redondean ni se sustituyen por centros de celda. Las áreas oceánicas
+siguen visibles en el mapa base, sin evaluación TCU.
+
+Para obtener la distribución **completa** y el conteo de nodos, sin
+consumir una sola consulta meteo ni calcular SOC:
+
+```bash
+node nas/viabilidad/seed.mjs --world all --period 30 --download-land
+```
+
+Para **registrar los tres manifiestos mundiales** en el NAS, después de
+configurar la fuente meteorológica comercial y el almacenamiento:
+
+```bash
+node nas/viabilidad/seed.mjs --world all --period 30 --enqueue --confirm-world
+```
+
+Esto registra todos los nodos y sus configuraciones. NO crea cientos de
+miles de ficheros pending ni consume meteorología por sí mismo. El servidor
+alimenta una cola persistente de tamaño reducido (`WORLD_QUEUE_BUFFER`,
+12 por defecto), procesa **un solo escenario cada vez** mediante
+`bateria.html` y reanuda tras los reinicios. Termina una fase antes
+de pasar a la siguiente. El cursor y los manifiestos permanecen en
+`/data/world`. `--world` nunca admite `--limit`.
+
+La vista `GET /api/mapa/world?step=5&bounds=-90,-180,90,180`
+presenta el estado de los nodos por ventana geográfica. El zoom selecciona
+5°, 2° o 1° y el API limita el volumen de respuesta para no saturar
+Leaflet. **Gris** = sin evaluar; **en cola** y **calculando** se diferencian;
+**azul** = hay cálculo pero la firma de escenario no coincide;
+**verde, ámbar, rojo** solo son el veredicto de un nodo realmente simulado
+con el mismo motor, parámetros, año y meteo. Nunca se pintan polígonos
+de viabilidad extrapolada a partir de centros de celda.
+
+**Límite técnico:** resolución de 1° no representa todas las variaciones
+de relieve, microclima, panel cubierto de nieve o coste mecánico por viento.
+La cobertura es *mundial en extensión*, pero **muestreada**, no una
+certificación continua de cada metro cuadrado. El modelo del tiempo
+ERA5/ERA5-Land tiene también su propia resolución. Las islas o
+microparcels ausentes de Natural Earth 10m siguen sin evaluarse; esto
+se declara, no se colorea como apto.
+
+La cantidad exacta de trabajos se obtiene del resumen real generado por
+`--world all`. Para 30 años, cada ubicación requiere dos solicitudes
+históricas por año antes de aplicar caché; cinco equipos por punto pueden
+compartir esa meteorología. No se ha calculado aún el mundo ni existe un
+mapa mundial de aptitudes verificado.
 
 Perfiles por defecto: SP 6Ah, STRING 6Ah, versiones LT y Track N Co 6Ah.
 Dentro de cada perfil se calculan sus propias estrategias sobre la misma
