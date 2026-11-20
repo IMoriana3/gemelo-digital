@@ -76,6 +76,20 @@ alimenta una cola persistente de tamaño reducido (`WORLD_QUEUE_BUFFER`,
 de pasar a la siguiente. El cursor y los manifiestos permanecen en
 `/data/world`. `--world` nunca admite `--limit`.
 
+**Pausa operativa sin pérdida de progreso** (en la terminal del contenedor):
+
+```bash
+node nas/viabilidad/seed.mjs --pause-world
+node nas/viabilidad/seed.mjs --resume-world --confirm-world
+```
+
+La pausa se registra en `/data/world/PAUSED.json`, sin editar
+manifiestos ni cursores en paralelo con el servidor. No cancela el
+trabajo que ya está ejecutándose, pero impide iniciar nuevos trabajos
+mundiales y añadir otros pendientes. Los trabajos manuales permanecen
+independientes. Para reanudar se exige `--confirm-world`; la salud de
+NAS y la capa mundial del mapa indican si está pausada.
+
 La vista `GET /api/mapa/world?step=5&bounds=-90,-180,90,180`
 presenta el estado de los nodos por ventana geográfica. El zoom selecciona
 5°, 2° o 1° y el API limita el volumen de respuesta para no saturar
