@@ -288,6 +288,57 @@ async function tick(){
     console.error('NAS TCU trabajo '+job.id+': '+job.last_error);
   }finally{running=false;}
 }
+/* Cobertura mundial por ventana, nunca porcentajes inventados:
+   las celdas sin evaluación son grises; los resultados solo se colorean
+   con la MISMA firma que el simulador que los consulta. */
+export async function getWorldCoverage(query){
+  const step=Number(query.get('step')||5),profileId=query.get('profile')||'SP_45W_6Ah';
+  const period=query.get('period')||'30',control=query.get('control')||'std';
+  const limit=Math.min(2500,Math.max(1,Number(query.get('limit')||1600)));
+  if(![5,2,1].includes(step)||!profiles.has(profileId)||
+     !['none','std','winter','cons','tnc'].includes(control))
+    throw Error('Parámetros de cobertura mundial inválidos');
+  const raw=(query.get('bounds')||'-90,-180,90,180').split(',').map(Number);
+  if(raw.length!==4||raw.some(x=>!Number.isFinite(x))||raw[0]>=raw[2]||
+     raw[1]>=raw[3]||raw[0]<-90||raw[2]>90||raw[1]<-180||raw[3]>180)
+    throw Error('Ventana mundial fuera de rango');
+  const yrs=requestedYears(period);
+  const plans=await worldPlans();
+  const selected=plans.find(x=>x.plan.step===step&&
+    x.plan.period===period&&x.plan.profiles.includes(profileId));
+  const stages=plans.map(x=>({step:x.plan.step,cells:x.plan.sites.length,
+    jobs:x.plan.total,assigned:x.plan.cursor,
+    finished:x.plan.finished||0,errors:x.plan.errors||0,
+    years:x.plan.yearRange}));
+  if(!selected)return {ok:true,configured:false,step,stages,nodes:[],
+    note:'La cobertura global no está registrada todavía; no se inventan estados'};
+  const plan=selected.plan;
+  const candidates=plan.sites.filter(site=>
+    site.lat>=raw[0]&&site.lat<=raw[2]&&site.lon>=raw[1]&&site.lon<=raw[3]);
+  const items=[];
+  for(const site of candidates.slice(0,limit)){
+    const job=normalizeJob({site,profileId,period});
+    let state='sin_evaluar',record=null;
+    if(existsSync(jobPath('done',job.id))){
+      try{
+        const done=JSON.parse(await readFile(jobPath('done',job.id),'utf8'));
+        if(done.revision===REVISION&&done.record&&
+           done.yearRange?.[0]===yrs[0]&&done.yearRange?.[1]===yrs[1]){
+          state='calculado';record={sig:done.record.sig,
+            result:done.record.results?.find(x=>x.k===control)||null};
+        }
+      }catch(_){}
+    }else if(existsSync(jobPath('failed',job.id)))state='fallido';
+    else if(existsSync(jobPath('running',job.id)))state='calculando';
+    else if(existsSync(jobPath('pending',job.id)))state='en_cola';
+    items.push({site,state,record});
+  }
+  return {ok:true,configured:true,step,period,control,profileId,
+    years:yrs,stages,planned_cells:plan.sites.length,
+    visible_cells:candidates.length,truncated:candidates.length>limit,
+    nodes:items,
+    note:'Nodos discretos; no significa que la superficie entre puntos esté evaluada'};
+}
 async function getSnapshot(){
   var utcCutoff=new Date().getUTCFullYear()-1;
   /* El caché de 10 segundos NO debe retener estudios de un rango
@@ -342,7 +393,7 @@ async function staticFile(res,pathname){
   }catch(_){return json(res,404,{error:'No encontrado'});}
 }
 async function request(req,res){
-  const path=new URL(req.url,'http://localhost').pathname;
+  const url=new URL(req.url,'http://localhost'),path=url.pathname;
   if(req.method==='GET'&&path==='/api/mapa/health'){
     const count={};for(const d of ['pending','running','done','failed'])count[d]=(await list(d)).length;
     return json(res,200,{ok:true,revision:REVISION,meteorologia:KEY?'licenciada':'pendiente_de_licencia',
@@ -350,6 +401,10 @@ async function request(req,res){
   }
   if(req.method==='GET'&&path==='/api/mapa/snapshot')
     return json(res,200,await getSnapshot());
+  if(req.method==='GET'&&path==='/api/mapa/world'){
+    try{return json(res,200,await getWorldCoverage(url.searchParams));}
+    catch(e){return json(res,400,{error:e.message});}
+  }
   if(req.method==='POST'&&path==='/api/mapa/jobs'){
     if(!UI_QUEUE||!authed(req))return json(res,403,{error:'Cola no autorizada'});
     try{const r=await enqueue(await receive(req));return json(res,202,{ok:true,id:r.job.id,already:r.already});}
