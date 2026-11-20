@@ -248,6 +248,23 @@ function updateParityButton(){
   var btn=e('mv-use-same-meteo');
   if(btn)btn.hidden=!parityAvailable();
 }
+/* La Tierra cruza el antimeridiano: un viewport 155°E–190°E necesita
+   dos consultas (155..180 y -180..-170). Sin este corte se pierden
+   puntos de Nueva Zelanda oriental, Fiyi, Rusia y Alaska. */
+function worldBoundsForViewport(bounds){
+  var south=Math.max(-90,bounds.getSouth()),north=Math.min(90,bounds.getNorth());
+  var west=bounds.getWest(),east=bounds.getEast(),width=east-west;
+  if(![south,north,west,east,width].every(Number.isFinite)||
+     south>=north||width<=0||width>=360)
+    return [[-90,-180,90,180]];
+  var start=((west+180)%360+360)%360-180,end=start+width;
+  if(end<=180)return [[south,start,north,end]];
+  return [[south,start,north,180],[south,-180,north,end-360]];
+}
+function worldLongitudeNearViewport(lon,bounds){
+  var center=(bounds.getWest()+bounds.getEast())/2;
+  return lon+360*Math.round((center-lon)/360);
+}
 /* El mapamundi no se basa en cuatro marcadores: carga nodos del plan
    GLOBAL 5°/2°/1° en función del zoom y la ventana visible.
    Un nodo sin resultado sigue gris. El azul significa CALCULADO CON OTROS
@@ -258,18 +275,25 @@ async function refreshGlobalCoverage(){
   const profileId=e('mv-profile').value,ctrl=e('mv-control').value;
   if(!profileId||!ctrl)return;
   const zoom=mv.map.getZoom(),step=zoom<4?5:zoom<6?2:1;
-  const b=mv.map.getBounds(),south=Math.max(-90,b.getSouth()),
-    north=Math.min(90,b.getNorth()),
-    west=Math.max(-180,b.getWest()),east=Math.min(180,b.getEast());
-  const bbox=(south<north&&west<east)
-    ?[south,west,north,east]:[-90,-180,90,180];
-  const query=new URLSearchParams({step:String(step),period:e('mv-period').value,
-    profile:profileId,control:ctrl,bounds:bbox.join(','),limit:'1600'});
+  const bounds=mv.map.getBounds(),boxes=worldBoundsForViewport(bounds);
   const seq=(mv.worldRequestSeq||0)+1;mv.worldRequestSeq=seq;
   try{
-    const response=await fetch('/api/mapa/world?'+query.toString(),{cache:'no-store'});
-    if(!response.ok)return;
-    const data=await response.json();
+    const replies=await Promise.all(boxes.map(function(bbox){
+      var query=new URLSearchParams({step:String(step),period:e('mv-period').value,
+        profile:profileId,control:ctrl,bounds:bbox.join(','),limit:'1600'});
+      return fetch('/api/mapa/world?'+query.toString(),{cache:'no-store'});
+    }));
+    if(replies.some(function(r){return !r.ok;}))return;
+    const chunks=await Promise.all(replies.map(function(r){return r.json();}));
+    const byId=new Map();
+    chunks.forEach(function(chunk){
+      (chunk.nodes||[]).forEach(function(node){if(node.site)byId.set(node.site.id,node);});
+    });
+    const data=Object.assign({},chunks[0],{
+      nodes:Array.from(byId.values()),
+      visible_cells:chunks.reduce(function(n,c){return n+(c.visible_cells||0);},0),
+      truncated:chunks.some(function(c){return !!c.truncated;})
+    });
     if(seq!==mv.worldRequestSeq||!e('mv-root')||e('mv-root').hidden)return;
     if(!mv.worldLayer)mv.worldLayer=L.layerGroup().addTo(mv.map);
     mv.worldLayer.clearLayers();
@@ -290,7 +314,7 @@ async function refreshGlobalCoverage(){
       const exact=item.record&&item.record.sig===sig;
       const stat=exact&&item.record.result?item.record.result.status:item.state;
       const color=colors[stat]||'#8798aa';
-      const marker=L.circleMarker([node.lat,node.lon],{
+      const marker=L.circleMarker([node.lat,worldLongitudeNearViewport(node.lon,bounds)],{
         radius:zoom<4?2.4:3.5,weight:0.8,
         color:'#1e2834',fillColor:color,fillOpacity:0.88
       }).addTo(mv.worldLayer);
