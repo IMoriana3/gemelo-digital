@@ -561,7 +561,7 @@ function initialize(){
         '<div id="mv-result"></div>',
        '</aside>',
       '</div>',
-      '<footer class="viab-footer">Origen del cálculo: simulador de batería de Factiun · meteo Open-Meteo histórica del punto exacto · sin veredicto automático por proximidad. Un resultado energético no sustituye las comprobaciones estructurales.</footer>',
+      '<footer class="viab-footer">Cálculo: simulador de batería Factiun · meteo ERA5 / ERA5-Land de rejilla, consultada en las coordenadas del punto, NO medición in situ · sin extrapolar viabilidad por proximidad ni certificar estructuras.</footer>',
     '</div>'
   ].join('');
   document.body.appendChild(root);
