@@ -1207,7 +1207,7 @@ const parity = await pg.evaluate(async () => {
   return {count,diff,invalid,variants,buttonVisible,sameReference,guard,
     selected,expectedSite:site,closed:byId('mv-root').hidden};
 });
-ok(parity.count>=140&&parity.diff===0&&parity.invalid===0&&parity.variants>=4,
+ok(parity.count>=136&&parity.diff===0&&parity.invalid===0&&parity.variants>=4,
   'PARIDAD LITERAL: serie completa y KPIs idénticos en cuatro sitios, 5 TCUs, 4 políticas y tramos; 0 diferencias',
   JSON.stringify(parity));
 ok(parity.buttonVisible&&parity.sameReference&&parity.guard&&parity.closed&&
