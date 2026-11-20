@@ -97,7 +97,7 @@ assert.equal(hasHole,false,'Nunca se califica un lago como tierra');
    coordenada duplicada; las otras tres son puntos urbanos provisionales. */
 import {execFileSync,spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {mkdtempSync,mkdirSync,writeFileSync,existsSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,existsSync,rmSync,readdirSync,readFileSync as readLocalFile} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 const preview=JSON.parse(execFileSync(process.execPath,[
@@ -135,6 +135,63 @@ try {
   assert.equal(existsSync(join(scratch,'pending')),false,
     'La preview tampoco debe crear carpetas de cola');
 } finally {rmSync(scratch,{recursive:true,force:true});}
+/* De una orden --world all salen TRES planes completos, no 20 nodos.
+   La mera vista previa no crea cola; el registro explícito se reanuda
+   después de reiniciar y el servicio solo prepara un buffer limitado. */
+const worldData=mkdtempSync(join(tmpdir(),'factiun-world-'));
+try{
+  mkdirSync(join(worldData,'world'),{recursive:true});
+  writeFileSync(join(worldData,'world','ne_10m_land.geojson'),JSON.stringify(mockWorld));
+  const cwd=fileURLToPath(new URL('../',import.meta.url));
+  const env={...process.env,FACTIUN_MAPA_DATA:worldData};
+  const previewWorld=JSON.parse(execFileSync(process.execPath,[
+    'nas/viabilidad/seed.mjs','--world','all','--period','30'
+  ],{cwd,encoding:'utf8',env}));
+  assert.equal(previewWorld.etapas.length,3);
+  assert.deepEqual(previewWorld.etapas.map(e=>e.step),[5,2,1]);
+  assert.equal(previewWorld.total_trabajos,
+    previewWorld.etapas.reduce((n,e)=>n+e.trabajos,0));
+  assert.ok(previewWorld.total_nodos>10);
+  assert.equal(readdirSync(join(worldData,'world')).filter(n=>n.startsWith('plan-')).length,0,
+    'La vista previa mundial no escribe planes de trabajo');
+  const registered=JSON.parse(execFileSync(process.execPath,[
+    'nas/viabilidad/seed.mjs','--world','all','--period','30',
+    '--enqueue','--confirm-world'
+  ],{cwd,encoding:'utf8',env}));
+  assert.equal(registered.modo.startsWith('PLAN MUNDIAL'),true);
+  let plans=readdirSync(join(worldData,'world')).filter(n=>n.startsWith('plan-'));
+  assert.equal(plans.length,3);
+  const plan5=plans.find(n=>n.startsWith('plan-5-'));
+  const a0=JSON.parse(readLocalFile(join(worldData,'world',plan5),'utf8'));
+  assert.equal(a0.cursor,0);
+  assert.equal(a0.total,a0.sites.length*a0.profiles.length);
+  assert.equal(existsSync(join(worldData,'pending')),false);
+  assert.throws(()=>execFileSync(process.execPath,[
+    'nas/viabilidad/seed.mjs','--world','all','--limit','20'
+  ],{cwd,encoding:'utf8',env,stdio:'pipe'}),/--world/);
+  const runner=[
+    "import {initStorage,fillWorldQueue,getWorldCoverage} from './nas/viabilidad/service.mjs';",
+    "await initStorage();await fillWorldQueue();",
+    "const coverage=await getWorldCoverage(new URLSearchParams({step:'5',profile:'SP_45W_6Ah',period:'30'}));",
+    "console.log(JSON.stringify({stage:coverage.stages.find(x=>x.step===5),",
+    "active:coverage.nodes.filter(x=>x.state==='en_cola').length,",
+    "evaluated:coverage.nodes.filter(x=>x.state==='calculado').length}));"
+  ].join('\n');
+  const seeded=JSON.parse(execFileSync(process.execPath,[
+    '--input-type=module','--eval',runner
+  ],{cwd,encoding:'utf8',env:{...env,OPEN_METEO_API_KEY:'token-test-no-red',WORLD_QUEUE_BUFFER:'4'}}));
+  assert.equal(seeded.stage.assigned,4);
+  assert.equal(seeded.active>0,true);
+  assert.equal(seeded.evaluated,0,'No se inventa un resultado de batería');
+  assert.equal(readdirSync(join(worldData,'pending')).filter(n=>n.endsWith('.json')).length,4);
+  /* Repetir el registro mundial no pone el cursor a cero ni borra la cola. */
+  execFileSync(process.execPath,[
+    'nas/viabilidad/seed.mjs','--world','all','--period','30',
+    '--enqueue','--confirm-world'
+  ],{cwd,encoding:'utf8',env});
+  const a1=JSON.parse(readLocalFile(join(worldData,'world',plan5),'utf8'));
+  assert.equal(a1.cursor,4);
+}finally{rmSync(worldData,{recursive:true,force:true});}
 /* Smoke HTTP real: servidor de Synology sin clave ni API externa.
    El JSON canónico de casos es legible en el mapa, pero el código de
    servicio y los ejemplos de secretos no son públicos. */
