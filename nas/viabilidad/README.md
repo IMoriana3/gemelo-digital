@@ -53,6 +53,18 @@ meteorología. Cambiar de perfil no sobrescribe otros resultados.
 
 ## Lote de cuatro emplazamientos · 20/11/2026
 
+La lista de Tordesillas, Chorzele, San José–La Joya y Dunedin se mantiene
+una sola vez en `nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json`.
+Tanto el servidor NAS como el mapa web leen ese mismo fichero. En el
+visor, San José se resuelve desde la cartera Factiun, sin duplicar sus
+coordenadas; los otros tres son puntos provisionales del municipio.
+
+Por seguridad, el servicio HTTP solo permite descargar este JSON de la
+carpeta `nas/viabilidad`. No permite acceso a la configuración, claves ni
+código del servidor. Los tests HTTP comprueban expresamente ambas reglas.
+
+
+
 Archivo versionado: `nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json`.
 Incluye Tordesillas (Valladolid), Chorzele (Mazowieckie), San José–La Joya
 (Arequipa) y Dunedin (Otago). **San José se resuelve dinámicamente del número
