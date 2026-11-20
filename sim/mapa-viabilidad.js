@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-meteorologia-verificada-v13';
+var MV_VERSION='viabilidad-2026-11-20-anios-explicitos-v14';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -48,12 +48,25 @@ function saveCustom(site){
 function getSite(id){return mv.sites.find(function(x){return x.id===id;})||null;}
 function isCustom(x){return x&&x.id.indexOf('custom:')===0;}
 function cleanName(x){return String(x||'').trim();}
+/* Una firma de "30 años" SIN los años concretos permitiría conservar
+   como APTO el 1996–2025 cuando, al cambiar el año, se pide 1997–2026.
+   Se usa el calendario UTC para que la app del usuario y el NAS resuelvan
+   exactamente el mismo periodo incluso si están en husos diferentes. */
+function historicalYears(period,now){
+  var cutoff=(now||new Date()).getUTCFullYear()-1;
+  if(period==='30')return Array.from({length:30},function(_,i){return cutoff-29+i;});
+  var year=Number(period);
+  if(!Number.isInteger(year)||year<1940||year>cutoff)
+    throw new Error('Año histórico fuera de periodo completo: '+String(period));
+  return [year];
+}
 function signature(){
   var p=activeProfile();
   var physics=typeof tocadosFis==='function'?tocadosFis():{};
   /* El simulador es la autoridad también de los parámetros físicos y de
      batería. Nunca copiar estas lecturas al módulo geográfico. */
   var period=e('mv-period').value;
+  var years=historicalYears(period);
   var soc0=period==='30'?null:num(e('soc0').value)/100;
   var base=opcionesDelPanel(p);
   /* La validez depende también de la ficha y química, no solo de las funciones:
@@ -66,8 +79,10 @@ function signature(){
     stowMotor:typeof K_STOW_MOTOR==='number'?K_STOW_MOTOR:null,
     stringFull:typeof POA_STRING_FULL==='number'?POA_STRING_FULL:null};
   return {key:JSON.stringify({v:MV_VERSION,engine:MV_ENGINE_HASH,p:p&&p.id,w:p&&p.chgW,
-    period:period,meteo:'ERA5 GHI/DHI/media + ERA5-Land racha/nieve/T; m/s',soc0:soc0,base:base,physics:physics,specs:specs}),
-    base:base,profile:p,soc0:soc0};
+    period:period,years:[years[0],years[years.length-1]],nYears:years.length,
+    meteo:'ERA5 GHI/DHI/media + ERA5-Land racha/nieve/T; m/s',
+    soc0:soc0,base:base,physics:physics,specs:specs}),
+    base:base,profile:p,soc0:soc0,years:years};
 }
 function selectedPageProfile(){
   return PROFILES[e('prof').value]||null;
@@ -311,8 +326,7 @@ function searchOnMap(){
 async function meteoForSite(site,period){
   /* Siempre meteo local para las coordenadas del punto. Un WeatherContract activo
      puede ser de OTRO emplazamiento: no puede dar un falso mapa verde. */
-  var finalYear=new Date().getFullYear()-1;
-  var years=period==='30'?Array.from({length:30},function(_,i){return finalYear-29+i;}):[Number(period)];
+  var years=historicalYears(period);
   /* Misma familia de reanálisis en todos los inviernos. La celda
      meteorológica no equivale a una estación en las coordenadas exactas. */
   var weatherSite=Object.assign({},site,{meteoMode:'era5_hybrid'});
@@ -596,7 +610,7 @@ function initialize(){
   syncPanel();
   e('mv-panel').value=e('panel').value;
   syncControls();
-  var year=new Date().getFullYear()-1,period=e('mv-period');
+  var year=new Date().getUTCFullYear()-1,period=e('mv-period');
   period.add(new Option('30 años seguidos · estudio de viabilidad','30'));
   for(var y=year;y>=year-10;y--)period.add(new Option(y+' · comprobación preliminar (1 año)',String(y)));
   period.value='30';
