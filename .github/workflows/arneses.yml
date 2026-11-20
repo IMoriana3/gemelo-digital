@@ -29,6 +29,12 @@
 
 name: arneses
 
+# La PR se revisa por HEAD, no por estados obsoletos. Cancelar ejecuciones
+# antiguas solo en pull_request; nunca cancelar una comprobación de main.
+concurrency:
+  group: arneses-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
