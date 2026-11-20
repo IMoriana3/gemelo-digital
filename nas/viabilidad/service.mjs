@@ -225,7 +225,11 @@ async function tick(){
   }finally{running=false;}
 }
 async function getSnapshot(){
-  if(snapshotCache&&Date.now()-snapshotCache.time<10000)return snapshotCache.value;
+  var utcCutoff=new Date().getUTCFullYear()-1;
+  /* El caché de 10 segundos NO debe retener estudios de un rango
+     diferente justo al cambiar el año UTC. */
+  if(snapshotCache&&snapshotCache.cutoff===utcCutoff&&
+     Date.now()-snapshotCache.time<10000)return snapshotCache.value;
   /* El snapshot no publica conclusiones obsoletas después de Año Nuevo,
      aunque siga existiendo su evidencia histórica en /data/done. */
   const items=(await list('done')).filter(j=>{
@@ -235,7 +239,7 @@ async function getSnapshot(){
     }catch(_){return false;}
   }).map(j=>({site:j.site,record:j.record,job_id:j.id}));
   const value={ok:true,revision:REVISION,items};
-  snapshotCache={value,time:Date.now()};return value;
+  snapshotCache={value,time:Date.now(),cutoff:utcCutoff};return value;
 }
 function json(res,status,obj){
   const buf=Buffer.from(JSON.stringify(obj));
