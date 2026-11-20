@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {normalizeJob,requestedYears,terminalJobError,REVISION} from '../nas/viabilidad/service.mjs';
 import {inLand} from '../nas/viabilidad/seed.mjs';
+import {worldGrid,WORLD_LEVELS} from '../nas/viabilidad/mundo.mjs';
 const j=normalizeJob({site:{n:'Prueba',lat:41.576342,lon:-0.798139},profileId:'SP_45W_6Ah',period:'30'});
 assert.equal(j.revision,REVISION);
 assert.equal(terminalJobError('Trabajo histórico caducado por cambio de año; reencolar periodo vigente'),true);
@@ -60,6 +61,38 @@ const land={type:'FeatureCollection',features:[{geometry:{type:'Polygon',coordin
 assert.equal(inLand(-2,41,land),true);
 assert.equal(inLand(0.5,41.5,land),false);
 assert.equal(inLand(10,40,land),false);
+/* Mundo entero: no sólo 20 puntos. El generador debe recuperar islotes
+   menores de la celda y conservar N/S, costas, polos y agujeros (lagos). */
+const island=(x,y,d)=>[[x-d,y-d],[x+d,y-d],[x+d,y+d],[x-d,y+d],[x-d,y-d]];
+const mockWorld={type:'FeatureCollection',features:[
+  {geometry:{type:'Polygon',coordinates:[island(-5,41.5,0.012)]}},
+  {geometry:{type:'Polygon',coordinates:[island(175,-17.5,0.012)]}},
+  {geometry:{type:'Polygon',coordinates:[island(45,-89.5,0.022)]}},
+  {geometry:{type:'Polygon',coordinates:[island(-30,78.5,0.022)]}},
+  {geometry:{type:'Polygon',coordinates:[island(20,10,2),
+    island(20,10,0.75)]}}
+]};
+assert.deepEqual(WORLD_LEVELS,[5,2,1]);
+for(const level of WORLD_LEVELS){
+  const grid=worldGrid(mockWorld,level);
+  assert.ok(grid.nodes.length>=4,'Debe conservar cuatro regiones, paso '+level);
+  const pts=grid.nodes.map(x=>[x.lon,x.lat]);
+  assert.ok(pts.some(([x,y])=>Math.abs(x+5)<0.025&&Math.abs(y-41.5)<0.025));
+  assert.ok(pts.some(([x,y])=>Math.abs(x-175)<0.025&&Math.abs(y+17.5)<0.025));
+  assert.ok(pts.some(([x,y])=>Math.abs(x-45)<0.03&&Math.abs(y+89.5)<0.03));
+  assert.ok(pts.some(([x,y])=>Math.abs(x+30)<0.03&&Math.abs(y-78.5)<0.03));
+  for(const node of grid.nodes){
+    assert.equal(inLand(node.lon,node.lat,mockWorld),true,
+      'No se permite crear un nodo sin tierra');
+    assert.ok(Math.abs(node.lat)<90&&Math.abs(node.lon)<=180);
+    assert.ok(node.id.startsWith('grid:'+level+':'));
+  }
+  assert.deepEqual(worldGrid(mockWorld,level).nodes,grid.nodes,
+    'La rejilla mundial ha de ser estable para poder reanudar');
+}
+const hasHole=worldGrid(mockWorld,1).nodes.some(node=>
+  node.lat>9.4&&node.lat<10.6&&node.lon>19.4&&node.lon<20.6);
+assert.equal(hasHole,false,'Nunca se califica un lago como tierra');
 /* Cuatro ubicaciones reproducibles: San José sale de la CARTERA, no de una
    coordenada duplicada; las otras tres son puntos urbanos provisionales. */
 import {execFileSync,spawn} from 'node:child_process';
