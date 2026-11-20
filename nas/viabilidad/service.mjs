@@ -123,7 +123,7 @@ export function normalizeJob(input,asOf=new Date()){
      identificador del escenario, sólo permiten auditar de qué plan viene. */
   const world=input.world==null?null:input.world;
   if(world!==null&&(typeof world!=='object'||!['5','2','1'].includes(String(world.step))||
-     !/^plan-[0-9]+-[0-9a-f]{16}-[0-9]{4}_[0-9]{4}-[0-9a-f]{12}\\.json$/.test(String(world.plan||''))))
+     !/^plan-[0-9]+-[0-9a-f]{16}-[0-9]{4}_[0-9]{4}-[0-9a-f]{12}\.json$/.test(String(world.plan||''))))
     throw Error('Origen de plan mundial inválido');
   return {id,revision:REVISION,site,profileId,period,yearRange,panelW,
     scenario,signature,world,attempts:0,created_at:new Date().toISOString()};
@@ -221,7 +221,7 @@ const WORLD_BUFFER=Math.min(50,Math.max(1,Number(process.env.WORLD_QUEUE_BUFFER)
 const worldFile=name=>join(DATA,'world',name);
 async function worldPlans(){
   const files=(await readdir(join(DATA,'world'))).filter(f=>
-    /^plan-(5|2|1)-[0-9a-f]{16}-[0-9]{4}_[0-9]{4}-[0-9a-f]{12}\\.json$/.test(f));
+    /^plan-(5|2|1)-[0-9a-f]{16}-[0-9]{4}_[0-9]{4}-[0-9a-f]{12}\.json$/.test(f));
   const out=[];
   for(const name of files){
     try{
