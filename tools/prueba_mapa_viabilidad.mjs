@@ -29,6 +29,13 @@ assert.match(html,/function opcionesDelPanel\(prof\)/);
 assert.match(html,/var opts=opcionesDelPanel\(prof\)/);
 assert.match(js,/var base=opcionesDelPanel\(p\)/);
 assert.match(js,/async function loadPrioritySites\(\)/);
+assert.match(js,/async function refreshGlobalCoverage\(\)/);
+assert.match(js,/fetch\('\/api\/mapa\/world\?'/);
+assert.match(js,/zoom<4\?5:zoom<6\?2:1/);
+assert.match(js,/const exact=item\.record&&item\.record\.sig===sig/);
+assert.match(js,/stat==='calculado'\?'CALCULADO PARA OTRA CONFIGURACIÓN'/);
+assert.match(js,/label\.textContent='Cobertura terrestre mundial/);
+assert.doesNotMatch(js,/interpolarAptitud|interpolateViability/);
 assert.match(js,/if\(item\.cartera_num!=null\)return/);
 const cases=JSON.parse(readFileSync(
   new URL('../nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json',import.meta.url),'utf8'));
