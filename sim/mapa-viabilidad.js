@@ -4,14 +4,14 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-v5';
+var MV_VERSION='viabilidad-2026-11-20-paridad-v6';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
 var mv={sites:[],selected:null,map:null,markers:{},busy:false,records:{},custom:[],config:null};
 /* Una conclusión guardada deja de ser vigente si cambia el motor de la página. */
 var MV_ENGINE_HASH=(function(){
-  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesDe,
+  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesDe,calculaControlTCU,
                  FISICA.consumoTCU,Abanderamiento.prototype.paso];
   var src=functions.map(function(f){return typeof f==='function'?Function.prototype.toString.call(f):'missing';}).join('|');
   var hash=2166136261;
@@ -44,6 +44,10 @@ function signature(){
   var p=activeProfile(), page=selectedPageProfile(), isSelected=page&&p&&page.id===p.id&&num(e('panel').value)===num(p.chgW);
   var tmin=isSelected?num(e('tmin').value):p&&p.tCarga?num(p.tCarga[0]):num(e('tmin').value);
   var physics=typeof tocadosFis==='function'?tocadosFis():{};
+  /* La página normal arranca en SOC del deslizador en 1 año. El barrido
+     30 años usa SOC estacionario por estrategia, no el deslizador. */
+  var period=e('mv-period').value;
+  var soc0=period==='30'?null:num(e('soc0').value)/100;
   var base={
     motorModel:['factiun','curva'].includes(e('motor').value)?e('motor').value:num(e('motor').value),
     soh:e('aged').checked?SOH_FIN_VIDA:1,
@@ -63,7 +67,8 @@ function signature(){
     stowMotor:typeof K_STOW_MOTOR==='number'?K_STOW_MOTOR:null,
     stringFull:typeof POA_STRING_FULL==='number'?POA_STRING_FULL:null};
   return {key:JSON.stringify({v:MV_VERSION,engine:MV_ENGINE_HASH,p:p&&p.id,w:p&&p.chgW,
-    period:e('mv-period').value,base:base,physics:physics,specs:specs}),base:base,profile:p};
+    period:period,meteo:'ERA5+ERA5-Land',soc0:soc0,base:base,physics:physics,specs:specs}),
+    base:base,profile:p,soc0:soc0};
 }
 function selectedPageProfile(){
   return PROFILES[e('prof').value]||null;
@@ -361,10 +366,15 @@ async function evaluateSite(){
       var control=controls[j],derived=opcionesDe(control,profile,cfg.base);
       note('Evaluando '+site.n+' · '+control.n+' ('+(j+1)+'/'+controls.length+')…');
       await pause();
-      if(met.years.length>1)rows=simulaSeguido(met.tramos,derived.p,site,derived.o);
-      else rows=simulate(met.tramos[0].meteo,derived.p,site,socEstacionario(derived.o),derived.o);
+      /* MISMA FUNCIÓN que usa runControls en el simulador principal. Se prohíbe
+         una segunda decisión de SOC inicial, perfil o política en el mapa. */
+      var result=calculaControlTCU(
+        met.years.length>1?met.tramos:met.tramos[0].meteo,
+        profile,site,cfg.base,control,
+        met.years.length>1?{seguido:true}:{soc0:cfg.soc0});
+      rows=result.rows;
       if(!rows||!rows.length)throw new Error('El simulador no devolvió datos para '+control.n);
-      var s=summarize(rows),win=null;
+      var s=result.S,win=null;
       var tmin=Infinity,tmax=-Infinity,modelBad=0;
        for(var ti=0;ti<rows.length;ti++){
          var r=rows[ti],tc=r.tCell;
