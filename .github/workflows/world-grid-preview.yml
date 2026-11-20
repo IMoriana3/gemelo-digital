@@ -1,4 +1,7 @@
 name: Rejilla terrestre mundial · sin SOC
+concurrency:
+  group: world-grid-${{ github.ref }}
+  cancel-in-progress: true
 on:
   push:
     branches: [feat/mapa-mundial-viabilidad-tcu]
