@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-paridad-v8';
+var MV_VERSION='viabilidad-2026-11-20-paridad-v9';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -85,7 +85,10 @@ function effectiveResult(site){
   if(!entries)return null;
   var all=Array.isArray(entries)?entries:[entries]; /* compatibilidad con 1ª versión */
   var sig=signature().key;
-  return all.find(function(item){return item&&item.sig===sig;})||null;
+  /* Un mismo nombre/código de planta con coordenadas cambiadas NO hereda
+     un resultado anterior. Las fichas sin localización explícita caducan. */
+  return all.find(function(item){return item&&item.sig===sig&&item.site&&
+    item.site.lat===site.lat&&item.site.lon===site.lon;})||null;
 }
 function controlsFor(p){
   return controlesPara(p).filter(function(c){return !c.prof;});
@@ -462,10 +465,12 @@ async function evaluateSite(){
       }
       results.push(item);rows=null;
     }
-    var record={sig:cfg.key,source:met.source,yearsOK:met.ok,yearsAsked:met.years.length,
+    var record={sig:cfg.key,site:{lat:site.lat,lon:site.lon},
+      source:met.source,yearsOK:met.ok,yearsAsked:met.years.length,
       missingYears:met.missing,results:results,date:new Date().toLocaleString('es-ES')};
     var entries=mv.records[site.id],all=Array.isArray(entries)?entries:(entries?[entries]:[]);
-    var previous=all.findIndex(function(item){return item.sig===record.sig;});
+    var previous=all.findIndex(function(item){return item.sig===record.sig&&
+      item.site&&item.site.lat===site.lat&&item.site.lon===site.lon;});
     if(previous>=0)all.splice(previous,1);
     all.push(record);
     /* Varias TCUs por ubicación, pero solo resúmenes: nunca las 262.800 filas */
@@ -645,7 +650,8 @@ async function refreshNAS(){
         mv.sites.push(siteOf(s.n,s.lat,s.lon,s.id,s.fuente));changed=true;
       }
       var entries=mv.records[s.id],all=Array.isArray(entries)?entries:(entries?[entries]:[]);
-      if(!all.some(function(x){return x.sig===r.sig;})){
+      if(!all.some(function(x){return x.sig===r.sig&&x.site&&
+        x.site.lat===Number(s.lat)&&x.site.lon===Number(s.lon);})){
         all.push(r);mv.records[s.id]=all.slice(-32);changed=true;
       }
     });
