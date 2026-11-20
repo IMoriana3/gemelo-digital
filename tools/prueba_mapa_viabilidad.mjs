@@ -30,6 +30,10 @@ assert.match(html,/var opts=opcionesDelPanel\(prof\)/);
 assert.match(js,/var base=opcionesDelPanel\(p\)/);
 assert.match(js,/async function loadPrioritySites\(\)/);
 assert.match(js,/async function refreshGlobalCoverage\(\)/);
+assert.match(js,/function meteoSummary\(tramos\)/);
+assert.match(js,/metric\('Irradiación GHI media anual'/);
+assert.match(js,/metric\('Ráfaga máxima'/);
+assert.match(js,/metric\('Nieve en suelo máxima'/);
 assert.match(js,/fetch\('\/api\/mapa\/world\?'/);
 assert.match(js,/zoom<4\?5:zoom<6\?2:1/);
 assert.match(js,/const exact=item\.record&&item\.record\.sig===sig/);
@@ -97,10 +101,27 @@ const ctx={
 ctx.Abanderamiento.prototype.paso=function(){};
 vm.createContext(ctx);
 const code=js.replace("if(document.readyState==='loading')",
-  'globalThis.__mapTests={fullYear,outcome,historicalYears};\nif(document.readyState===\'loading\')');
+  'globalThis.__mapTests={fullYear,outcome,historicalYears,meteoSummary};\nif(document.readyState===\'loading\')');
 assert.notEqual(code,js,'No se ha encontrado el punto de inyección de pruebas');
 vm.runInContext(code,ctx,{filename:'sim/mapa-viabilidad.js'});
-const {fullYear,outcome,historicalYears}=ctx.__mapTests;
+const {fullYear,outcome,historicalYears,meteoSummary}=ctx.__mapTests;
+const clima=meteoSummary([{meteo:[
+  {t:new Date('2024-01-01T00:00:00Z'),ghi:100,temp:-10,wind:3,gust:5,snowDepth:0.02},
+  {t:new Date('2024-01-01T01:00:00Z'),ghi:300,temp:12,wind:5,gust:9,snowDepth:0.06}
+]},{meteo:[
+  {t:new Date('2025-01-01T00:00:00Z'),ghi:200,temp:31,wind:8,gust:12,snowDepth:0},
+  {t:new Date('2025-01-01T01:00:00Z'),ghi:400,temp:2,wind:4,gust:11,snowDepth:null}
+]}]);
+assert.equal(clima.horas,4);
+assert.equal(clima.anios,2);
+assert.equal(clima.ghi_kwh_m2_anio,0.5);
+assert.equal(clima.t_min_c,-10);
+assert.equal(clima.t_max_c,31);
+assert.equal(clima.viento_max_ms,8);
+assert.equal(clima.racha_max_ms,12);
+assert.equal(clima.nieve_max_m,0.06);
+assert.equal(clima.horas_sin_nieve,1);
+assert.match(clima.nota,/no mediciones in situ/);
 /* Año 2027: `30` ya no significa 1996–2025, sino 1997–2026.
    La firma de caché debe contener ese rango y caducar automáticamente. */
 const roll2026=Array.from(historicalYears('30',new Date(Date.UTC(2026,11,31,23,59))));
