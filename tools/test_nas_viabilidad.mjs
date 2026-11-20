@@ -191,6 +191,42 @@ try{
   ],{cwd,encoding:'utf8',env});
   const a1=JSON.parse(readLocalFile(join(worldData,'world',plan5),'utf8'));
   assert.equal(a1.cursor,4);
+  /* Una planta ya calculada en /done se reutiliza en la rejilla; un nodo
+     en /failed NO entra de nuevo en pending por existir en otra escala. */
+  mkdirSync(join(worldData,'done'),{recursive:true});
+  mkdirSync(join(worldData,'failed'),{recursive:true});
+  const previouslyDone=normalizeJob({
+    site:a0.sites[2],profileId:a0.profiles[0],period:'30'});
+  const previouslyFailed=normalizeJob({
+    site:a0.sites[3],profileId:a0.profiles[0],period:'30'});
+  writeFileSync(join(worldData,'done',previouslyDone.id+'.json'),
+    JSON.stringify({...previouslyDone,record:{
+      sig:'dato-canónico-previo-de-planta',results:[{k:'std',status:'condicionado'}]
+    }}));
+  writeFileSync(join(worldData,'failed',previouslyFailed.id+'.json'),
+    JSON.stringify({...previouslyFailed,attempts:3,last_error:'fallo terminal'}));
+  const reuseScript=[
+    "import {getWorldCoverage,enqueue} from './nas/viabilidad/service.mjs';",
+    "const jobs=JSON.parse(process.env.QA_JOBS);",
+    "const cov=await getWorldCoverage(new URLSearchParams({step:'5',profile:'SP_45W_6Ah',period:'30'}));",
+    "const done=cov.nodes.find(n=>n.site.id===jobs.done.site.id);",
+    "const failed=cov.nodes.find(n=>n.site.id===jobs.failed.site.id);",
+    "const d=await enqueue(jobs.done),f=await enqueue(jobs.failed);",
+    "console.log(JSON.stringify({done:done?.state,doneResult:done?.record?.result?.status,",
+    "failed:failed?.state,alreadyDone:d.already,alreadyFailed:f.already}));"
+  ].join('\n');
+  const reuse=JSON.parse(execFileSync(process.execPath,
+    ['--input-type=module','--eval',reuseScript],{
+      cwd,encoding:'utf8',env:{...env,QA_JOBS:JSON.stringify({
+        done:previouslyDone,failed:previouslyFailed
+      })}
+    }));
+  assert.equal(reuse.done,'calculado');
+  assert.equal(reuse.doneResult,'condicionado');
+  assert.equal(reuse.failed,'fallido');
+  assert.equal(reuse.alreadyDone,'done');
+  assert.equal(reuse.alreadyFailed,'failed');
+  assert.equal(existsSync(join(worldData,'pending',previouslyFailed.id+'.json')),false);
 }finally{rmSync(worldData,{recursive:true,force:true});}
 /* Smoke HTTP real: servidor de Synology sin clave ni API externa.
    El JSON canónico de casos es legible en el mapa, pero el código de
