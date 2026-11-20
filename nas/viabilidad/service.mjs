@@ -241,7 +241,7 @@ async function staticFile(res,pathname){
   try{decoded=decodeURIComponent(pathname);}catch(_){return json(res,400,{error:'Ruta inválida'});}
   if(decoded.includes('..')||decoded.includes('\\'))return json(res,403,{error:'Acceso denegado'});
   const relative=decoded==='/'?'bateria.html':decoded.replace(/^\/+/,'');
-  if(!/^(?:bateria\.html|favicon\.svg|sim\/|lib\/|assets\/)/.test(relative))
+  if(!/^(?:bateria\.html|favicon\.svg|sim\/|lib\/|assets\/|nas\/viabilidad\/casos-tordesillas-chorzele-joya-dunedin\.json$)/.test(relative))
     return json(res,404,{error:'No encontrado'});
   const file=resolve(ROOT,relative);
   if(!file.startsWith(ROOT+sep)||!mime[extname(file).toLowerCase()])
