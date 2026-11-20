@@ -18,11 +18,11 @@ const UI_QUEUE=process.env.ENABLE_UI_QUEUE==='1';
 export const REVISION=createHash('sha256').update(
   ['bateria.html','sim/mapa-viabilidad.js','sim/fisica.js','sim/viento.js',
    'sim/canon.js','sim/cartera.js','pines.json',
-   'nas/viabilidad/service.mjs','nas/viabilidad/seed.mjs']
+   'nas/viabilidad/service.mjs','nas/viabilidad/seed.mjs','nas/viabilidad/mundo.mjs']
   .map(f=>readFileSync(join(ROOT,f))).reduce((a,b)=>Buffer.concat([a,b]),Buffer.alloc(0))
 ).digest('hex').slice(0,16);
 const hash=s=>createHash('sha256').update(s).digest('hex');
-const folders=['pending','running','done','failed','meteo'];
+const folders=['pending','running','done','failed','meteo','world'];
 const jobPath=(folder,id)=>join(DATA,folder,id+'.json');
 async function atomic(file,obj){
   const tmp=file+'.'+randomUUID()+'.tmp';
@@ -119,8 +119,14 @@ export function normalizeJob(input,asOf=new Date()){
   }
   const id=hash(JSON.stringify([REVISION,site.lat,site.lon,profileId,period,
     yearRange,panelW,scenario,signature])).slice(0,24);
+  /* Metadatos de la cola mundial. No tienen efecto en la física ni en el
+     identificador del escenario, sólo permiten auditar de qué plan viene. */
+  const world=input.world==null?null:input.world;
+  if(world!==null&&(typeof world!=='object'||!['5','2','1'].includes(String(world.step))||
+     !/^plan-[0-9]+-[0-9a-f]{16}-[0-9]{4}_[0-9]{4}-[0-9a-f]{12}\\.json$/.test(String(world.plan||''))))
+    throw Error('Origen de plan mundial inválido');
   return {id,revision:REVISION,site,profileId,period,yearRange,panelW,
-    scenario,signature,attempts:0,created_at:new Date().toISOString()};
+    scenario,signature,world,attempts:0,created_at:new Date().toISOString()};
 }
 export async function enqueue(input){
   const job=normalizeJob(input);
@@ -208,9 +214,58 @@ async function compute(job){
 export function terminalJobError(message){
   return /^(?:Trabajo histórico caducado|Diferencia de configuración NAS\/visor|Diferencia de firma al terminar|Perfil NAS no presente|Coordenadas NAS inválidas|Periodo NAS no reconocido)/.test(String(message||''));
 }
+/* Plan mundial sin limit=20: cola reanudable, con cantidad acotada de
+   pendientes. Un plan completo ocupa UN fichero con cursor persistente;
+   nunca se crean centenares de miles de JSON simultáneamente. */
+const WORLD_BUFFER=Math.min(50,Math.max(1,Number(process.env.WORLD_QUEUE_BUFFER)||12));
+const worldFile=name=>join(DATA,'world',name);
+async function worldPlans(){
+  const files=(await readdir(join(DATA,'world'))).filter(f=>
+    /^plan-(5|2|1)-[0-9a-f]{16}-[0-9]{4}_[0-9]{4}-[0-9a-f]{12}\\.json$/.test(f));
+  const out=[];
+  for(const name of files){
+    try{
+      const p=JSON.parse(await readFile(worldFile(name),'utf8'));
+      if(p.schema!=='factiun.world-coverage.v1'||p.revision!==REVISION||
+         !p.enabled||!Array.isArray(p.sites)||!Array.isArray(p.profiles)||p.cursor>p.total||
+         p.total!==p.sites.length*p.profiles.length||p.step<=0)continue;
+      const yrs=requestedYears(p.period);
+      if(p.yearRange?.[0]!==yrs[0]||p.yearRange?.[1]!==yrs[1])continue;
+      out.push({name,plan:p});
+    }catch(_){}
+  }
+  return out.sort((a,b)=>b.plan.step-a.plan.step);
+}
+async function fillWorldQueue(){
+  if(!KEY)return;
+  let backlog=(await readdir(join(DATA,'pending'))).filter(f=>f.endsWith('.json')).length+
+              (await readdir(join(DATA,'running'))).filter(f=>f.endsWith('.json')).length;
+  if(backlog>=WORLD_BUFFER)return;
+  for(const {name,plan} of await worldPlans()){
+    if(plan.cursor>=plan.total){
+      /* No iniciar la etapa siguiente mientras queden trabajos activos
+         de la etapa anterior. Los errores terminales cuentan como cerrados. */
+      if(backlog>0)return;
+      continue;
+    }
+    while(backlog<WORLD_BUFFER&&plan.cursor<plan.total){
+      const index=plan.cursor,at=Math.floor(index/plan.profiles.length),
+        profileId=plan.profiles[index%plan.profiles.length],site=plan.sites[at];
+      const q=await enqueue({site,profileId,period:plan.period,
+        world:{step:plan.step,plan:name}});
+      /* Atomicidad: primero el JSON pending/done; DESPUÉS se avanza
+         el cursor. Tras un crash se reintenta y enqueue es idempotente. */
+      plan.cursor++;
+      await atomic(worldFile(name),plan);
+      if(q.already===null)backlog++;
+    }
+    return;
+  }
+}
 let running=false,snapshotCache=null;
 async function tick(){
   if(running||!KEY)return;
+  await fillWorldQueue();
   const pending=await list('pending');
   const job=pending.find(j=>!j.retry_after||Date.parse(j.retry_after)<=Date.now());
   if(!job)return;
