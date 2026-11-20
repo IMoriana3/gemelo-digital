@@ -240,6 +240,11 @@ export function terminalJobError(message){
    nunca se crean centenares de miles de JSON simultáneamente. */
 const WORLD_BUFFER=Math.min(50,Math.max(1,Number(process.env.WORLD_QUEUE_BUFFER)||12));
 const worldFile=name=>join(DATA,'world',name);
+/* Pausa global como fichero SEPARADO: nunca se edita el manifiesto
+   mientras el NAS actualiza el cursor, evitando perder avances por
+   operaciones concurrentes entre terminal y contenedor. */
+const WORLD_PAUSE_FILE=join(DATA,'world','PAUSED.json');
+const worldPaused=()=>existsSync(WORLD_PAUSE_FILE);
 /* Los manifiestos 1° contienen decenas de miles de puntos. El servidor
    no debe parsearlos cada 5 segundos: usa memoria de lectura cuyo origen
    de verdad sigue siendo siempre el JSON persistido en /data/world. */
@@ -271,7 +276,7 @@ async function worldPlans(){
   return out.sort((a,b)=>b.plan.step-a.plan.step);
 }
 export async function fillWorldQueue(){
-  if(!KEY)return;
+  if(!KEY||worldPaused())return;
   let backlog=(await readdir(join(DATA,'pending'))).filter(f=>f.endsWith('.json')).length+
               (await readdir(join(DATA,'running'))).filter(f=>f.endsWith('.json')).length;
   if(backlog>=WORLD_BUFFER)return;
@@ -311,8 +316,9 @@ async function tick(){
   }
   lowDiskNotice=false;
   await fillWorldQueue();
-  const pending=await list('pending');
-  const job=pending.find(j=>!j.retry_after||Date.parse(j.retry_after)<=Date.now());
+  const pending=await list('pending'),paused=worldPaused();
+  const job=pending.find(j=>
+    (!paused||!j.world)&&(!j.retry_after||Date.parse(j.retry_after)<=Date.now()));
   if(!job)return;
   running=true;
   try{
@@ -397,7 +403,7 @@ export async function getWorldCoverage(query){
     else if(existsSync(jobPath('pending',job.id)))state='en_cola';
     items.push({site,state,record});
   }
-  return {ok:true,configured:true,step,period,control,profileId,
+  return {ok:true,configured:true,paused:worldPaused(),step,period,control,profileId,
     years:yrs,stages,planned_cells:plan.sites.length,
     visible_cells:candidates.length,truncated:candidates.length>limit,
     nodes:items,
@@ -471,7 +477,7 @@ async function request(req,res){
     return json(res,200,{ok:true,revision:REVISION,meteorologia:KEY?'licenciada':'pendiente_de_licencia',
       puede_encolar:UI_QUEUE&&!!TOKEN,counts:count,
       almacenamiento:storage,
-      cobertura_mundial:{registrada:world.length>0,etapas:world}});
+      cobertura_mundial:{registrada:world.length>0,pausada:worldPaused(),etapas:world}});
   }
   if(req.method==='GET'&&path==='/api/mapa/snapshot')
     return json(res,200,await getSnapshot());
