@@ -292,7 +292,7 @@ export async function fillWorldQueue(){
       if(backlog>0)return;
       continue;
     }
-    while(backlog<WORLD_BUFFER&&plan.cursor<plan.total){
+    while(!worldPaused()&&backlog<WORLD_BUFFER&&plan.cursor<plan.total){
       const index=plan.cursor,at=Math.floor(index/plan.profiles.length),
         profileId=plan.profiles[index%plan.profiles.length],site=plan.sites[at];
       const q=await enqueue({site,profileId,period:plan.period,
