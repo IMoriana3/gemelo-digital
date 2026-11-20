@@ -232,6 +232,14 @@ try{
     site:a0.sites[2],profileId:a0.profiles[0],period:'30'});
   const previouslyFailed=normalizeJob({
     site:a0.sites[3],profileId:a0.profiles[0],period:'30'});
+  const worldDone=normalizeJob({
+    site:a0.sites[4],profileId:a0.profiles[0],period:'30'});
+  const shard=join(worldData,'world-done',worldDone.id.slice(0,2));
+  mkdirSync(shard,{recursive:true});
+  writeFileSync(join(shard,worldDone.id+'.json'),
+    JSON.stringify({...worldDone,world:{step:5,plan:plan5},
+      record:{sig:'resultado-nodal-sin-extrapolar',
+        results:[{k:'std',status:'no_apto'}]}}));
   writeFileSync(join(worldData,'done',previouslyDone.id+'.json'),
     JSON.stringify({...previouslyDone,record:{
       sig:'dato-canónico-previo-de-planta',results:[{k:'std',status:'condicionado'}]
@@ -244,14 +252,17 @@ try{
     "const cov=await getWorldCoverage(new URLSearchParams({step:'5',profile:'SP_45W_6Ah',period:'30'}));",
     "const done=cov.nodes.find(n=>n.site.id===jobs.done.site.id);",
     "const failed=cov.nodes.find(n=>n.site.id===jobs.failed.site.id);",
-    "const d=await enqueue(jobs.done),f=await enqueue(jobs.failed);",
+    "const nodal=cov.nodes.find(n=>n.site.id===jobs.nodal.site.id);",
+    "const d=await enqueue(jobs.done),f=await enqueue(jobs.failed),",
+    "n=await enqueue(jobs.nodal);",
     "console.log(JSON.stringify({done:done?.state,doneResult:done?.record?.result?.status,",
-    "failed:failed?.state,alreadyDone:d.already,alreadyFailed:f.already}));"
+    "failed:failed?.state,alreadyDone:d.already,alreadyFailed:f.already,",
+    "nodal:nodal?.state,nodalResult:nodal?.record?.result?.status,alreadyNodal:n.already}));"
   ].join('\n');
   const reuse=JSON.parse(execFileSync(process.execPath,
     ['--input-type=module','--eval',reuseScript],{
       cwd,encoding:'utf8',env:{...env,QA_JOBS:JSON.stringify({
-        done:previouslyDone,failed:previouslyFailed
+        done:previouslyDone,failed:previouslyFailed,nodal:worldDone
       })}
     }));
   assert.equal(reuse.done,'calculado');
@@ -259,6 +270,9 @@ try{
   assert.equal(reuse.failed,'fallido');
   assert.equal(reuse.alreadyDone,'done');
   assert.equal(reuse.alreadyFailed,'failed');
+  assert.equal(reuse.nodal,'calculado');
+  assert.equal(reuse.nodalResult,'no_apto');
+  assert.equal(reuse.alreadyNodal,'world-done');
   assert.equal(existsSync(join(worldData,'pending',previouslyFailed.id+'.json')),false);
 }finally{rmSync(worldData,{recursive:true,force:true});}
 /* Smoke HTTP real: servidor de Synology sin clave ni API externa.
