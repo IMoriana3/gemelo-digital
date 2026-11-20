@@ -53,22 +53,15 @@ meteorología. Cambiar de perfil no sobrescribe otros resultados.
 
 ## Lote de cuatro emplazamientos · 20/11/2026
 
-La lista de Tordesillas, Chorzele, San José–La Joya y Dunedin se mantiene
-una sola vez en `nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json`.
-Tanto el servidor NAS como el mapa web leen ese mismo fichero. En el
-visor, San José se resuelve desde la cartera Factiun, sin duplicar sus
-coordenadas; los otros tres son puntos provisionales del municipio.
+La lista de Tordesillas (Valladolid), Chorzele (Mazowieckie),
+San José–La Joya (Arequipa) y Dunedin (Otago) se mantiene **una sola vez**
+en `nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json`.
+El NAS y el mapa web leen ese fichero. San José se resuelve a partir del
+proyecto 24019 de la cartera canónica, sin copiar sus coordenadas.
 
-Por seguridad, el servicio HTTP solo permite descargar este JSON de la
-carpeta `nas/viabilidad`. No permite acceso a la configuración, claves ni
-código del servidor. Los tests HTTP comprueban expresamente ambas reglas.
-
-
-
-Archivo versionado: `nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json`.
-Incluye Tordesillas (Valladolid), Chorzele (Mazowieckie), San José–La Joya
-(Arequipa) y Dunedin (Otago). **San José se resuelve dinámicamente del número
-de cartera 24019**; no se mantiene una segunda copia de sus coordenadas.
+Por seguridad, el servicio HTTP solo publica ese JSON dentro de
+`nas/viabilidad`: el código del servidor, secretos y variables de entorno
+no son descargables. Los tests HTTP verifican esa restricción.
 
 Los otros tres puntos son **centros de población**, no coordenadas verificadas
 de los proyectos. Sustituirlos por el punto exacto de implantación antes de
@@ -103,6 +96,23 @@ NO se ha lanzado esta cola. No se publican SOC ni veredictos hasta obtener
 los resultados horarios del propio simulador. Los resultados se consultan
 por `/api/mapa/snapshot`, separando claramente equipos y estrategias.
 Las pruebas CI validan el montaje y coordenadas, **no** la meteorología real.
+
+## Periodos históricos: identidad y caducidad
+
+La petición `--period 30` se resuelve en años completos del calendario
+**UTC**. Por ejemplo, en 2026 significa 1996–2025; al pasar a 2027
+significa 1997–2026. Ambos intervalos son trabajos **distintos**:
+`normalizeJob` incluye `yearRange` en el identificador de cola.
+
+Un trabajo pendiente que cruce el cambio de año sin ejecutarse se
+rechaza como caducado y debe volverse a encolar. Los resultados anteriores
+permanecen archivados en `/data/done`, pero se excluyen de
+`/api/mapa/snapshot`, que solo sirve periodos vigentes. Esto no reinicia
+el SOC el 1 de enero: los años continuos se siguen simulando juntos.
+
+La vista previa del comando `seed.mjs` no cambia ficheros de la cola,
+ni puede mover un trabajo de `running` a `pending`. La recuperación
+de trabajos interrumpidos pertenece al arranque del servidor NAS.
 
 ## Persistencia, datos y visor
 
