@@ -1974,6 +1974,30 @@ $('btnCanon').onclick=function(){
 };
 pintaParams();
 
+/* Un solo lector de parámetros editables. El mapa NO reconstruye estos
+   11 campos: pide al simulador las opciones del hardware seleccionado. */
+function opcionesDelPanel(prof){
+  var pageProf=PROFILES[$('prof').value],panelW=+$('panel').value;
+  var pageHardware=pageProf?(pageProf.string?pageProf:conPanel(pageProf,panelW)):null;
+  var same=!!(prof&&pageHardware&&
+    prof.id===pageHardware.id&&prof.chgW===pageHardware.chgW&&
+    prof.wh===pageHardware.wh);
+  var mm=$('motor').value;
+  mm=(mm==='factiun'||mm==='curva')?mm:+mm;
+  return {
+    motorModel:mm,soh:$('aged').checked?SOH_FIN_VIDA:1,
+    vientoStow:$('vientoStow').value,winter:$('winter').checked,
+    strategy:true,socTgt:+$('socTgt').value,socCrit:+$('socCrit').value,
+    fcDays:+$('fc').value,
+    tMin:(same||!prof||!prof.tCarga)?+$('tmin').value:prof.tCarga[0],
+    poaMin:+$('poaMin').value,
+    mountTilt:$('mount').value==='fix'?+$('tilt').value:null
+  };
+}
+function opcionesReferenciaTCU(opts){
+  return Object.assign({},opts,{strategy:false,winter:false,
+    socTgt:100,socCrit:0,fcDays:5});
+}
 $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
   var loc=getLoc();
@@ -1990,15 +2014,8 @@ $('run').onclick=function(){
     }
   }
   var prof=conPanel(PROFILES[$('prof').value],+$('panel').value);
-  var mm=$('motor').value; mm=(mm==='factiun'||mm==='curva')?mm:+mm;
-  var soh=$('aged').checked?SOH_FIN_VIDA:1;
-  var opts={motorModel:mm, soh:soh, vientoStow:$('vientoStow').value, winter:$('winter').checked, strategy:true,
-            socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
-            fcDays:+$('fc').value, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
-            mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
-  var refOpts={motorModel:mm, soh:soh, vientoStow:$('vientoStow').value, winter:false, strategy:false,
-            socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
-            mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
+  var opts=opcionesDelPanel(prof);
+  var refOpts=opcionesReferenciaTCU(opts);
   var soc0=+$('soc0').value/100;
   var job;
   if(($('src').value==='archive'||$('src').value==='contract'||$('src').value==='mapa') && $('year').value==='worst'){
