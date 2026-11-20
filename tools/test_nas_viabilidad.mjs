@@ -101,6 +101,21 @@ try {
    servicio y los ejemplos de secretos no son públicos. */
 import {createServer} from 'node:http';
 const srvData=mkdtempSync(join(tmpdir(),'factiun-nas-http-'));
+/* Dos evidencias antiguas en disco NO son intercambiables: el resultado
+   del periodo vigente se publica, el del rango anterior se conserva
+   en /data/done para auditoría, pero nunca aparece como vigente. */
+mkdirSync(join(srvData,'done'),{recursive:true});
+const fresh=normalizeJob({site:{n:'Corte vigente',lat:41.5,lon:-5},
+  profileId:'SP_45W_6Ah',period:'30'});
+const oldYears=[fresh.yearRange[0]-1,fresh.yearRange[1]-1];
+writeFileSync(join(srvData,'done','antiguo.json'),JSON.stringify({
+  ...fresh,id:'antiguo',yearRange:oldYears,
+  record:{sig:'resultado-obsoleto',results:[{k:'std',status:'apto'}]}
+}));
+writeFileSync(join(srvData,'done','vigente.json'),JSON.stringify({
+  ...fresh,id:'vigente',
+  record:{sig:'resultado-vigente',results:[{k:'std',status:'apto'}]}
+}));
 const probe=createServer();
 await new Promise((ok,fail)=>{probe.once('error',fail);probe.listen(0,'127.0.0.1',ok);});
 const port=probe.address().port;
@@ -126,7 +141,7 @@ try{
   const url='http://127.0.0.1:'+port;
   const health=await (await fetch(url+'/api/mapa/health')).json();
   assert.equal(health.meteorologia,'pendiente_de_licencia');
-  assert.equal(health.counts.done,0);
+  assert.equal(health.counts.done,2);
   const sites=await fetch(url+'/nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json');
   assert.equal(sites.status,200);
   assert.equal((await sites.json()).length,4);
@@ -141,7 +156,10 @@ try{
     body:JSON.stringify({site:{lat:41.5,lon:-5},profileId:'SP_45W_6Ah'})
   })).status,403);
   const snapshot=await (await fetch(url+'/api/mapa/snapshot')).json();
-  assert.deepEqual(snapshot.items,[]);
+  assert.equal(snapshot.items.length,1);
+  assert.equal(snapshot.items[0].job_id,'vigente');
+  assert.equal(snapshot.items[0].record.sig,'resultado-vigente');
+  assert.equal(snapshot.items.some(i=>i.record?.sig==='resultado-obsoleto'),false);
 }finally{
   child.kill('SIGTERM');
   if(child.exitCode===null)await new Promise(ok=>child.once('exit',ok));
