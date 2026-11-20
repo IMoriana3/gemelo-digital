@@ -8,6 +8,13 @@ assert.equal(j.site.lat,41.576342);
 assert.equal(j.id,normalizeJob({site:{n:'Otro',lat:41.576342,lon:-0.798139},profileId:'SP_45W_6Ah',period:'30'}).id);
 assert.notEqual(j.id,normalizeJob({site:j.site,profileId:'STRING_60W_6Ah',period:'30'}).id);
 assert.throws(()=>normalizeJob({site:{lat:150,lon:0}}),/Coordenadas/);
+assert.throws(()=>normalizeJob({site:{lat:null,lon:0}}),/Coordenadas ausentes/);
+assert.throws(()=>normalizeJob({site:{lat:'',lon:' '}}),/Coordenadas ausentes/);
+assert.throws(()=>normalizeJob({site:{lat:undefined,lon:42}}),/Coordenadas ausentes/);
+assert.throws(()=>normalizeJob({site:{lat:42,lon:null}}),/Coordenadas ausentes/);
+assert.throws(()=>normalizeJob({site:{lat:42,lon:0},period:0}),/Periodo inválido/);
+assert.equal(normalizeJob({site:{lat:0,lon:0}}).site.lat,0,
+  'La coordenada 0 explícita sí es válida; la ausente no');
 assert.throws(()=>normalizeJob({site:{lat:40,lon:0},period:2030}),/Periodo/);
 /* Las coordenadas de una planta tienen más de 6 decimales y NO se recortan. */
 const exactSite={n:'San José',lat:-16.5957735,lon:-71.8064406};
