@@ -201,6 +201,13 @@ async function compute(job){
     return record;
   }finally{await browser.close();}
 }
+/* Los errores de escenario/cobertura son definitivos. Reintentarlos tres
+   veces volvería a usar recursos de la cola sin posibilidad de corregirlos
+   mediante descargas meteorológicas. Las cuotas 429 y fallos de red sí
+   siguen siendo reintentables. */
+export function terminalJobError(message){
+  return /^(?:Trabajo histórico caducado|Diferencia de configuración NAS\/visor|Diferencia de firma al terminar|Perfil NAS no presente|Coordenadas NAS inválidas|Periodo NAS no reconocido)/.test(String(message||''));
+}
 let running=false,snapshotCache=null;
 async function tick(){
   if(running||!KEY)return;
@@ -217,8 +224,10 @@ async function tick(){
     snapshotCache=null;
     console.log('NAS TCU: '+job.site.n+' · '+job.profileId+' · '+record.yearsOK+'/'+record.yearsAsked+' años');
   }catch(e){
-    job.attempts+=1;job.last_error=String(e.message).slice(0,450);
-    job.retry_after=new Date(Date.now()+job.attempts*600000).toISOString();
+    job.last_error=String(e.message).slice(0,450);
+    const terminal=terminalJobError(job.last_error);
+    job.attempts=terminal?Math.max(3,job.attempts+1):job.attempts+1;
+    job.retry_after=terminal?null:new Date(Date.now()+job.attempts*600000).toISOString();
     await atomic(jobPath(job.attempts>=3?'failed':'pending',job.id),job);
     await unlink(jobPath('running',job.id)).catch(()=>{});
     console.error('NAS TCU trabajo '+job.id+': '+job.last_error);
