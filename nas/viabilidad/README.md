@@ -72,9 +72,11 @@ node nas/viabilidad/seed.mjs \
 ```
 
 Son cuatro ubicaciones × cinco configuraciones de partida = **20 trabajos**.
-Cada ubicación requiere inicialmente 30 años horarios: hasta **120 consultas
-históricas por año** en el lote si no existe caché; la caché reutiliza
-la misma meteorología entre los perfiles de cada punto.
+Cada ubicación requiere inicialmente 30 años horarios de dos fuentes
+compatibles (ERA5 atmosférico + ERA5-Land terrestre): hasta **240
+consultas al servicio histórico en total** sin caché (4 × 30 × 2), no
+120 consultas por año. La caché reutiliza la misma meteorología entre
+los cinco perfiles de cada emplazamiento.
 
 Para calcularlos, una vez desplegado en NAS y configurada una licencia
 meteorológica comercial autorizada:
