@@ -94,10 +94,29 @@ microparcels ausentes de Natural Earth 10m siguen sin evaluarse; esto
 se declara, no se colorea como apto.
 
 La cantidad exacta de trabajos se obtiene del resumen real generado por
-`--world all`. Para 30 años, cada ubicación requiere dos solicitudes
-históricas por año antes de aplicar caché; cinco equipos por punto pueden
-compartir esa meteorología. No se ha calculado aún el mundo ni existe un
-mapa mundial de aptitudes verificado.
+`--world all`. La última generación mundial verificada con Natural Earth
+10m obtuvo **1.452 nodos a 5°, 7.133 a 2° y 25.502 a 1°**:
+**34.087 nodos de muestreo, 170.435 trabajos TCU previstos**. Son
+conteos de los tres niveles, no parcelas fotovoltaicas únicas.
+
+Para 30 años, cada ubicación requiere hasta dos peticiones históricas por
+año (una ERA5 y otra ERA5-Land) antes de aplicar caché. El resumen CLI
+incluye las peticiones potenciales sin caché y la espera teórica por la
+separación mínima entre consultas. Es **una dimensión de capacidad, no un
+plazo de entrega**: faltan cuota contratada, tiempo de CPU/Chromium,
+descargas, reintentos, espacio de caché y RAM del NAS.
+
+El servicio del NAS reserva por defecto **20 GB de margen libre** en el
+volumen de datos mediante `MIN_DISK_FREE_GB=20` (ajustable en `.env`).
+Si desciende de ese valor **pausa la cola sin consumir los reintentos de
+los trabajos**. `/api/mapa/health` indica el espacio libre y el motivo
+de pausa. Esto evita llenar el volumen compartido con otros servicios.
+
+La lectura de manifiestos geográficos usa caché invalidable por fecha de
+modificación del archivo para no volver a parsear los 25.502 nodos de 1°
+cada cinco segundos. Los ficheros de `/data/world` siguen siendo la única
+fuente persistente del progreso. No se ha calculado aún el mundo ni existe
+un mapa mundial de aptitudes verificado.
 
 Perfiles por defecto: SP 6Ah, STRING 6Ah, versiones LT y Track N Co 6Ah.
 Dentro de cada perfil se calculan sus propias estrategias sobre la misma
