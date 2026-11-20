@@ -25,6 +25,25 @@ const sites=specs.map(s=>{
  return s;
 });
 const PARAMS=['ALLSKY_SFC_SW_DWN','ALLSKY_SFC_SW_DIFF','T2M','WS10M'];
+function leeMeteoHoraria(p, year){
+ const inicio=Date.UTC(year,0,1);
+ const horas=(Date.UTC(year+1,0,1)-inicio)/3600000;
+ for(const param of PARAMS){
+  if(Object.keys(p[param]||{}).length!==horas)
+   throw Error(`NASA POWER: ${param} debe tener ${horas} horas UTC en ${year}`);
+ }
+ return Array.from({length:horas},(_,i)=>{
+  const t=new Date(inicio+i*3600000);
+  const key=t.toISOString().slice(0,13).replace(/[-T]/g,'');
+  const vals=PARAMS.map(param=>p[param][key]);
+  if(vals.some(v=>!Number.isFinite(v)||v<=-900))
+   throw Error('NASA POWER: valores incompletos '+key);
+  const [ghi,dhi,temp,wind]=vals;
+  if(ghi<0||dhi<0||wind<0||dhi>ghi+20)
+   throw Error('NASA POWER: variables incoherentes '+key);
+  return {t,ghi,dhi,temp,wind,gust:null,snowDepth:null};
+ });
+}
 async function nasa(s,year){
  const url=new URL('https://power.larc.nasa.gov/api/temporal/hourly/point');
  for(const [k,v] of Object.entries({latitude:s.lat,longitude:s.lon,
@@ -37,20 +56,7 @@ async function nasa(s,year){
    if(!resp.ok)throw Error('NASA POWER HTTP '+resp.status);
    const obj=await resp.json(),p=obj.properties?.parameter;
    if(!p)throw Error('NASA POWER sin properties.parameter');
-   const dates=Object.keys(p[PARAMS[0]]||{}).sort();
-   if(dates.length!==8760)throw Error('2025: '+dates.length+' horas, esperadas 8760');
-   const meteo=dates.map(key=>{
-    const get=k=>p[k]?.[key];
-    const vals=PARAMS.map(get);
-    if(vals.some(v=>!Number.isFinite(v)||v<=-900))
-      throw Error('NASA POWER: valores incompletos '+key);
-    const [ghi,dhi,temp,wind]=vals;
-    if(ghi<0||dhi<0||wind<0||dhi>ghi+20)
-      throw Error('NASA POWER: variables incoherentes '+key);
-    return {t:new Date(key.slice(0,4)+'-'+key.slice(4,6)+'-'+key.slice(6,8)+
-        'T'+key.slice(8,10)+':00:00.000Z'),
-      ghi,dhi,temp,wind,gust:null,snowDepth:null};
-   });
+   const meteo=leeMeteoHoraria(p,year);
    return {meteo,source:{title:obj.header?.title,version:obj.header?.api?.version,
      data_sources:obj.header?.sources||[],lat:s.lat,lon:s.lon,
      parameter_units:obj.parameters||{},time:'UTC',year}};
@@ -113,4 +119,4 @@ for(const site of sites){
 await browser.close();
 mkdirSync(join(ROOT,'outputs'),{recursive:true});
 writeFileSync(join(ROOT,'outputs','diagnostico_nasa_2025_cuatro.json'),JSON.stringify(out,null,2)+'\n');
-if(out.sites.every(s=>s.error))process.exitCode=2;
+if(out.sites.some(s=>s.error))process.exitCode=2;
