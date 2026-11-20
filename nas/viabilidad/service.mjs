@@ -193,6 +193,27 @@ async function historicLicensed(requestUrl){
     }catch(e){error=e;if(i<2)await pause((i+1)*10000);}
   }throw Error(error?.message||'Error meteorológico');
 }
+/* 170k escenarios no deben lanzar 170k procesos Chromium. Cada escenario
+   usa un BrowserContext nuevo: cookies, localStorage, memoria y controles
+   quedan aislados. El navegador se recicla tras un número acotado de
+   trabajos para controlar acumulación de memoria. La fórmula energética
+   sigue siendo EXCLUSIVAMENTE bateria.html. */
+const MAX_BROWSER_JOBS=Math.min(100,Math.max(1,
+  Number(process.env.BROWSER_RECYCLE_JOBS)||20));
+let sharedBrowser=null,browserUses=0;
+async function getWorkerBrowser(){
+  if(sharedBrowser&&(!sharedBrowser.isConnected()||browserUses>=MAX_BROWSER_JOBS)){
+    await sharedBrowser.close().catch(()=>{});
+    sharedBrowser=null;browserUses=0;
+  }
+  if(!sharedBrowser){
+    const {chromium}=await import('playwright');
+    sharedBrowser=await chromium.launch({headless:true,
+      args:['--disable-dev-shm-usage','--js-flags=--max-old-space-size=2048']});
+  }
+  browserUses++;
+  return sharedBrowser;
+}
 async function compute(job){
   if(job.revision!==REVISION)
     throw Error('Trabajo de revisión antigua: reencolar con motor vigente');
@@ -202,11 +223,11 @@ async function compute(job){
   if(!Array.isArray(job.yearRange)||job.yearRange.length!==2||
      job.yearRange[0]!==expected[0]||job.yearRange[1]!==expected[1])
     throw Error('Trabajo histórico caducado por cambio de año; reencolar periodo vigente');
-  const {chromium}=await import('playwright');
-  const browser=await chromium.launch({headless:true,
-    args:['--disable-dev-shm-usage','--js-flags=--max-old-space-size=2048']});
+  const browser=await getWorkerBrowser();
+  let context=null;
   try{
-    const context=await browser.newContext({viewport:{width:1200,height:800}});
+    /* Aislamiento real por trabajo, aunque compartan proceso Chromium. */
+    context=await browser.newContext({viewport:{width:1200,height:800}});
     const weatherEvidence=[];
     await context.route(/^https:\/\/archive-api\.open-meteo\.com\/v1\/archive\?/,async route=>{
       try{const txt=await historicLicensed(route.request().url());
@@ -231,7 +252,10 @@ async function compute(job){
       sha256:hash(JSON.stringify(weatherEvidence)),
       detalle:'Hash compuesto de los datos horarios descargados, sin guardar la clave API'};
     return record;
-  }finally{await browser.close();}
+  }finally{
+    if(context)await context.close().catch(()=>{});
+    if(!browser.isConnected()){sharedBrowser=null;browserUses=0;}
+  }
 }
 /* Los errores de escenario/cobertura son definitivos. Reintentarlos tres
    veces volvería a usar recursos de la cola sin posibilidad de corregirlos
