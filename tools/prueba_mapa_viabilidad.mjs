@@ -16,6 +16,8 @@ assert.match(js,/fetchYearDeclarado\(weatherSite,y\)/);
 assert.match(js,/meteoModel:'era5_land'/);
 assert.match(js,/var keep=all\.filter\(function\(x\)\{return x&&x\.sig!==cfg\.key;\}\);/);
 assert.match(html,/if\(loc&&loc\.meteoModel==='era5_land'\)u\+='&models=era5_land'/);
+assert.match(js,/var control=controls\[j\],derived=opcionesDe\(control,profile,cfg.base\)/);
+assert.doesNotMatch(js,/derived=opcionesPara\(control/);
 assert.match(js,/simulaSeguido\(met.tramos,derived.p,site,derived.o\)/);
 assert.match(js,/simulate\(met.tramos\[0\].meteo,derived.p,site,socEstacionario\(derived.o\),derived.o\)/);
 assert.doesNotMatch(js,/function simulate\(/);
@@ -56,6 +58,24 @@ const thermal={min:5,max:30};
 const S={reservaWh:5.37,margenMin:8.2,hBajoReserva:0,socMin:0.65,
   hZero:0,periodosRes:0,inactivePct:0,hSinRacha:0,hSinNieve:0,
   diasRes:0,hStow:0,hNieve:0};
+/* Las cuatro estrategias CAMBIAN la política: opcionesPara cambia química
+   entre perfiles, pero no sirve para combinar una lógica con la misma TCU. */
+const a=html.indexOf('function opcionesDe(c,prof,base){');
+const b=html.indexOf('function runControls(',a);
+assert.ok(a>0&&b>a,'opcionesDe canónica no encontrada');
+const strategyCtx={};
+vm.createContext(strategyCtx);
+vm.runInContext(html.slice(a,b)+'\nglobalThis.__opts=opcionesDe;',strategyCtx);
+const equipo={id:'SP_45W_6Ah',wh:153.6};
+const principal={strategy:true,socTgt:80,socCrit:30,fcDays:5};
+const winter=strategyCtx.__opts({o:{socTgt:90,socCrit:30,fcDays:3,winter:true}},equipo,principal);
+const conservador=strategyCtx.__opts({o:{socTgt:80,socCrit:40,fcDays:5,winter:false}},equipo,principal);
+const sinGestion=strategyCtx.__opts({o:{strategy:false,socTgt:100,socCrit:0,fcDays:5}},equipo,principal);
+assert.equal(winter.p,equipo);
+assert.equal(winter.o.socTgt,90);
+assert.equal(winter.o.fcDays,3);
+assert.equal(conservador.o.socCrit,40);
+assert.equal(sinGestion.o.strategy,false);
 assert.equal(outcome(S,control,met,opts,'2017/18',profile,thermal).status,'apto');
 assert.equal(outcome({...S,hZero:3},control,met,opts,'2017/18',profile,thermal).status,'no_apto');
 assert.equal(outcome({...S,periodosRes:1},control,met,opts,'2017/18',profile,thermal).status,'condicionado');
