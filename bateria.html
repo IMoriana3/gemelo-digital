@@ -1968,7 +1968,20 @@ pintaParams();
 
 $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
-  var loc=getLoc(), prof=conPanel(PROFILES[$('prof').value],+$('panel').value);
+  var loc=getLoc();
+  /* El panel no puede anunciar paridad con un resultado del mapa si alguien
+     ha cambiado el SOC, panel, hardware o cualquier ajuste desde ese run. */
+  if($('src').value==='mapa'){
+    var check=window.FACTIUN_MAPA_PARIDAD&&
+      window.FACTIUN_MAPA_PARIDAD.validate(loc);
+    if(!check||!check.ok){
+      $('srcTag').textContent='PARIDAD BLOQUEADA: '+
+        (check&&check.motivo||'No está disponible el mapa de referencia');
+      btn.disabled=false;btn.textContent='▶ Simular';
+      return;
+    }
+  }
+  var prof=conPanel(PROFILES[$('prof').value],+$('panel').value);
   var mm=$('motor').value; mm=(mm==='factiun'||mm==='curva')?mm:+mm;
   var soh=$('aged').checked?SOH_FIN_VIDA:1;
   var opts={motorModel:mm, soh:soh, vientoStow:$('vientoStow').value, winter:$('winter').checked, strategy:true,
