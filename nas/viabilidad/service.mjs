@@ -16,7 +16,8 @@ const KEY=process.env.OPEN_METEO_API_KEY||'';
 const TOKEN=process.env.FACTIUN_MAPA_TOKEN||'';
 const UI_QUEUE=process.env.ENABLE_UI_QUEUE==='1';
 export const REVISION=createHash('sha256').update(
-  ['bateria.html','sim/mapa-viabilidad.js','sim/fisica.js','sim/viento.js']
+  ['bateria.html','sim/mapa-viabilidad.js','sim/fisica.js','sim/viento.js',
+   'nas/viabilidad/service.mjs','nas/viabilidad/seed.mjs']
   .map(f=>readFileSync(join(ROOT,f))).reduce((a,b)=>Buffer.concat([a,b]),Buffer.alloc(0))
 ).digest('hex').slice(0,16);
 const hash=s=>createHash('sha256').update(s).digest('hex');
@@ -58,13 +59,51 @@ export function normalizeJob(input){
     throw Error('Periodo inválido');
   const panelW=input.panelW==null?null:Number(input.panelW);
   if(panelW!==null&&![30,45,60,90].includes(panelW))throw Error('Panel no válido');
+  /* No se redondean coordenadas: siete decimales de la parcela real
+     pueden cambiar el ángulo solar y romper paridad con batería.html. */
   const site={n:String(src.n||src.name||'Coordenadas').trim(),
-    id:String(src.id||'custom:'+lat.toFixed(6)+':'+lon.toFixed(6)),
-    lat:+lat.toFixed(6),lon:+lon.toFixed(6),
-    fuente:String(src.fuente||'Coordenadas solicitadas').trim()};
+    id:String(src.id||'custom:'+lat+':'+lon),
+    lat,lon,fuente:String(src.fuente||'Coordenadas solicitadas').trim()};
   if(site.n.length>160||site.id.length>160||site.fuente.length>160)throw Error('Texto demasiado largo');
-  const id=hash(JSON.stringify([REVISION,site.lat,site.lon,profileId,period,panelW])).slice(0,24);
-  return {id,revision:REVISION,site,profileId,period,panelW,
+  /* Cualquier parámetro diferente crea OTRO trabajo y debe reproducirse
+     byte a byte en el navegador headless. Nunca sobrescribir un escenario
+     diferente por tener iguales coordenadas/modelo. */
+  const signature=input.signature==null?null:String(input.signature);
+  if(signature!==null&&(signature.length<16||signature.length>16000))
+    throw Error('Firma de escenario inválida');
+  if(signature!==null&&!input.scenario)
+    throw Error('La firma exige parámetros de escenario completos');
+  let scenario=null;
+  if(input.scenario!=null){
+    if(typeof input.scenario!=='object'||Array.isArray(input.scenario))
+      throw Error('Escenario inválido');
+    const names=['motorModel','soh','vientoStow','socTgt','socCrit',
+      'fcDays','tMin','poaMin','mountTilt','strategy','winter','soc0','physics'];
+    const obj=input.scenario;
+    if(Object.keys(obj).some(k=>!names.includes(k)))
+      throw Error('Campo de escenario desconocido');
+    if(!Object.hasOwn(obj,'physics')||typeof obj.physics!=='object'||!obj.physics||
+       Array.isArray(obj.physics))throw Error('Parámetros físicos ausentes');
+    if(Object.keys(obj.physics).length>32)throw Error('Demasiados parámetros físicos');
+    for(const [k,v] of Object.entries(obj.physics))
+      if(!/^[A-Z][A-Z0-9_]{0,39}$/.test(k)||!Number.isFinite(v))
+        throw Error('Parámetro físico inválido: '+k);
+    for(const name of ['soh','socTgt','socCrit','fcDays','tMin','poaMin'])
+      if(!Number.isFinite(obj[name]))throw Error('Escenario no finito: '+name);
+    if(obj.mountTilt!=null&&!Number.isFinite(obj.mountTilt))
+      throw Error('Inclinación no finita');
+    if(obj.soc0!=null&&(!Number.isFinite(obj.soc0)||obj.soc0<0||obj.soc0>1))
+      throw Error('SOC inicial inválido');
+    if(typeof obj.vientoStow!=='string'||typeof obj.strategy!=='boolean'||
+       typeof obj.winter!=='boolean')
+      throw Error('Política de control inválida');
+    if(!(typeof obj.motorModel==='string'||Number.isFinite(obj.motorModel)))
+      throw Error('Motor inválido');
+    scenario={...obj,physics:{...obj.physics}};
+  }
+  const id=hash(JSON.stringify([REVISION,site.lat,site.lon,profileId,period,
+    panelW,scenario,signature])).slice(0,24);
+  return {id,revision:REVISION,site,profileId,period,panelW,scenario,signature,
     attempts:0,created_at:new Date().toISOString()};
 }
 export async function enqueue(input){
