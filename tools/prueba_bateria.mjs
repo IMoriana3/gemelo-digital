@@ -1193,7 +1193,8 @@ const parity = await pg.evaluate(async () => {
   byId('mv-profile').dispatchEvent(new Event('change'));
   byId('mv-period').value='2025';
   window.BAT_METEO_PARIDAD={site:{lat:site.lat,lon:site.lon},years:[2025],
-    list:[m],period:'2025',source:'fixture de paridad, sin red'};
+    list:[m],period:'2025',source:'fixture de paridad, sin red',
+    sig:window.FACTIUN_MAPA_PARIDAD.currentSignature()};
   byId('mv-period').dispatchEvent(new Event('change'));
   const buttonVisible=!byId('mv-use-same-meteo').hidden;
   byId('mv-use-same-meteo').click();
@@ -1201,6 +1202,11 @@ const parity = await pg.evaluate(async () => {
     profile:PROFILES[Number(byId('prof').value)].id,year:byId('year').value};
   const actual=await getMeteo(getLoc());
   const sameReference=actual===m;
+  const validBefore=window.FACTIUN_MAPA_PARIDAD.validate(getLoc()).ok;
+  const socOriginal=byId('soc0').value;
+  byId('soc0').value='55';
+  const rejectChangedSOC=!window.FACTIUN_MAPA_PARIDAD.validate(getLoc()).ok;
+  byId('soc0').value=socOriginal;
   let guard=false;
   try{meteoExactaMapa({...site,lon:site.lon+0.00001},[2025]);}
   catch(_){guard=true;}
@@ -1208,13 +1214,15 @@ const parity = await pg.evaluate(async () => {
   try{await window.FACTIUN_MAPA_NAS.run({site,
     profileId:'SP_45W_6Ah',period:'2025',signature:'firma-deliberadamente-distinta'});}
   catch(e){nasRefused=/Diferencia de configuración/.test(String(e.message||e));}
-  return {count,diff,invalid,variants,buttonVisible,sameReference,guard,nasRefused,
+  return {count,diff,invalid,variants,buttonVisible,sameReference,validBefore,
+    rejectChangedSOC,guard,nasRefused,
     selected,expectedSite:site,closed:byId('mv-root').hidden};
 });
 ok(parity.count>=136&&parity.diff===0&&parity.invalid===0&&parity.variants>=4,
   'PARIDAD LITERAL: serie completa y KPIs idénticos en cuatro sitios, 5 TCUs, 4 políticas y tramos; 0 diferencias',
   JSON.stringify(parity));
-ok(parity.buttonVisible&&parity.sameReference&&parity.guard&&parity.nasRefused&&parity.closed&&
+ok(parity.buttonVisible&&parity.sameReference&&parity.validBefore&&
+   parity.rejectChangedSOC&&parity.guard&&parity.nasRefused&&parity.closed&&
    parity.selected.src==='mapa'&&parity.selected.profile==='SP_45W_6Ah'&&
    parity.selected.year==='2025'&&
    parity.selected.lat===parity.expectedSite.lat&&parity.selected.lon===parity.expectedSite.lon,
