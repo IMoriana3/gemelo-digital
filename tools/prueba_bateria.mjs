@@ -1318,6 +1318,8 @@ if(evaluated.canCompare){
         !document.getElementById('out').textContent.includes('Balance del motor'),
       sameArray:LAST.meteo===data.list[0],
       sameProfile:LAST.prof.id==='SP_45W_6Ah',
+      sameMarker:!!bmarker&&bmarker.getLatLng().lat===data.site.lat&&
+        bmarker.getLatLng().lng===data.site.lon,
       sameHours:LAST.meteo.length===8760&&stdMain?.rows?.length===8760,
       noDifference:!!stdMain&&!!stdMap&&
         Object.is(stdMain.S.hZero,stdMap.hZero)&&
@@ -1330,7 +1332,8 @@ if(evaluated.canCompare){
       map:{hZero:stdMap?.hZero,socMin:stdMap?.simulador?.socMinPct}
     };
   });
-  ok(compared.noParallelMotor&&compared.sameArray&&compared.sameProfile&&compared.sameHours&&
+  ok(compared.noParallelMotor&&compared.sameArray&&compared.sameProfile&&compared.sameMarker&&
+    compared.sameHours&&
     compared.noDifference,
     'paridad REAL mapa→simulador: misma meteo, hardware, SOC y KPIs SIN redondeos',
     JSON.stringify(compared));
@@ -1353,12 +1356,16 @@ const precision = await pg.evaluate(() => {
   const b=add('QA precisión B',-33.4567811,-70.651239);
   const duplicate=add('QA precisión B repetida',-33.4567811,-70.651239);
   e('mv-close').click();
-  return {initial,a,b,duplicate};
+  /* El mapa original de batería nunca debe redondear a 3 decimales. */
+  setPick(41.502021234,-5.001461234,'QA ubicación exacta');
+  const original={lat:Number(e('clat').value),lon:Number(e('clon').value)};
+  return {initial,a,b,duplicate,original};
 });
 ok(precision.a.count===precision.initial+1&&
    precision.b.count===precision.initial+2&&
    precision.duplicate.count===precision.initial+2&&
-   precision.b.lat==='-33.4567811',
+   precision.b.lat==='-33.4567811'&&
+   precision.original.lat===41.502021234&&precision.original.lon===-5.001461234,
    'dos emplazamientos separados 1e-7° conservan coordenadas y marcadores distintos',
    JSON.stringify(precision));
 
