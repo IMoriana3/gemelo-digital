@@ -1119,6 +1119,104 @@ ok(mv.coordenadas&&mv.encontrados===1,
 ok(mv.firmware,
   'la selección Track N Co muestra SU firmware y no las estrategias de SUNNER');
 
+
+/* ── 16) PARIDAD LITERAL: MISMO motor, misma entrada, cero diferencia ──
+   Compara filas HORARIAS sin redondear: SOC, posición, consumo, carga, stow,
+   nieve, reservas, temperatura, KPIs. Se fuerza viento/nieve/frío. */
+const parity = await pg.evaluate(async () => {
+  const sites=[
+    {n:'Tordesillas QA',lat:41.50202,lon:-5.00146},
+    {n:'Chorzele QA',lat:53.26105,lon:20.9},
+    {n:'La Joya QA',lat:-16.5957735,lon:-71.8064406},
+    {n:'Dunedin QA',lat:-45.86666667,lon:170.5},
+  ];
+  const make=(y,day,n)=>Array.from({length:n},(_,i)=>{
+    const hour=i%24,rad=(hour-6)*Math.PI/12,solar=Math.max(0,Math.sin(rad));
+    const g=solar*(i%43<12?180:930);
+    return {t:new Date(Date.UTC(y,0,day)+i*3600000),ghi:g,dhi:g*(i%43<12?.84:.22),
+      temp:i%57<22?-23+(i%6):i%31<6?43:10+(i%8),
+      wind:i%37<8?17.8:4.0,gust:i%37<8?24:7,
+      snowDepth:i%73<18?.06:0};
+  });
+  const base={motorModel:'curva',soh:0.8,vientoStow:'racha',
+    winter:false,strategy:true,socTgt:80,socCrit:30,
+    fcDays:5,tMin:0,poaMin:0,mountTilt:null};
+  const profiles=['SP_45W_6Ah','SP_45W_6Ah_LT','STRING_60W_6Ah',
+    'STRING_60W_6Ah_LT','TNC_45W_6Ah'];
+  let count=0,diff=0,invalid=0,variants=0;
+  const same=(a,b)=>{
+    if(JSON.stringify(a)!==JSON.stringify(b))diff++;
+  };
+  for(const site of sites){
+    const meteo=make(2025,10,96);
+    for(const id of profiles){
+      const prof=PROFILES.find(p=>p.id===id),tmin=prof.tCarga[0];
+      const opts={...base,tMin:tmin};
+      const fromPage=runControls(meteo,prof,site,0.5,opts);
+      const wanted=controlesPara(prof).filter(c=>!c.prof);
+      for(const c of wanted){
+        const left=fromPage.find(x=>x.c.k===c.k);
+        const right=calculaControlTCU(meteo,prof,site,opts,c,{soc0:0.5});
+        same(left.rows,right.rows);
+        same(left.S,right.S);
+        same(left.soc0,right.soc0);
+        same(left.prof.id,right.prof.id);
+        for(const r of right.rows){
+          if(!['soc','pos','motor','chg','net','eLib','tCell'].every(k=>Number.isFinite(r[k])))invalid++;
+        }
+        if(c.k==='winter')variants++;
+        count++;
+      }
+      const tramos=[{years:[2024],meteo:make(2024,5,72)},
+                   {years:[2025],meteo:make(2025,5,72)}];
+      for(const c of wanted){
+        const od=opcionesDe(c,prof,opts);
+        const reference=simulaSeguido(tramos,od.p,site,od.o);
+        const fromMap=calculaControlTCU(tramos,prof,site,opts,c,{seguido:true});
+        same(reference,fromMap.rows);
+        same(summarize(reference),fromMap.S);
+        same(fromMap.soc0,socEstacionario(od.o));
+        count++;
+      }
+    }
+  }
+
+  /* Paso del MISMO array de meteo del mapa al panel: cero redescargas. */
+  const site=sites[2],m=make(2025,1,96);
+  const byId=id=>document.getElementById(id);
+  byId('mv-open').click();
+  byId('mv-lat').value=String(site.lat);
+  byId('mv-lon').value=String(site.lon);
+  byId('mv-name').value=site.n;
+  byId('mv-add').click();
+  byId('mv-profile').value='SP_45W_6Ah';
+  byId('mv-profile').dispatchEvent(new Event('change'));
+  byId('mv-period').value='2025';
+  window.BAT_METEO_PARIDAD={site:{lat:site.lat,lon:site.lon},years:[2025],
+    list:[m],period:'2025',source:'fixture de paridad, sin red'};
+  byId('mv-period').dispatchEvent(new Event('change'));
+  const buttonVisible=!byId('mv-use-same-meteo').hidden;
+  byId('mv-use-same-meteo').click();
+  const selected={src:byId('src').value,lat:getLoc().lat,lon:getLoc().lon,
+    profile:PROFILES[Number(byId('prof').value)].id,year:byId('year').value};
+  const actual=await getMeteo(getLoc());
+  const sameReference=actual===m;
+  let guard=false;
+  try{meteoExactaMapa({...site,lon:site.lon+0.00001},[2025]);}
+  catch(_){guard=true;}
+  return {count,diff,invalid,variants,buttonVisible,sameReference,guard,
+    selected,expectedSite:site,closed:byId('mv-root').hidden};
+});
+ok(parity.count>=140&&parity.diff===0&&parity.invalid===0&&parity.variants>=4,
+  'PARIDAD LITERAL: serie completa y KPIs idénticos en cuatro sitios, 5 TCUs, 4 políticas y tramos; 0 diferencias',
+  JSON.stringify(parity));
+ok(parity.buttonVisible&&parity.sameReference&&parity.guard&&parity.closed&&
+   parity.selected.src==='mapa'&&parity.selected.profile==='SP_45W_6Ah'&&
+   parity.selected.year==='2025'&&
+   parity.selected.lat===parity.expectedSite.lat&&parity.selected.lon===parity.expectedSite.lon,
+  'el mapa entrega EL MISMO array horario al simulador y rechaza coordenadas distintas',
+  JSON.stringify(parity));
+
 await nav.close();
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa, se sabe qué batería basta y la TCU de Track N Co se compara con lo suyo'));
 process.exit(fallos ? 1 : 0);
