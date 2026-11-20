@@ -41,22 +41,13 @@ function getSite(id){return mv.sites.find(function(x){return x.id===id;})||null;
 function isCustom(x){return x&&x.id.indexOf('custom:')===0;}
 function cleanName(x){return String(x||'').trim();}
 function signature(){
-  var p=activeProfile(), page=selectedPageProfile(), isSelected=page&&p&&page.id===p.id&&num(e('panel').value)===num(p.chgW);
-  var tmin=isSelected?num(e('tmin').value):p&&p.tCarga?num(p.tCarga[0]):num(e('tmin').value);
+  var p=activeProfile();
   var physics=typeof tocadosFis==='function'?tocadosFis():{};
-  /* La página normal arranca en SOC del deslizador en 1 año. El barrido
-     30 años usa SOC estacionario por estrategia, no el deslizador. */
+  /* El simulador es la autoridad también de los parámetros físicos y de
+     batería. Nunca copiar estas lecturas al módulo geográfico. */
   var period=e('mv-period').value;
   var soc0=period==='30'?null:num(e('soc0').value)/100;
-  var base={
-    motorModel:['factiun','curva'].includes(e('motor').value)?e('motor').value:num(e('motor').value),
-    soh:e('aged').checked?SOH_FIN_VIDA:1,
-    vientoStow:e('vientoStow').value,
-    socTgt:num(e('socTgt').value),socCrit:num(e('socCrit').value),fcDays:num(e('fc').value),
-    poaMin:num(e('poaMin').value),tMin:tmin,
-    mountTilt:e('mount').value==='fix'?num(e('tilt').value):null,
-    strategy:true,winter:e('winter').checked
-  };
+  var base=opcionesDelPanel(p);
   /* La validez depende también de la ficha y química, no solo de las funciones:
      cambiar la celda no debe conservar un resultado verde anterior. */
   var specs={profile:p?{id:p.id,wh:p.wh,chgW:p.chgW,string:!!p.string,lt:!!p.lt,
