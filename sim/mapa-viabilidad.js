@@ -26,7 +26,7 @@ var MV_ENGINE_HASH=(function(){
 })();
 function e(id){return document.getElementById(id);}
 function num(x){if(x==null||String(x).trim()==='')return NaN;var n=Number(String(x).trim().replace(',','.'));return Number.isFinite(n)?n:NaN;}
-function coordOK(lat,lon){return Number.isFinite(lat)&&Number.isFinite(lon)&&lat>=-89&&lat<=89&&lon>=-180&&lon<=180;}
+function coordOK(lat,lon){return Number.isFinite(lat)&&Number.isFinite(lon)&&lat>-90&&lat<90&&lon>=-180&&lon<=180;}
 function dec(x,d){return Number(x||0).toLocaleString('es-ES',{maximumFractionDigits:d==null?1:d,minimumFractionDigits:0});}
 function saved(key,fallback){try{var data=JSON.parse(localStorage.getItem(key));return data&&typeof data==='object'?data:fallback;}catch(_){return fallback;}}
 function persist(){try{localStorage.setItem(MV_CUSTOM,JSON.stringify(mv.custom));localStorage.setItem(MV_RESULTS,JSON.stringify(mv.records));}catch(_){}}
