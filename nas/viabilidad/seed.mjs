@@ -156,6 +156,13 @@ async function worldPlan(){
     etapas:results,
     total_nodos:results.reduce((n,x)=>n+x.sitios,0),
     total_trabajos:results.reduce((n,x)=>n+x.trabajos,0),
+    peticiones_meteo_sin_cache:results.reduce((n,x)=>n+x.peticiones_historicas_sin_cache,0),
+    espera_meteo_teorica_dias_sin_cache:(function(){
+      const calls=results.reduce((n,x)=>n+x.peticiones_historicas_sin_cache,0);
+      const gap=Math.max(1000,Number(process.env.METEO_GAP_MS)||2500);
+      return Math.round(calls*gap/86400000*10)/10;
+    })(),
+    advertencia_capacidad:'La espera teórica solo contempla el intervalo entre peticiones sin caché; no incluye descargas, cálculos TCU, límites comerciales ni reintentos. No es un plazo de ejecución.',
     declaracion:'NINGÚN SOC CALCULADO: se requieren licencia, ejecución NAS y revisión de resultados'
   },null,2));
 }
