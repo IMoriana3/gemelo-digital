@@ -39,6 +39,9 @@ assert.equal(inLand(10,40,land),false);
    coordenada duplicada; las otras tres son puntos urbanos provisionales. */
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {mkdtempSync,mkdirSync,writeFileSync,existsSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 const preview=JSON.parse(execFileSync(process.execPath,[
   'nas/viabilidad/seed.mjs','--sites',
   'nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json',
@@ -47,11 +50,31 @@ const preview=JSON.parse(execFileSync(process.execPath,[
 assert.equal(preview.modo,'SOLO VISTA PREVIA');
 assert.equal(preview.ubicaciones,4);
 assert.equal(preview.trabajos,20); // cinco equipos × cuatro ubicaciones
-assert.equal(preview.consultas_meteo_unicas_sin_cache,120);
+assert.equal(preview.consultas_meteo_unicas_sin_cache,240);
 assert.equal(preview.emplazamientos[2].lat,-16.5957735);
 assert.equal(preview.emplazamientos[2].lon,-71.8064406);
 assert.match(preview.emplazamientos[2].fuente,/layout:sanjose/);
 assert.match(preview.emplazamientos[0].fuente,/NO parcela/);
 assert.match(preview.emplazamientos[1].fuente,/NO parcela/);
 assert.match(preview.emplazamientos[3].fuente,/NO parcela/);
-console.log('NAS viabilidad: cola, máscara terrestre y lote de cuatro emplazamientos OK');
+/* Regresión operativa: una VISTA PREVIA jamás mueve el JSON de running a
+   pending. Ese movimiento pertenece únicamente a la recuperación del
+   servidor tras un reinicio, no a un segundo proceso que ejecuta seed. */
+const scratch=mkdtempSync(join(tmpdir(),'factiun-nas-preview-'));
+try {
+  mkdirSync(join(scratch,'running'),{recursive:true});
+  const running=join(scratch,'running','trabajo-activo.json');
+  writeFileSync(running,JSON.stringify({id:'trabajo-activo',status:'running'}));
+  execFileSync(process.execPath,[
+    'nas/viabilidad/seed.mjs','--sites',
+    'nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json',
+    '--period','30'
+  ],{cwd:fileURLToPath(new URL('../',import.meta.url)),encoding:'utf8',
+     env:{...process.env,FACTIUN_MAPA_DATA:scratch}});
+  assert.equal(existsSync(running),true,
+    'Una preview debe preservar el trabajo que está corriendo');
+  assert.equal(existsSync(join(scratch,'pending','trabajo-activo.json')),false);
+  assert.equal(existsSync(join(scratch,'pending')),false,
+    'La preview tampoco debe crear carpetas de cola');
+} finally {rmSync(scratch,{recursive:true,force:true});}
+console.log('NAS viabilidad: vista previa sin mutaciones, 4 sitios, 240 peticiones y cola OK');
