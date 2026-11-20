@@ -15,6 +15,21 @@ const PORT=Number(process.env.PORT||8787);
 const KEY=process.env.OPEN_METEO_API_KEY||'';
 const TOKEN=process.env.FACTIUN_MAPA_TOKEN||'';
 const UI_QUEUE=process.env.ENABLE_UI_QUEUE==='1';
+const MIN_DISK_GB=(function(){
+  const supplied=process.env.MIN_DISK_FREE_GB;
+  const n=supplied==null?20:Number(supplied);
+  if(!Number.isFinite(n)||n<0||n>100000)
+    throw Error('MIN_DISK_FREE_GB debe ser un número entre 0 y 100000');
+  return n;
+})();
+async function diskSpace(){
+  const fs=await statfs(DATA);
+  const freeGB=Number(fs.bavail)*Number(fs.bsize)/1e9;
+  if(!Number.isFinite(freeGB)||freeGB<0)
+    throw Error('No se puede verificar el espacio disponible en el NAS');
+  return {free_gb:Math.round(freeGB*100)/100,
+    min_free_gb:MIN_DISK_GB,paused:freeGB<MIN_DISK_GB};
+}
 export const REVISION=createHash('sha256').update(
   ['bateria.html','sim/mapa-viabilidad.js','sim/fisica.js','sim/viento.js',
    'sim/canon.js','sim/cartera.js','pines.json',
@@ -281,9 +296,20 @@ export async function fillWorldQueue(){
     return;
   }
 }
-let running=false,snapshotCache=null;
+let running=false,snapshotCache=null,lowDiskNotice=false;
 async function tick(){
   if(running||!KEY)return;
+  /* El histórico global puede ocupar cientos de GB: reservar margen para
+     el NAS y sus servicios. Sin espacio suficiente, PAUSAR la cola sin
+     invalidar trabajos ni consumir reintentos de meteorología. */
+  const capacity=await diskSpace();
+  if(capacity.paused){
+    if(!lowDiskNotice)console.error('Cola mundial pausada: libre '+
+      capacity.free_gb+' GB, mínimo '+capacity.min_free_gb+' GB');
+    lowDiskNotice=true;
+    return;
+  }
+  lowDiskNotice=false;
   await fillWorldQueue();
   const pending=await list('pending');
   const job=pending.find(j=>!j.retry_after||Date.parse(j.retry_after)<=Date.now());
@@ -435,6 +461,7 @@ async function request(req,res){
   if(req.method==='GET'&&path==='/api/mapa/health'){
     const count={};for(const d of ['pending','running','done','failed'])
       count[d]=(await readdir(join(DATA,d))).filter(x=>x.endsWith('.json')).length;
+    const storage=await diskSpace();
     const alive=await activeWorldCounts();
     const world=(await worldPlans()).map(x=>({step:x.plan.step,
       nodes:x.plan.sites.length,total_jobs:x.plan.total,
@@ -443,6 +470,7 @@ async function request(req,res){
       year_range:x.plan.yearRange}));
     return json(res,200,{ok:true,revision:REVISION,meteorologia:KEY?'licenciada':'pendiente_de_licencia',
       puede_encolar:UI_QUEUE&&!!TOKEN,counts:count,
+      almacenamiento:storage,
       cobertura_mundial:{registrada:world.length>0,etapas:world}});
   }
   if(req.method==='GET'&&path==='/api/mapa/snapshot')
