@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-v4';
+var MV_VERSION='viabilidad-2026-11-20-v5';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -247,7 +247,7 @@ async function meteoForSite(site,period){
   var years=period==='30'?Array.from({length:30},function(_,i){return finalYear-29+i;}):[Number(period)];
   /* Misma familia de reanálisis en todos los inviernos. La celda
      meteorológica no equivale a una estación en las coordenadas exactas. */
-  var weatherSite=Object.assign({},site,{meteoModel:'era5_land'});
+  var weatherSite=Object.assign({},site,{meteoMode:'era5_hybrid'});
   var list=[];
   for(var i=0;i<years.length;i+=4){
     note('Descargando meteorología del punto · '+Math.min(i+4,years.length)+'/'+years.length+' años…');
@@ -266,7 +266,7 @@ async function meteoForSite(site,period){
   });
   var tramos=tramosContinuos(list,years);
   if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
-  return {years:years,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo · ERA5-Land (reanálisis homogéneo; forzamiento ERA5 para viento e irradiación)'};
+  return {years:years,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo histórico · ERA5 (irradiancia, viento y ráfaga) + ERA5-Land (temperatura y nieve)'};
 }
 function outcome(S,c,met,opts,worst,profile,thermal,modelBad,snowPresenceHours){
   var issues=[];
