@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import {normalizeJob,requestedYears,REVISION} from '../nas/viabilidad/service.mjs';
+import {normalizeJob,requestedYears,terminalJobError,REVISION} from '../nas/viabilidad/service.mjs';
 import {inLand} from '../nas/viabilidad/seed.mjs';
 const j=normalizeJob({site:{n:'Prueba',lat:41.576342,lon:-0.798139},profileId:'SP_45W_6Ah',period:'30'});
 assert.equal(j.revision,REVISION);
+assert.equal(terminalJobError('Trabajo histórico caducado por cambio de año; reencolar periodo vigente'),true);
+assert.equal(terminalJobError('Diferencia de configuración NAS/visor: trabajo rechazado'),true);
+assert.equal(terminalJobError('Diferencia de firma al terminar: resultado descartado'),true);
+assert.equal(terminalJobError('Fuente meteorológica HTTP 429'),false);
+assert.equal(terminalJobError('Fuente meteorológica HTTP 503'),false);
+assert.equal(terminalJobError('Error meteorológico: timeout'),false);
 assert.deepEqual(requestedYears('30',new Date('2026-12-31T23:59:59Z')),[1996,2025]);
 assert.deepEqual(requestedYears('30',new Date('2027-01-01T00:00:00Z')),[1997,2026]);
 assert.deepEqual(requestedYears('2024',new Date('2026-01-01T00:00:00Z')),[2024,2024]);
