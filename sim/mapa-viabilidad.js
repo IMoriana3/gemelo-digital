@@ -228,6 +228,7 @@ function updateView(){
 function useSameScenarioInSimulator(){
   if(!parityAvailable()){note('Primero calcula el emplazamiento exacto en el mapa.');return;}
   var site=mv.selected,p=activeProfile(),data=window.BAT_METEO_PARIDAD;
+  var original=signature(); // conserva también un tMin ajustado a mano
   var i=PROFILES.findIndex(function(q){return q.id===e('mv-profile').value;});
   if(i<0||!p)throw new Error('La TCU del mapa ya no existe en el simulador');
   /* La vista principal leerá los MISMOS arrays de meteorología, sin
@@ -238,6 +239,9 @@ function useSameScenarioInSimulator(){
     e('panel').value=String(p.chgW);
     e('panel').dispatchEvent(new Event('change'));
   }
+  /* Cambiar de perfil restaura por diseño su temperatura de ficha: para
+     reproducir un estudio con tMin manual hay que reponer el valor ORIGINAL. */
+  e('tmin').value=String(original.base.tMin);
   e('loc').value='custom';e('loc').dispatchEvent(new Event('change'));
   e('clat').value=String(site.lat);e('clon').value=String(site.lon);
   e('cname').value=site.n;
