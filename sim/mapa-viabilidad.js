@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-paridad-v9';
+var MV_VERSION='viabilidad-2026-11-20-paridad-v10';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -215,7 +215,7 @@ function parityAvailable(){
   var data=window.BAT_METEO_PARIDAD,s=mv.selected;
   return !!(data&&s&&data.site&&
     data.site.lat===s.lat&&data.site.lon===s.lon&&
-    data.period===e('mv-period').value);
+    data.period===e('mv-period').value&&data.sig===signature().key);
 }
 function updateParityButton(){
   var btn=e('mv-use-same-meteo');
@@ -250,6 +250,8 @@ function useSameScenarioInSimulator(){
   e('cmp').checked=true;
   e('src').value='mapa';e('src').dispatchEvent(new Event('change'));
   e('year').dispatchEvent(new Event('change'));
+  if(signature().key!==data.sig)
+    throw new Error('Los parámetros han cambiado durante la sincronización; recalcula el mapa');
   e('mv-close').click();
   e('srcTag').textContent='DATOS HORARIOS IDÉNTICOS al mapa: '+site.n+
     ' · '+data.years[0]+'–'+data.years[data.years.length-1]+
@@ -480,7 +482,8 @@ async function evaluateSite(){
        vez. El simulador podrá reutilizarlas byte a byte en esta sesión. */
     if(met.missing.length===0){
       window.BAT_METEO_PARIDAD={site:{lat:site.lat,lon:site.lon},
-        years:met.years.slice(),list:met.list,period:period,source:met.source};
+        years:met.years.slice(),list:met.list,period:period,source:met.source,
+        sig:cfg.key};
     }
     updateView();
     note('Evaluación terminada para '+site.n+'. Los resultados proceden del simulador de batería.');
@@ -611,6 +614,19 @@ function initialize(){
   setInterval(function(){if(!root.hidden)refreshNAS();},20000);
 }
 
+/* Verificación accesible al botón Simular: la igualdad exige misma fuente,
+   misma ubicación y mismo escenario. No basta con reutilizar la meteo. */
+if(typeof window!=='undefined')window.FACTIUN_MAPA_PARIDAD={
+  currentSignature:function(){return signature().key;},
+  validate:function(loc){
+    var data=window.BAT_METEO_PARIDAD;
+    if(!data||!data.site||data.sig!==signature().key)
+      return {ok:false,motivo:'Cambiaron los parámetros: vuelve a calcular el mapa'};
+    if(!loc||loc.lat!==data.site.lat||loc.lon!==data.site.lon)
+      return {ok:false,motivo:'Las coordenadas ya no coinciden con las del mapa'};
+    return {ok:true};
+  }
+};
 if(typeof window!=='undefined')window.FACTIUN_MAPA_NAS={
   async run(job){
     var src=job.site||{},site=siteOf(src.n,src.lat,src.lon,src.id,src.fuente);
