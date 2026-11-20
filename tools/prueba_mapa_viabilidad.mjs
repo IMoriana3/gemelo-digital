@@ -25,6 +25,8 @@ assert.doesNotMatch(js,/derived=opcionesPara\(control/);
 assert.match(html,/function opcionesDelPanel\(prof\)/);
 assert.match(html,/var opts=opcionesDelPanel\(prof\)/);
 assert.match(js,/var base=opcionesDelPanel\(p\)/);
+assert.match(js,/meteoForSite,fullYear,outcome,FISICA\.consumoTCU/);
+assert.match(js,/poaAt,etaAtCrate,etaCharger,cRateSafeLFP,hotDerate,motorTrackWh/);
 assert.match(html,/function ejecutaBalanceTCU\(meteoOTramos,prof,loc,opts,conf\)/);
 assert.match(html,/function calculaControlTCU\(meteoOTramos,prof,loc,base,control,conf\)/);
 assert.match(html,/var full=ejecutaBalanceTCU\(tramos,prof,loc,opts,\{seguido:true\}\)/);
@@ -58,6 +60,18 @@ const ctx={
   opcionesDe:function opcionesDe(){},
   opcionesDelPanel:function opcionesDelPanel(){},
   enCatalogo:function(){return true;},
+  cuentaReserva:function cuentaReserva(){},
+  poaAt:function poaAt(){},
+  etaAtCrate:function etaAtCrate(){},
+  etaCharger:function etaCharger(){},
+  cRateSafeLFP:function cRateSafeLFP(){},
+  hotDerate:function hotDerate(){},
+  motorTrackWh:function motorTrackWh(){},
+  controlDe:function controlDe(){},
+  parseOM:function parseOM(){},
+  fetchOpenMeteoYear:function fetchOpenMeteoYear(){},
+  resumenInviernos:function resumenInviernos(){},
+  peorInvierno:function peorInvierno(){},
 };
 ctx.Abanderamiento.prototype.paso=function(){};
 vm.createContext(ctx);
