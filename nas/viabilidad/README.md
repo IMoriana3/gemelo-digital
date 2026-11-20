@@ -51,6 +51,45 @@ Perfiles por defecto: SP 6Ah, STRING 6Ah, versiones LT y Track N Co 6Ah.
 Dentro de cada perfil se calculan sus propias estrategias sobre la misma
 meteorología. Cambiar de perfil no sobrescribe otros resultados.
 
+## Lote de cuatro emplazamientos · 20/11/2026
+
+Archivo versionado: `nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json`.
+Incluye Tordesillas (Valladolid), Chorzele (Mazowieckie), San José–La Joya
+(Arequipa) y Dunedin (Otago). **San José se resuelve dinámicamente del número
+de cartera 24019**; no se mantiene una segunda copia de sus coordenadas.
+
+Los otros tres puntos son **centros de población**, no coordenadas verificadas
+de los proyectos. Sustituirlos por el punto exacto de implantación antes de
+emitir un informe para cliente. El archivo conserva la procedencia y esta
+limitación por separado.
+
+Vista previa, sin descargar meteorología ni ejecutar el simulador:
+
+```bash
+node nas/viabilidad/seed.mjs \
+  --sites nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json \
+  --period 30
+```
+
+Son cuatro ubicaciones × cinco configuraciones de partida = **20 trabajos**.
+Cada ubicación requiere inicialmente 30 años horarios: hasta **120 consultas
+históricas por año** en el lote si no existe caché; la caché reutiliza
+la misma meteorología entre los perfiles de cada punto.
+
+Para calcularlos, una vez desplegado en NAS y configurada una licencia
+meteorológica comercial autorizada:
+
+```bash
+node nas/viabilidad/seed.mjs \
+  --sites nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json \
+  --period 30 --enqueue
+```
+
+NO se ha lanzado esta cola. No se publican SOC ni veredictos hasta obtener
+los resultados horarios del propio simulador. Los resultados se consultan
+por `/api/mapa/snapshot`, separando claramente equipos y estrategias.
+Las pruebas CI validan el montaje y coordenadas, **no** la meteorología real.
+
 ## Persistencia, datos y visor
 
 - /data/pending: trabajos pendientes.
