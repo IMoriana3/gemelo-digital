@@ -1681,7 +1681,10 @@ PROFILES.forEach(function(P,i){if(!P.variante)$('prof').add(new Option(P.n,i))})
 /* — Emplazamiento personalizado: Leaflet local + Nominatim (mismo patrón que index.html) — */
 var bmap=null, bmarker=null;
 function setPick(la,lo,name){
-  $('clat').value=(+la).toFixed(3); $('clon').value=(+lo).toFixed(3);
+  /* No redondear a tres decimales (~111 m en latitud): eso mueve el
+     emplazamiento respecto a la parcela seleccionada y altera el sol local.
+     Conservar el valor numérico completo de Leaflet/Nominatim. */
+  $('clat').value=String(Number(la)); $('clon').value=String(Number(lo));
   if(name)$('cname').value=name;
   if(bmap){bmarker.setLatLng([la,lo]);}
   try{localStorage.setItem('bateria_customLoc',JSON.stringify({lat:+la,lon:+lo,n:$('cname').value}))}catch(e){}
