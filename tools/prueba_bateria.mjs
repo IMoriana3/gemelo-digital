@@ -1191,6 +1191,11 @@ const parity = await pg.evaluate(async () => {
   byId('mv-add').click();
   byId('mv-profile').value='SP_45W_6Ah';
   byId('mv-profile').dispatchEvent(new Event('change'));
+  /* tMin personalizado debe sobrevivir al sincronizado entre vistas. */
+  byId('prof').value=String(PROFILES.findIndex(p=>p.id==='SP_45W_6Ah'));
+  byId('prof').dispatchEvent(new Event('change'));
+  byId('panel').value='45';
+  byId('tmin').value='-15';
   byId('mv-period').value='2025';
   window.BAT_METEO_PARIDAD={site:{lat:site.lat,lon:site.lon},years:[2025],
     list:[m],period:'2025',source:'fixture de paridad, sin red',
@@ -1199,7 +1204,8 @@ const parity = await pg.evaluate(async () => {
   const buttonVisible=!byId('mv-use-same-meteo').hidden;
   byId('mv-use-same-meteo').click();
   const selected={src:byId('src').value,lat:getLoc().lat,lon:getLoc().lon,
-    profile:PROFILES[Number(byId('prof').value)].id,year:byId('year').value};
+    profile:PROFILES[Number(byId('prof').value)].id,year:byId('year').value,
+    tmin:Number(byId('tmin').value)};
   const actual=await getMeteo(getLoc());
   const sameReference=actual===m;
   const validBefore=window.FACTIUN_MAPA_PARIDAD.validate(getLoc()).ok;
@@ -1224,7 +1230,7 @@ ok(parity.count>=136&&parity.diff===0&&parity.invalid===0&&parity.variants>=4,
 ok(parity.buttonVisible&&parity.sameReference&&parity.validBefore&&
    parity.rejectChangedSOC&&parity.guard&&parity.nasRefused&&parity.closed&&
    parity.selected.src==='mapa'&&parity.selected.profile==='SP_45W_6Ah'&&
-   parity.selected.year==='2025'&&
+   parity.selected.year==='2025'&&parity.selected.tmin===-15&&
    parity.selected.lat===parity.expectedSite.lat&&parity.selected.lon===parity.expectedSite.lon,
   'el mapa entrega EL MISMO array horario al simulador y rechaza coordenadas distintas',
   JSON.stringify(parity));
