@@ -396,8 +396,12 @@ async function request(req,res){
   const url=new URL(req.url,'http://localhost'),path=url.pathname;
   if(req.method==='GET'&&path==='/api/mapa/health'){
     const count={};for(const d of ['pending','running','done','failed'])count[d]=(await list(d)).length;
+    const world=(await worldPlans()).map(x=>({step:x.plan.step,
+      nodes:x.plan.sites.length,total_jobs:x.plan.total,
+      assigned_jobs:x.plan.cursor,year_range:x.plan.yearRange}));
     return json(res,200,{ok:true,revision:REVISION,meteorologia:KEY?'licenciada':'pendiente_de_licencia',
-      puede_encolar:UI_QUEUE&&!!TOKEN,counts:count});
+      puede_encolar:UI_QUEUE&&!!TOKEN,counts:count,
+      cobertura_mundial:{registrada:world.length>0,etapas:world}});
   }
   if(req.method==='GET'&&path==='/api/mapa/snapshot')
     return json(res,200,await getSnapshot());
