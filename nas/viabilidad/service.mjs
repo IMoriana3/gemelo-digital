@@ -43,6 +43,17 @@ export async function initStorage(){
     await unlink(jobPath('running',job.id)).catch(()=>{});
   }
 }
+/* Contrato idéntico al mapa: una petición "30 años" SE IDENTIFICA por
+   los 30 años concretos. La cola no debe reutilizar el cálculo de
+   1996–2025 cuando el calendario ya requiere 1997–2026. */
+export function requestedYears(period,now=new Date()){
+  const cutoff=now.getUTCFullYear()-1;
+  if(period==='30')return [cutoff-29,cutoff];
+  const y=Number(period);
+  if(!Number.isInteger(y)||y<1940||y>cutoff)
+    throw Error('Periodo inválido: año histórico aún no completo');
+  return [y,y];
+}
 const profiles=new Set(['SP_45W_3Ah','SP_45W_6Ah','SP_60W_6Ah',
   'STRING_60W_3Ah','STRING_60W_6Ah','SP_45W_6Ah_LT','STRING_60W_6Ah_LT',
   'TNC_45W_3.8Ah','TNC_45W_6Ah','TNC_45W_8Ah',
@@ -61,9 +72,7 @@ export function normalizeJob(input){
   const profileId=String(input.profileId||'SP_45W_6Ah');
   if(!profiles.has(profileId))throw Error('Modelo de TCU desconocido');
   const period=String(input.period==null?'30':input.period);
-  const year=Number(period);
-  if(period!=='30'&&(!Number.isInteger(year)||year<1940||year>=new Date().getUTCFullYear()))
-    throw Error('Periodo inválido');
+  const yearRange=requestedYears(period);
   const panelW=input.panelW==null?null:Number(input.panelW);
   if(panelW!==null&&![30,45,60,90].includes(panelW))throw Error('Panel no válido');
   /* No se redondean coordenadas: siete decimales de la parcela real
@@ -109,9 +118,9 @@ export function normalizeJob(input){
     scenario={...obj,physics:{...obj.physics}};
   }
   const id=hash(JSON.stringify([REVISION,site.lat,site.lon,profileId,period,
-    panelW,scenario,signature])).slice(0,24);
-  return {id,revision:REVISION,site,profileId,period,panelW,scenario,signature,
-    attempts:0,created_at:new Date().toISOString()};
+    yearRange,panelW,scenario,signature])).slice(0,24);
+  return {id,revision:REVISION,site,profileId,period,yearRange,panelW,
+    scenario,signature,attempts:0,created_at:new Date().toISOString()};
 }
 export async function enqueue(input){
   const job=normalizeJob(input);
@@ -155,6 +164,12 @@ async function historicLicensed(requestUrl){
   }throw Error(error?.message||'Error meteorológico');
 }
 async function compute(job){
+  /* No arrancar una cola de 2026 con fecha 2027 ni mezclar resultados
+     de periodos distintos en la misma etiqueta. */
+  const expected=requestedYears(job.period);
+  if(!Array.isArray(job.yearRange)||job.yearRange.length!==2||
+     job.yearRange[0]!==expected[0]||job.yearRange[1]!==expected[1])
+    throw Error('Trabajo histórico caducado por cambio de año; reencolar periodo vigente');
   const {chromium}=await import('playwright');
   const browser=await chromium.launch({headless:true,
     args:['--disable-dev-shm-usage','--js-flags=--max-old-space-size=2048']});
@@ -211,8 +226,14 @@ async function tick(){
 }
 async function getSnapshot(){
   if(snapshotCache&&Date.now()-snapshotCache.time<10000)return snapshotCache.value;
-  const items=(await list('done')).filter(j=>j.revision===REVISION&&j.record)
-    .map(j=>({site:j.site,record:j.record,job_id:j.id}));
+  /* El snapshot no publica conclusiones obsoletas después de Año Nuevo,
+     aunque siga existiendo su evidencia histórica en /data/done. */
+  const items=(await list('done')).filter(j=>{
+    if(j.revision!==REVISION||!j.record||!Array.isArray(j.yearRange))return false;
+    try{const expected=requestedYears(j.period);
+      return j.yearRange[0]===expected[0]&&j.yearRange[1]===expected[1];
+    }catch(_){return false;}
+  }).map(j=>({site:j.site,record:j.record,job_id:j.id}));
   const value={ok:true,revision:REVISION,items};
   snapshotCache={value,time:Date.now()};return value;
 }
