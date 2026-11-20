@@ -345,7 +345,8 @@ async function refreshGlobalCoverage(){
       const stages=(data.stages||[]).sort((a,b)=>b.step-a.step);
       const totals=stages.map(p=>p.step+'° '+p.assigned+'/'+p.jobs+
         ' programados; '+p.closed+' cerrados (incluye fallos)').join(' · ');
-      label.textContent='Cobertura terrestre mundial · nivel '+step+'°: '+
+      label.textContent=(data.paused?'COBERTURA MUNDIAL PAUSADA · ':'Cobertura terrestre mundial · ')+
+        'nivel '+step+'°: '+
         data.planned_cells+' nodos terrestres · '+data.nodes.length+
         ' visibles'+(data.truncated?' (amplía el zoom para ver más)':'')+
         '. '+totals+'. Gris: sin evaluar; azul: otra configuración. Sólo coloreado puntual, sin regiones aptas interpoladas.';
