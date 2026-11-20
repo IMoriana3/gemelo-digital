@@ -58,7 +58,7 @@ const profiles=new Set(['SP_45W_3Ah','SP_45W_6Ah','SP_60W_6Ah',
   'STRING_60W_3Ah','STRING_60W_6Ah','SP_45W_6Ah_LT','STRING_60W_6Ah_LT',
   'TNC_45W_3.8Ah','TNC_45W_6Ah','TNC_45W_8Ah',
   'TNC_60W_3.8Ah','TNC_60W_6Ah','TNC_60W_8Ah']);
-export function normalizeJob(input){
+export function normalizeJob(input,asOf=new Date()){
   if(!input||typeof input!=='object')throw Error('Trabajo vacío');
   const src=input.site||input;
   /* Number(null)==0 y Number('')==0: sin esta puerta, una planta sin
@@ -72,7 +72,7 @@ export function normalizeJob(input){
   const profileId=String(input.profileId||'SP_45W_6Ah');
   if(!profiles.has(profileId))throw Error('Modelo de TCU desconocido');
   const period=String(input.period==null?'30':input.period);
-  const yearRange=requestedYears(period);
+  const yearRange=requestedYears(period,asOf);
   const panelW=input.panelW==null?null:Number(input.panelW);
   if(panelW!==null&&![30,45,60,90].includes(panelW))throw Error('Panel no válido');
   /* No se redondean coordenadas: siete decimales de la parcela real
