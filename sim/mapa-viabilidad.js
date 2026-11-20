@@ -623,16 +623,58 @@ if(typeof window!=='undefined')window.FACTIUN_MAPA_NAS={
     if(!selected)throw new Error('No existe perfil equivalente visible');
     if(!mv.sites.some(function(x){return x.id===site.id;}))mv.sites.push(site);
     selectSite(site,false);
+    /* El panel principal y el mapa DEBEN apuntar al mismo hardware antes
+       de aplicar overrides: la firma deriva tMin del perfil seleccionado. */
+    var pageIdx=PROFILES.indexOf(selected);
+    if(pageIdx<0)throw new Error('El perfil no existe en batería.html');
+    e('prof').value=String(pageIdx);
+    e('prof').dispatchEvent(new Event('change'));
     e('mv-profile').value=selected.id;syncPanel();
     if(!p.string){
-      e('mv-panel').value=String(job.panelW||p.chgW);
-      if(!e('mv-panel').value)throw new Error('Panel NAS no ofertado en el selector');
+      var w=String(job.panelW||p.chgW);
+      e('panel').value=w;
+      e('panel').dispatchEvent(new Event('change'));
+      e('mv-panel').value=w;
+      if(!e('mv-panel').value||e('panel').value!==w)
+        throw new Error('Panel NAS no ofertado en los dos selectores');
     }
     syncControls();e('mv-period').value=String(job.period||'30');
     if(!e('mv-period').value)throw new Error('Periodo NAS no reconocido');
+    /* Un trabajo de UI conserva todo el escenario, incluidos los parámetros
+       físicos modificados. Si el firmware o el formulario no puede reproducirlo,
+       no se calculan ni publican conclusiones. */
+    if(job.scenario){
+      var sc=job.scenario;
+      if(sc.strategy!==true)throw new Error('Política no compatible con el mapa');
+      if(sc.soh!==1&&sc.soh!==SOH_FIN_VIDA)
+        throw new Error('SOH solicitado no disponible en batería.html');
+      e('aged').checked=sc.soh===SOH_FIN_VIDA;
+      e('motor').value=String(sc.motorModel);
+      e('vientoStow').value=sc.vientoStow;
+      e('socTgt').value=String(sc.socTgt);
+      e('socCrit').value=String(sc.socCrit);
+      e('fc').value=String(sc.fcDays);
+      e('tmin').value=String(sc.tMin);
+      e('poaMin').value=String(sc.poaMin);
+      e('mount').value=sc.mountTilt==null?'trk':'fix';
+      if(sc.mountTilt!=null)e('tilt').value=String(sc.mountTilt);
+      e('winter').checked=sc.winter;
+      if(sc.soc0!=null)e('soc0').value=String(sc.soc0*100);
+      for(var key of Object.keys(sc.physics)){
+        if(!PARAMS_FIS.some(function(v){return v.k===key;}))
+          throw new Error('Parámetro físico ajeno al simulador: '+key);
+        if(!Number.isFinite(sc.physics[key]))
+          throw new Error('Parámetro físico no finito: '+key);
+        window[key]=sc.physics[key];
+      }
+    }
+    if(job.signature&&signature().key!==job.signature)
+      throw new Error('Diferencia de configuración NAS/visor: trabajo rechazado');
     await evaluateSite();
     var result=effectiveResult(site);
     if(!result)throw new Error(e('mv-progress').textContent||'Sin resultado');
+    if(job.signature&&result.sig!==job.signature)
+      throw new Error('Diferencia de firma al terminar: resultado descartado');
     return result;
   }
 };
@@ -673,10 +715,15 @@ async function sendToNAS(){
   if(!mv.nasToken)return;
   var p=activeProfile();
   try{
+    var config=signature(),physics={};
+    var mods=typeof tocadosFis==='function'?tocadosFis():{};
+    for(var key of Object.keys(mods))physics[key]=mods[key].ahora;
+    var scenario=Object.assign({},config.base,{soc0:config.soc0,physics:physics});
     var resp=await fetch('/api/mapa/jobs',{
       method:'POST',headers:{'content-type':'application/json','x-factiun-token':mv.nasToken},
       body:JSON.stringify({site:mv.selected,profileId:e('mv-profile').value,
-        period:e('mv-period').value,panelW:p&&!p.string?p.chgW:null})
+        period:e('mv-period').value,panelW:p&&!p.string?p.chgW:null,
+        scenario:scenario,signature:config.key})
     });
     var j=await resp.json();
     if(!resp.ok){if(resp.status===403)mv.nasToken='';throw new Error(j.error||'No autorizado');}
