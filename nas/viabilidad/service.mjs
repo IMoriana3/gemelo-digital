@@ -3,7 +3,7 @@
  * Runs serially; JSON checkpoints survive Synology restarts.
  */
 import {createServer} from 'node:http';
-import {readFile,writeFile,rename,readdir,unlink,mkdir} from 'node:fs/promises';
+import {readFile,writeFile,rename,readdir,unlink,mkdir,stat,statfs} from 'node:fs/promises';
 import {existsSync,readFileSync} from 'node:fs';
 import {resolve,join,extname,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -225,13 +225,26 @@ export function terminalJobError(message){
    nunca se crean centenares de miles de JSON simultáneamente. */
 const WORLD_BUFFER=Math.min(50,Math.max(1,Number(process.env.WORLD_QUEUE_BUFFER)||12));
 const worldFile=name=>join(DATA,'world',name);
+/* Los manifiestos 1° contienen decenas de miles de puntos. El servidor
+   no debe parsearlos cada 5 segundos: usa memoria de lectura cuyo origen
+   de verdad sigue siendo siempre el JSON persistido en /data/world. */
+const worldPlanCache=new Map();
+async function readWorldPlan(name){
+  const file=worldFile(name),info=await stat(file);
+  const cached=worldPlanCache.get(name);
+  if(cached&&cached.mtimeMs===info.mtimeMs&&cached.size===info.size)
+    return cached.plan;
+  const plan=JSON.parse(await readFile(file,'utf8'));
+  worldPlanCache.set(name,{mtimeMs:info.mtimeMs,size:info.size,plan});
+  return plan;
+}
 async function worldPlans(){
   const files=(await readdir(join(DATA,'world'))).filter(f=>
     /^plan-(5|2|1)-[0-9a-f]{16}-[0-9]{4}_[0-9]{4}-[0-9a-f]{12}\.json$/.test(f));
   const out=[];
   for(const name of files){
     try{
-      const p=JSON.parse(await readFile(worldFile(name),'utf8'));
+      const p=await readWorldPlan(name);
       if(p.schema!=='factiun.world-coverage.v1'||p.revision!==REVISION||
          !p.enabled||!Array.isArray(p.sites)||!Array.isArray(p.profiles)||p.cursor>p.total||
          p.total!==p.sites.length*p.profiles.length||p.step<=0)continue;
