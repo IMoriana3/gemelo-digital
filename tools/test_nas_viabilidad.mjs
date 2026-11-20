@@ -195,6 +195,35 @@ try{
   ],{cwd,encoding:'utf8',env});
   const a1=JSON.parse(readLocalFile(join(worldData,'world',plan5),'utf8'));
   assert.equal(a1.cursor,4);
+  /* Pausar NO cancela el cálculo activo ni toca el cursor. Reanudar exige
+     confirmación explícita; los trabajos pendientes siguen donde estaban. */
+  const paused=JSON.parse(execFileSync(process.execPath,[
+    'nas/viabilidad/seed.mjs','--pause-world'
+  ],{cwd,encoding:'utf8',env}));
+  assert.equal(paused.pausada,true);
+  assert.equal(existsSync(join(worldData,'world','PAUSED.json')),true);
+  const priorPending=readdirSync(join(worldData,'pending')).filter(n=>n.endsWith('.json'));
+  rmSync(join(worldData,'pending',priorPending[0]));
+  const pausedRun=JSON.parse(execFileSync(process.execPath,[
+    '--input-type=module','--eval',runner
+  ],{cwd,encoding:'utf8',env:{...env,OPEN_METEO_API_KEY:'qa-sin-red',
+    WORLD_QUEUE_BUFFER:'4'}}));
+  assert.equal(pausedRun.stage.assigned,4);
+  assert.equal(readdirSync(join(worldData,'pending')).filter(n=>n.endsWith('.json')).length,3);
+  assert.throws(()=>execFileSync(process.execPath,[
+    'nas/viabilidad/seed.mjs','--resume-world'
+  ],{cwd,env,stdio:'pipe'}),/--confirm-world/);
+  const resumed=JSON.parse(execFileSync(process.execPath,[
+    'nas/viabilidad/seed.mjs','--resume-world','--confirm-world'
+  ],{cwd,encoding:'utf8',env}));
+  assert.equal(resumed.pausada,false);
+  assert.equal(existsSync(join(worldData,'world','PAUSED.json')),false);
+  const resumedRun=JSON.parse(execFileSync(process.execPath,[
+    '--input-type=module','--eval',runner
+  ],{cwd,encoding:'utf8',env:{...env,OPEN_METEO_API_KEY:'qa-sin-red',
+    WORLD_QUEUE_BUFFER:'4'}}));
+  assert.equal(resumedRun.stage.assigned,5);
+  assert.equal(readdirSync(join(worldData,'pending')).filter(n=>n.endsWith('.json')).length,4);
   /* Una planta ya calculada en /done se reutiliza en la rejilla; un nodo
      en /failed NO entra de nuevo en pending por existir en otra escala. */
   mkdirSync(join(worldData,'done'),{recursive:true});
