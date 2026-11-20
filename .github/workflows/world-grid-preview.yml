@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      FACTIUN_MAPA_DATA: ${{ runner.temp }}/factiun-world
+      FACTIUN_MAPA_DATA: /tmp/factiun-world
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,6 +36,6 @@ jobs:
         with:
           name: factiun-mundo-5-2-1-geografico-no-calculado
           path: |
-            ${{ runner.temp }}/factiun-world/world/plan-*.json
-            ${{ runner.temp }}/factiun-world/world/resumen-mundial.json
+            /tmp/factiun-world/world/plan-*.json
+            /tmp/factiun-world/world/resumen-mundial.json
           retention-days: 30
