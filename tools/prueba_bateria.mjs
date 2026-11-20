@@ -1282,6 +1282,7 @@ await pg.evaluate(()=>{
   e('prof').value=String(PROFILES.findIndex(p=>p.id==='SP_45W_6Ah'));
   e('prof').dispatchEvent(new Event('change'));
   e('tmin').value='0';
+  e('vientoStow').value='racha';
   e('mv-open').click();
   e('mv-lat').value='41.50202';e('mv-lon').value='-5.00146';
   e('mv-name').value='QA Tordesillas físico';e('mv-add').click();
@@ -1326,6 +1327,10 @@ if(evaluated.canCompare){
       noParallelMotor:document.getElementById('motorTag').textContent.includes('motor único')&&
         !document.getElementById('out').textContent.includes('Balance del motor'),
       sameArray:LAST.meteo===data.list[0],
+      correctWindUnits:LAST.meteo.some(r=>r.wind===7.2&&r.gust===13.5),
+      gustsPresent:stdMain?.S.hSinRacha===0,
+      snowDataPresent:stdMain?.S.hSinNieve===0,
+      windStowObserved:stdMain?.S.hStow>0,
       sameProfile:LAST.prof.id==='SP_45W_6Ah',
       sameMarker:!!bmarker&&bmarker.getLatLng().lat===data.site.lat&&
         bmarker.getLatLng().lng===data.site.lon,
@@ -1341,7 +1346,9 @@ if(evaluated.canCompare){
       map:{hZero:stdMap?.hZero,socMin:stdMap?.simulador?.socMinPct}
     };
   });
-  ok(compared.noParallelMotor&&compared.sameArray&&compared.sameProfile&&compared.sameMarker&&
+  ok(compared.noParallelMotor&&compared.sameArray&&compared.correctWindUnits&&
+    compared.gustsPresent&&compared.snowDataPresent&&compared.windStowObserved&&
+    compared.sameProfile&&compared.sameMarker&&
     compared.sameHours&&
     compared.noDifference,
     'paridad REAL mapa→simulador: misma meteo, hardware, SOC y KPIs SIN redondeos',
