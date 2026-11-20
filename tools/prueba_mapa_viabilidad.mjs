@@ -28,6 +28,14 @@ assert.doesNotMatch(js,/derived=opcionesPara\(control/);
 assert.match(html,/function opcionesDelPanel\(prof\)/);
 assert.match(html,/var opts=opcionesDelPanel\(prof\)/);
 assert.match(js,/var base=opcionesDelPanel\(p\)/);
+assert.match(js,/async function loadPrioritySites\(\)/);
+assert.match(js,/if\(item\.cartera_num!=null\)return/);
+const cases=JSON.parse(readFileSync(
+  new URL('../nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json',import.meta.url),'utf8'));
+assert.equal(cases.length,4);
+assert.equal(cases.filter(c=>c.cartera_num==='24019').length,1);
+assert.equal(cases.filter(c=>c.cartera_num!=null&&c.lat!=null).length,0,
+  'La Joya no duplica coordenadas de la cartera');
 assert.match(js,/meteoForSite,fullYear,outcome,FISICA\.consumoTCU/);
 assert.match(js,/poaAt,etaAtCrate,etaCharger,cRateSafeLFP,hotDerate,motorTrackWh/);
 assert.match(html,/function ejecutaBalanceTCU\(meteoOTramos,prof,loc,opts,conf\)/);
