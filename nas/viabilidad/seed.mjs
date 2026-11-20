@@ -6,7 +6,7 @@ import {join,resolve} from 'node:path';
 import {runInNewContext} from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {ROOT,DATA,REVISION,requestedYears,enqueue,normalizeJob} from './service.mjs';
-import {worldGrid,inLand,WORLD_LEVELS} from './mundo.mjs';
+import {worldGrid,inLand,inPolygon,geometries,WORLD_LEVELS} from './mundo.mjs';
 export {inLand} from './mundo.mjs';
 const args=process.argv.slice(2);
 const get=(key,fallback='')=>{const i=args.indexOf(key);return i<0?fallback:(args[i+1]||fallback);};
@@ -101,6 +101,46 @@ async function worldMask(){
   if(mask.type!=='FeatureCollection')throw Error('Máscara mundial corrupta');
   return {mask,sha256:createHash('sha256').update(bytes).digest('hex')};
 }
+// IRENA 2026: capacidad fotovoltaica acumulada a cierre de 2025.
+const PV_PRIORITY=['CHN','USA','IND','DEU','JPN','BRA','ESP','AUS','ITA','KOR'];
+function priorityCountries(geo){
+  if(geo.type!=='FeatureCollection')throw Error('Límites de países inválidos');
+  return PV_PRIORITY.map(code=>{
+    const features=geo.features.filter(f=>f.properties?.ISO_A3_EH===code);
+    if(!features.length)throw Error('País prioritario ausente en Natural Earth: '+code);
+    return {code,polygons:geometries({type:'FeatureCollection',features})};
+  });
+}
+function prioritizeSites(sites,countries){
+  const buckets=new Map(countries.map(({code})=>[code,[]]));
+  const remaining=[];
+  for(const site of sites){
+    const {lat,lon}=site;
+    const country=countries.find(({polygons})=>polygons.some(({bb,rings})=>
+      lon>=bb.xmin&&lon<=bb.xmax&&lat>=bb.ymin&&lat<=bb.ymax&&inPolygon(lon,lat,rings)));
+    (country?buckets.get(country.code):remaining).push(site);
+  }
+  return {sites:[...Array.from(buckets.values()).flat(),...remaining],
+    counts:Object.fromEntries([...buckets].map(([code,nodes])=>[code,nodes.length]))};
+}
+async function worldCountries(){
+  const file=join(DATA,'world','ne_10m_admin_0_countries.geojson');
+  if(!existsSync(file)){
+    if(!has('--download-land'))throw Error('Faltan límites de países; añade --download-land');
+    const url='https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson';
+    const response=await fetch(url,{signal:AbortSignal.timeout(120000)});
+    if(!response.ok)throw Error('Límites Natural Earth: HTTP '+response.status);
+    const bytes=await response.text();
+    priorityCountries(JSON.parse(bytes));
+    await mkdir(join(DATA,'world'),{recursive:true});
+    const temp=file+'.'+randomUUID()+'.tmp';
+    await writeFile(temp,bytes);
+    await rename(temp,file);
+  }
+  const bytes=await readFile(file,'utf8');
+  return {countries:priorityCountries(JSON.parse(bytes)),
+    country_mask_sha256:createHash('sha256').update(bytes).digest('hex')};
+}
 async function worldPlan(){
   const mode=get('--world','');
   if(!['all','5','2','1'].includes(mode))
@@ -110,23 +150,27 @@ async function worldPlan(){
   if(has('--enqueue')&&!has('--confirm-world'))
     throw Error('Para registrar toda la Tierra añade --confirm-world');
   const {mask,sha256}=await worldMask();
+  const {countries,country_mask_sha256}=await worldCountries();
   const levels=mode==='all'?WORLD_LEVELS:[Number(mode)];
   const yearRange=requestedYears(period);
   const profHash=createHash('sha256').update(JSON.stringify(profiles)).digest('hex').slice(0,12);
   const tasks=[],results=[];
   for(const level of levels){
     const geo=worldGrid(mask,level);
-    const count=geo.nodes.length,work=count*profiles.length;
+    const {sites,counts}=prioritizeSites(geo.nodes,countries);
+    const count=sites.length,work=count*profiles.length;
     const name='plan-'+String(level).replace('.','p')+'-'+REVISION+'-'+yearRange.join('_')+'-'+profHash+'.json';
     const file=join(DATA,'world',name);
     const plan={
       schema:'factiun.world-coverage.v1',revision:REVISION,mask_sha256:sha256,
       source:'Natural Earth 1:10m land polygons, public domain',
-      step:level,period,yearRange,profiles,sites:geo.nodes,
+      step:level,period,yearRange,profiles,sites,
+      country_mask_sha256,pv_priority:PV_PRIORITY,pv_capacity_year:2025,
+      pv_capacity_source:'https://ourworldindata.org/grapher/solar-pv-cumulative-capacity',
       total:work,cursor:0,enabled:true,created_at:new Date().toISOString(),
       disclaimer:'EXPLORACIÓN GLOBAL: las celdas no están certificadas ni interpoladas'
     };
-    results.push({step:level,sitios:count,trabajos:work,
+    results.push({step:level,sitios:count,trabajos:work,nodos_paises_prioritarios:counts,
       peticiones_historicas_sin_cache:count*(period==='30'?30:1)*2,
       comprobaciones_geometricas:geo.candidateChecks,
       detalle:'Un nodo terrestre por celda con tierra detectable a 1:10m'});
@@ -141,6 +185,9 @@ async function worldPlan(){
            prev.mask_sha256!==plan.mask_sha256||prev.total!==plan.total||
            JSON.stringify(prev.profiles)!==JSON.stringify(plan.profiles))
           throw Error('Plan previo incompatible: no se sobrescribe '+file);
+        if(JSON.stringify(prev.pv_priority)!==JSON.stringify(plan.pv_priority)||
+           prev.country_mask_sha256!==plan.country_mask_sha256)
+          throw Error('El plan ya registrado tiene otro orden. Se conserva su cursor: '+file);
         continue; // --enqueue idempotente, no reinicia el cursor ni el progreso
       }
       const temp=file+'.'+randomUUID()+'.tmp';
@@ -152,7 +199,7 @@ async function worldPlan(){
   console.log(JSON.stringify({
     modo:has('--enqueue')?'PLAN MUNDIAL REGISTRADO · ejecución NAS automática con licencia':'VISTA PREVIA GLOBAL · sin cálculos',
     cobertura:'todas las celdas terrestres detectables por Natural Earth 1:10m; no áreas certificadas',
-    mascara_sha256:sha256,periodo:yearRange,perfiles:profiles,
+    mascara_sha256:sha256,prioridad_fv_2025:PV_PRIORITY,periodo:yearRange,perfiles:profiles,
     etapas:results,
     total_nodos:results.reduce((n,x)=>n+x.sitios,0),
     total_trabajos:results.reduce((n,x)=>n+x.trabajos,0),
