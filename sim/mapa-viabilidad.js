@@ -34,7 +34,9 @@ function siteOf(name,lat,lon,id,src){
 function saveCustom(site){
   var at=mv.custom.findIndex(function(x){return x.id===site.id;});
   if(at>=0)mv.custom[at]=site;else mv.custom.push(site);
-  if(!mv.sites.some(function(x){return x.id===site.id;}))mv.sites.push(site);
+  var atSite=mv.sites.findIndex(function(x){return x.id===site.id;});
+  if(atSite>=0)mv.sites[atSite]=site;
+  else mv.sites.push(site);
   persist();pin(site);listSites();
 }
 function getSite(id){return mv.sites.find(function(x){return x.id===id;})||null;}
@@ -255,9 +257,10 @@ function useSameScenarioInSimulator(){
 }
 function addLocation(name,lat,lon){
   if(!coordOK(lat,lon))throw new Error('Introduce coordenadas válidas: latitud −89…89, longitud −180…180.');
-  var near=mv.sites.find(function(x){return Math.abs(x.lat-lat)<.000001&&Math.abs(x.lon-lon)<.000001;});
+  /* Igualdad EXACTA: no fusionar parcelas distintas separadas por centímetros. */
+  var near=mv.sites.find(function(x){return x.lat===lat&&x.lon===lon;});
   if(near){selectSite(near,true);return near;}
-  var id='custom:'+lat.toFixed(6)+':'+lon.toFixed(6);
+  var id='custom:'+String(lat)+':'+String(lon);
   var site=siteOf(name||'Coordenadas '+lat.toFixed(4)+', '+lon.toFixed(4),lat,lon,id,'Coordenadas indicadas por el usuario');
   saveCustom(site);selectSite(site,true);return site;
 }
