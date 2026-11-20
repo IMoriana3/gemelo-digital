@@ -217,7 +217,7 @@ function json(res,status,obj){
 }
 async function receive(req){
   const chunks=[];let size=0;
-  for await(const b of req){size+=b.length;if(size>8192)throw Error('Entrada demasiado grande');chunks.push(b);}
+  for await(const b of req){size+=b.length;if(size>32768)throw Error('Entrada demasiado grande');chunks.push(b);}
   return JSON.parse(Buffer.concat(chunks).toString());
 }
 function authed(req){
