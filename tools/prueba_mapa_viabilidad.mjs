@@ -17,8 +17,11 @@ assert.match(js,/meteoMode:'era5_hybrid'/);
 assert.match(js,/var keep=all\.filter\(function\(x\)\{return x&&x\.sig!==cfg\.key;\}\);/);
 assert.match(html,/loc&&loc\.meteoMode==='era5_hybrid'/);
 assert.match(html,/wind_gusts_10m/);
-assert.match(html,/models=era5&windspeed_unit=ms/);
-assert.match(html,/models=era5_land/);
+assert.match(html,/models=era5&wind_speed_unit=ms/);
+assert.match(html,/models=era5_land&wind_speed_unit=ms/);
+assert.match(html,/wind_gusts_10m:b.wind_gusts_10m/);
+assert.match(html,/hourly_units.wind_gusts_10m!=='m\/s'/);
+assert.match(html,/wind_speed_unit=ms/);
 assert.match(html,/a\.time\[i\]!==b\.time\[i\]/);
 assert.match(js,/var control=controls\[j\],derived=opcionesDe\(control,profile,cfg.base\)/);
 assert.doesNotMatch(js,/derived=opcionesPara\(control/);
@@ -187,4 +190,51 @@ assert.equal(selectedOpts.soh,0.8);
 assert.equal(selectedOpts.motorModel,'curva');
 assert.equal(selectedOpts.vientoStow,'racha');
 assert.equal(alternateOpts.socCrit,selectedOpts.socCrit);
+// Contrato real entre dos reanálisis: ERA5 es viento medio; ERA5-Land,
+// ráfaga y nieve. No aceptar por accidente km/h como m/s.
+const startYear=html.indexOf('function fetchOpenMeteoYear(loc,year){');
+const endYear=html.indexOf('/* Sintético:',startYear);
+assert.ok(startYear>0&&endYear>startYear,'No se encuentra el lector histórico');
+const dates=['2025-01-01T00:00','2025-01-01T01:00'];
+const weatherCtx={parseOM:j=>j.hourly};
+const urls=[];
+weatherCtx.fetch=async function(url){
+  const u=new URL(url),model=u.searchParams.get('models');
+  urls.push(u);
+  const params=u.searchParams.get('hourly');
+  assert.equal(u.searchParams.get('wind_speed_unit'),'ms');
+  if(model==='era5'){
+    assert.equal(params,'shortwave_radiation,diffuse_radiation,windspeed_10m');
+    return {ok:true,json:async()=>({
+      hourly:{time:dates,shortwave_radiation:[0,500],diffuse_radiation:[0,160],
+        windspeed_10m:[4.2,5.6]},hourly_units:{windspeed_10m:'m/s'}})};
+  }
+  assert.equal(model,'era5_land');
+  assert.equal(params,'temperature_2m,snow_depth,wind_gusts_10m');
+  return {ok:true,json:async()=>({
+    hourly:{time:dates,temperature_2m:[-4,-3],snow_depth:[0.01,0.01],
+      wind_gusts_10m:[8.6,11.2]},
+    hourly_units:{wind_gusts_10m:'m/s'}})};
+};
+vm.createContext(weatherCtx);
+vm.runInContext(html.slice(startYear,endYear)+'\nglobalThis.__load=fetchOpenMeteoYear;',weatherCtx);
+const hybrid=await weatherCtx.__load({lat:41.5,lon:-5,meteoMode:'era5_hybrid'},2025);
+assert.equal(urls.length,2);
+assert.equal(hybrid.windspeed_10m[1],5.6);
+assert.equal(hybrid.wind_gusts_10m[1],11.2);
+assert.equal(hybrid.snow_depth[1],0.01);
+const origFetch=weatherCtx.fetch;
+weatherCtx.fetch=async u=>{
+  const r=await origFetch(u),json=r.json;
+  return {...r,json:async()=>{
+    const j=await json();
+    if(new URL(u).searchParams.get('models')==='era5_land')
+      j.hourly_units.wind_gusts_10m='km/h';
+    return j;
+  }};
+};
+await assert.rejects(
+  weatherCtx.__load({lat:41.5,lon:-5,meteoMode:'era5_hybrid'},2025),
+  /unidad del viento no es m\/s/);
+
 console.log('Mapa TCU: integridad, un solo lector físico y clasificación conservadora OK');
