@@ -47,7 +47,7 @@ assert.equal(cases.length,4);
 assert.equal(cases.filter(c=>c.cartera_num==='24019').length,1);
 assert.equal(cases.filter(c=>c.cartera_num!=null&&c.lat!=null).length,0,
   'La Joya no duplica coordenadas de la cartera');
-assert.match(js,/meteoForSite,fullYear,outcome,FISICA\.consumoTCU/);
+assert.match(js,/meteoForSite,meteoSummary,fullYear,outcome,FISICA\.consumoTCU/);
 assert.match(js,/poaAt,etaAtCrate,etaCharger,cRateSafeLFP,hotDerate,motorTrackWh/);
 assert.match(html,/function ejecutaBalanceTCU\(meteoOTramos,prof,loc,opts,conf\)/);
 assert.match(html,/function calculaControlTCU\(meteoOTramos,prof,loc,base,control,conf\)/);
