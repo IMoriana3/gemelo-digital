@@ -22,6 +22,9 @@ assert.match(html,/models=era5_land/);
 assert.match(html,/a\.time\[i\]!==b\.time\[i\]/);
 assert.match(js,/var control=controls\[j\],derived=opcionesDe\(control,profile,cfg.base\)/);
 assert.doesNotMatch(js,/derived=opcionesPara\(control/);
+assert.match(html,/function opcionesDelPanel\(prof\)/);
+assert.match(html,/var opts=opcionesDelPanel\(prof\)/);
+assert.match(js,/var base=opcionesDelPanel\(p\)/);
 assert.match(html,/function ejecutaBalanceTCU\(meteoOTramos,prof,loc,opts,conf\)/);
 assert.match(html,/function calculaControlTCU\(meteoOTramos,prof,loc,base,control,conf\)/);
 assert.match(html,/var full=ejecutaBalanceTCU\(tramos,prof,loc,opts,\{seguido:true\}\)/);
@@ -53,6 +56,7 @@ const ctx={
   summarize:function summarize(){},
   controlesPara:function controlesPara(){},
   opcionesDe:function opcionesDe(){},
+  opcionesDelPanel:function opcionesDelPanel(){},
   enCatalogo:function(){return true;},
 };
 ctx.Abanderamiento.prototype.paso=function(){};
@@ -141,4 +145,32 @@ assert.equal(series[2].snowDepth,null);
 assert.equal(series[0].wind,0);
 assert.equal(Object.keys(series).includes('mapaQA'),false);
 
-console.log('Mapa TCU: integridad, clasificación y cierres conservadores correctos.');
+// El mapa y el panel consumen la misma lectura física. Variar hardware
+// sólo cambia el suelo de carga si el equipo NO es el seleccionado.
+const pStart=html.indexOf('function opcionesDelPanel(prof){');
+const pEnd=html.indexOf('function opcionesReferenciaTCU(opts){',pStart);
+assert.ok(pStart>0&&pEnd>pStart,'No existe lector común del panel');
+const panelValues={
+ prof:{value:'0'},panel:{value:'45'},motor:{value:'curva'},
+ aged:{checked:true},vientoStow:{value:'racha'},winter:{checked:false},
+ socTgt:{value:'80'},socCrit:{value:'30'},fc:{value:'5'},
+ tmin:{value:'-15'},poaMin:{value:'0'},mount:{value:'trk'},tilt:{value:'30'}
+};
+const panelP={id:'SP_45W_6Ah',wh:153.6,chgW:45,tCarga:[0,45]};
+const panelOther={id:'SP_45W_6Ah_LT',wh:166.4,chgW:45,tCarga:[-20,60]};
+const panelCtx={
+ PROFILES:[panelP,panelOther],SOH_FIN_VIDA:0.8,
+ $:function(k){return panelValues[k];},
+ conPanel:function(p,w){return w===p.chgW?p:{...p,chgW:w,id:p.id.replace('_45W_','_'+w+'W_')}}
+};
+vm.createContext(panelCtx);
+vm.runInContext(html.slice(pStart,pEnd)+'\nglobalThis.__opts=opcionesDelPanel;',panelCtx);
+const selectedOpts=panelCtx.__opts(panelP);
+const alternateOpts=panelCtx.__opts(panelOther);
+assert.equal(selectedOpts.tMin,-15,'umbral personalizado del perfil seleccionado');
+assert.equal(alternateOpts.tMin,-20,'umbral de ficha cuando se selecciona otra química');
+assert.equal(selectedOpts.soh,0.8);
+assert.equal(selectedOpts.motorModel,'curva');
+assert.equal(selectedOpts.vientoStow,'racha');
+assert.equal(alternateOpts.socCrit,selectedOpts.socCrit);
+console.log('Mapa TCU: integridad, un solo lector físico y clasificación conservadora OK');
