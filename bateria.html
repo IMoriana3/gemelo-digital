@@ -885,12 +885,33 @@ function clasificaBarrido(list,years,simYear){
   return {res:res,caidos:caidos};
 }
 function fetchOpenMeteoYear(loc,year){
-  var u="https://archive-api.open-meteo.com/v1/archive?latitude="+loc.lat+"&longitude="+loc.lon+
-    "&start_date="+year+"-01-01&end_date="+year+"-12-31&hourly="+OM_VARS+"&timezone=UTC";
-  /* El mapa multianual pide una fuente homogénea (ERA5-Land). El simulador
-     normal conserva su selector existente; no cambiamos sus estudios previos. */
-  if(loc&&loc.meteoModel==='era5_land')u+='&models=era5_land';
-  return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM);
+  var base="https://archive-api.open-meteo.com/v1/archive?latitude="+loc.lat+"&longitude="+loc.lon+
+    "&start_date="+year+"-01-01&end_date="+year+"-12-31&timezone=UTC";
+  var load=function(u){return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()});};
+  /* El mapa multianual combina DOS reanálisis, sin cambiar el simulador:
+     ERA5 aporta viento, ráfaga e irradiancias; ERA5-Land aporta temperatura
+     y nieve en suelo. ERA5-Land NO ofrece las ráfagas: pedir todo de un solo
+     modelo devolvería campos inexistentes o series incoherentes. */
+  if(loc&&loc.meteoMode==='era5_hybrid'){
+    var atm=base+"&hourly=shortwave_radiation,diffuse_radiation,windspeed_10m,wind_gusts_10m"+
+      "&models=era5&windspeed_unit=ms";
+    var land=base+"&hourly=temperature_2m,snow_depth&models=era5_land";
+    return Promise.all([load(atm),load(land)]).then(function(pair){
+      var a=pair[0].hourly,b=pair[1].hourly;
+      if(!a||!b||!Array.isArray(a.time)||!Array.isArray(b.time)||
+         a.time.length!==b.time.length||!a.time.length)
+        throw new Error("ERA5 / ERA5-Land: cobertura temporal incompatible");
+      for(var i=0;i<a.time.length;i++)if(a.time[i]!==b.time[i])
+        throw new Error("ERA5 / ERA5-Land: índices horarios diferentes en "+i);
+      return parseOM({hourly:{
+        time:a.time,shortwave_radiation:a.shortwave_radiation,
+        diffuse_radiation:a.diffuse_radiation,
+        temperature_2m:b.temperature_2m,
+        windspeed_10m:a.windspeed_10m,wind_gusts_10m:a.wind_gusts_10m,
+        snow_depth:b.snow_depth}});
+    });
+  }
+  return load(base+"&hourly="+OM_VARS).then(parseOM);
 }
 /* Sintético: cielo claro atenuado por nubes + temperatura estacional/diurna */
 function synthMeteo(loc,days,doy0,clouds){
