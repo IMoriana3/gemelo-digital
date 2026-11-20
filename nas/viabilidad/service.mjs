@@ -67,7 +67,7 @@ export function normalizeJob(input,asOf=new Date()){
      String(src.lat).trim()===''||String(src.lon).trim()==='')
     throw Error('Coordenadas ausentes: no se puede asignar 0,0');
   const lat=Number(src.lat),lon=Number(src.lon);
-  if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>89||Math.abs(lon)>180)
+  if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>=90||Math.abs(lon)>180)
     throw Error('Coordenadas no válidas');
   const profileId=String(input.profileId||'SP_45W_6Ah');
   if(!profiles.has(profileId))throw Error('Modelo de TCU desconocido');
