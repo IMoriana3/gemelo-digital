@@ -1326,21 +1326,29 @@ function opcionesDe(c,prof,base){
   if(c.tMin!=null)o.tMin=c.tMin;                /* la columna de EQUIPO trae su propio suelo de carga */
   return {o:o,p:c.prof||prof};
 }
-/* AUTORIDAD ÚNICA DE EJECUCIÓN PARA PANEL Y MAPA.
-   Devuelve exactamente las filas de simulate/simulaSeguido. No calcula
-   nuevas potencias, SOC, ángulos ni reglas meteorológicas. El modo anual
-   respeta el SOC inicial del panel; el barrido multianual, igual que el
-   informe, arranca cada tramo en el objetivo de SU estrategia. */
+/* UN ÚNICO EJECUTOR ENERGÉTICO: lo llaman el panel, los controles
+   comparados y el mapa. La física sólo vive en simulate() y simulaSeguido().
+   Esta función no tiene fórmulas propias de potencia, batería ni movimiento.
+   No añade un summarize() global al barrido de 30 años: sería costoso y
+   alteraría el flujo de memoria del informe original. */
+function ejecutaBalanceTCU(meteoOTramos,prof,loc,opts,conf){
+  var seguido=!!(conf&&conf.seguido);
+  var soc0=seguido||!conf||conf.soc0==null
+    ?socEstacionario(opts):conf.soc0;
+  if(!Number.isFinite(soc0)||soc0<0||soc0>1)
+    throw new Error('SOC inicial del control fuera de 0…1');
+  return seguido
+    ?simulaSeguido(meteoOTramos,prof,loc,opts)
+    :simulate(meteoOTramos,prof,loc,soc0,opts);
+}
+/* La transformación de política es también única (opcionesDe), incluida la
+   química y el SOH; aquí sólo se escoge qué control ya definido se ejecuta. */
 function calculaControlTCU(meteoOTramos,prof,loc,base,control,conf){
   var od=opcionesDe(control,prof,base);
   var seguido=!!(conf&&conf.seguido);
-  var soc0=seguido||(conf&&conf.soc0==null)||!conf
+  var soc0=seguido||!conf||conf.soc0==null
     ?socEstacionario(od.o):conf.soc0;
-  if(!Number.isFinite(soc0)||soc0<0||soc0>1)
-    throw new Error('SOC inicial del control fuera de 0…1');
-  var rows=seguido
-    ?simulaSeguido(meteoOTramos,od.p,loc,od.o)
-    :simulate(meteoOTramos,od.p,loc,soc0,od.o);
+  var rows=ejecutaBalanceTCU(meteoOTramos,od.p,loc,od.o,conf);
   return {c:control,rows:rows,S:summarize(rows),soc0:soc0,prof:od.p};
 }
 function runControls(meteo,prof,loc,soc0,base){
@@ -2050,11 +2058,11 @@ $('run').onclick=function(){
       var tramos=tramosContinuos(list,years);
       if(!tramos.length)throw new Error('Sin datos históricos (¿sin red?)'+(cl.caidos.length?' · '+cl.caidos[0].year+': '+cl.caidos[0].motivo:''));
       var meteoSeguido=[]; tramos.forEach(function(t){for(var k=0;k<t.meteo.length;k++)meteoSeguido.push(t.meteo[k])});
-      var full=simulaSeguido(tramos,prof,loc,opts);
+      var full=ejecutaBalanceTCU(tramos,prof,loc,opts,{seguido:true});
       var inv=resumenInviernos(full), peor=peorInvierno(inv);
       var total=cuentaReserva(full,1), gob=periodoQueGobierna(full,opts,peor.i0,peor.i1);
       var mng=recorta(full,peor.i0,peor.i1); full=null;            /* suelta las 262 800 filas */
-      var refFull=simulaSeguido(tramos,prof,loc,refOpts);
+      var refFull=ejecutaBalanceTCU(tramos,prof,loc,refOpts,{seguido:true});
       var ref=recorta(refFull,peor.i0,peor.i1), refTotal=cuentaReserva(refFull,1); refFull=null;
       var ctrlW=$('cmp').checked?controlesPara(prof).map(function(c){
         var result=calculaControlTCU(tramos,prof,loc,opts,c,{seguido:true});
@@ -2100,8 +2108,8 @@ $('run').onclick=function(){
     job=getMeteo(loc).then(function(meteo){
       meteo=applyStep(meteo);
       if(STEP_NOTE)$('srcTag').textContent+=STEP_NOTE;
-      var mng=simulate(meteo,prof,loc,soc0,opts);
-      var ref=simulate(meteo,prof,loc,soc0,refOpts);
+      var mng=ejecutaBalanceTCU(meteo,prof,loc,opts,{soc0:soc0});
+      var ref=ejecutaBalanceTCU(meteo,prof,loc,refOpts,{soc0:soc0});
       var ctrl=$('cmp').checked?runControls(meteo,prof,loc,soc0,opts):null;
       LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,soc0:soc0,socModo:'panel',sweep:null,controls:ctrl,
         weatherContract:meteo.contract||null,weatherFallback:meteo.contractFallback||null};
