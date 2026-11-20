@@ -4,14 +4,14 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-19-v3';
+var MV_VERSION='viabilidad-2026-11-20-v4';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
 var mv={sites:[],selected:null,map:null,markers:{},busy:false,records:{},custom:[],config:null};
 /* Una conclusión guardada deja de ser vigente si cambia el motor de la página. */
 var MV_ENGINE_HASH=(function(){
-  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesPara,
+  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesDe,
                  FISICA.consumoTCU,Abanderamiento.prototype.paso];
   var src=functions.map(function(f){return typeof f==='function'?Function.prototype.toString.call(f):'missing';}).join('|');
   var hash=2166136261;
@@ -358,7 +358,7 @@ async function evaluateSite(){
       tr.meteo.forEach(function(m){if(Number.isFinite(m.snowDepth)&&m.snowDepth>0)snowPresenceHours++;});
     });
     for(var j=0;j<controls.length;j++){
-      var control=controls[j],derived=opcionesPara(control,profile,cfg.base);
+      var control=controls[j],derived=opcionesDe(control,profile,cfg.base);
       note('Evaluando '+site.n+' · '+control.n+' ('+(j+1)+'/'+controls.length+')…');
       await pause();
       if(met.years.length>1)rows=simulaSeguido(met.tramos,derived.p,site,derived.o);
