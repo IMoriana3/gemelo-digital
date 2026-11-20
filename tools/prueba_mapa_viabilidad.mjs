@@ -22,8 +22,14 @@ assert.match(html,/models=era5_land/);
 assert.match(html,/a\.time\[i\]!==b\.time\[i\]/);
 assert.match(js,/var control=controls\[j\],derived=opcionesDe\(control,profile,cfg.base\)/);
 assert.doesNotMatch(js,/derived=opcionesPara\(control/);
-assert.match(js,/simulaSeguido\(met.tramos,derived.p,site,derived.o\)/);
-assert.match(js,/simulate\(met.tramos\[0\].meteo,derived.p,site,socEstacionario\(derived.o\),derived.o\)/);
+assert.match(html,/function calculaControlTCU\(meteoOTramos,prof,loc,base,control,conf\)/);
+assert.match(html,/return calculaControlTCU\(meteo,prof,loc,base,c,\{soc0:soc0\}\)/);
+assert.match(js,/var result=calculaControlTCU\(/);
+assert.match(js,/\{soc0:cfg.soc0\}/);
+assert.match(js,/BAT_METEO_PARIDAD/);
+assert.match(html,/function meteoExactaMapa\(loc,years\)/);
+assert.doesNotMatch(js,/rows=simulaSeguido\(/);
+assert.doesNotMatch(js,/rows=simulate\(/);
 assert.doesNotMatch(js,/function simulate\(/);
 assert.doesNotMatch(js,/synthMeteo\(/);
 assert.match(js,/if\(!fullYear\(m,years\[i\]\)\)/);
@@ -34,6 +40,7 @@ const ctx={
   Abanderamiento:function Abanderamiento(){},
   simulate:function simulate(){},
   simulaSeguido:function simulaSeguido(){},
+  calculaControlTCU:function calculaControlTCU(){},
   summarize:function summarize(){},
   controlesPara:function controlesPara(){},
   opcionesDe:function opcionesDe(){},
