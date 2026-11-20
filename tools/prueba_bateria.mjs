@@ -1181,6 +1181,36 @@ const parity = await pg.evaluate(async () => {
     }
   }
 
+  /* AÑO NUEVO: el SOC y la temperatura NO se reinician el 1 de enero.
+     Caso oscuro sin generación para que el arnés detecte un reinicio falso.
+     Un tramo real puede contener dos años; dividirlos sería físicamente
+     inventar un SOC nuevo en Nochevieja. */
+  const borderSite=sites[1],p0=PROFILES.find(p=>p.id==='SP_45W_6Ah');
+  const bord=make(2025,28,240,11).map(r=>({...r,ghi:0,dhi:0,
+    wind:0,gust:0,snowDepth:0,temp:-4}));
+  const split=bord.findIndex(r=>r.t.getUTCFullYear()===2026);
+  if(!(split>0&&split<bord.length))throw Error('El ensayo no cruza Año Nuevo');
+  const borderOpts={...base,tMin:p0.tCarga[0]};
+  const full=simulaSeguido([{years:[2025,2026],meteo:bord}],p0,borderSite,borderOpts);
+  const direct=simulate(bord,p0,borderSite,socEstacionario(borderOpts),borderOpts);
+  const fields=['t','soc','pos','chg','motor','base','net','tCell','eLib','seg','stow','nieve'];
+  let borderDiff=0;
+  for(let i=0;i<full.length;i++){
+    for(const key of fields){
+      const left=key==='t'?+full[i][key]:full[i][key];
+      const right=key==='t'?+direct[i][key]:direct[i][key];
+      if(!Object.is(left,right))borderDiff++;
+    }
+  }
+  const wrong=simulaSeguido([
+    {years:[2025],meteo:bord.slice(0,split)},
+    {years:[2026],meteo:bord.slice(split)}
+  ],p0,borderSite,borderOpts);
+  const resetDetected=wrong[split].soc!==full[split].soc;
+  const yearsInWinter=porInviernos(full).map(x=>x.label);
+  const continuous=borderDiff===0&&resetDetected&&yearsInWinter.length===1&&
+    yearsInWinter[0]==='2025/26';
+  if(!continuous)invalid++;
   /* Paso del MISMO array de meteo del mapa al panel: cero redescargas. */
   const site=sites[2],m=make(2025,1,240);
   const byId=id=>document.getElementById(id);
@@ -1220,7 +1250,8 @@ const parity = await pg.evaluate(async () => {
   try{await window.FACTIUN_MAPA_NAS.run({site,
     profileId:'SP_45W_6Ah',period:'2025',signature:'firma-deliberadamente-distinta'});}
   catch(e){nasRefused=/Diferencia de configuración/.test(String(e.message||e));}
-  return {count,diff,invalid,variants,buttonVisible,sameReference,validBefore,
+  return {count,diff,invalid,variants,continuous,borderDiff,resetDetected,
+    yearsInWinter,buttonVisible,sameReference,validBefore,
     rejectChangedSOC,guard,nasRefused,
     selected,expectedSite:site,closed:byId('mv-root').hidden};
 });
