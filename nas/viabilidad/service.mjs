@@ -17,6 +17,7 @@ const TOKEN=process.env.FACTIUN_MAPA_TOKEN||'';
 const UI_QUEUE=process.env.ENABLE_UI_QUEUE==='1';
 export const REVISION=createHash('sha256').update(
   ['bateria.html','sim/mapa-viabilidad.js','sim/fisica.js','sim/viento.js',
+   'sim/canon.js','sim/cartera.js','pines.json',
    'nas/viabilidad/service.mjs','nas/viabilidad/seed.mjs']
   .map(f=>readFileSync(join(ROOT,f))).reduce((a,b)=>Buffer.concat([a,b]),Buffer.alloc(0))
 ).digest('hex').slice(0,16);
