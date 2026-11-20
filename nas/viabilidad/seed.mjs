@@ -4,7 +4,7 @@ import {existsSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {runInNewContext} from 'node:vm';
 import {fileURLToPath} from 'node:url';
-import {ROOT,DATA,initStorage,enqueue,normalizeJob} from './service.mjs';
+import {ROOT,DATA,enqueue,normalizeJob} from './service.mjs';
 const args=process.argv.slice(2);
 const get=(key,fallback='')=>{const i=args.indexOf(key);return i<0?fallback:(args[i+1]||fallback);};
 const has=key=>args.includes(key);
@@ -94,11 +94,18 @@ async function grid(){
 async function main(){
  if(!has('--cartera')&&!step&&!get('--sites'))throw Error('Especifica --cartera, --sites archivo.json o --grid 5');
  if(limit&&(!Number.isInteger(limit)||limit<1))throw Error('--limit requiere entero positivo');
- await initStorage();
+ /* Una vista previa NUNCA recupera trabajos running. La recuperación tras
+    reinicio pertenece exclusivamente al servidor; de otro modo una preview
+    desde otra terminal movería el trabajo en ejecución a pending y podría
+    producir doble cálculo del mismo emplazamiento. */
+ if(has('--enqueue')){
+   for(const folder of ['pending','running','done','failed','meteo'])
+     await mkdir(join(DATA,folder),{recursive:true});
+ }
  const sites=[...(has('--cartera')?await cartera():[]),...(get('--sites')?await fileSites():[]),
    ...(step?await grid():[])];
  const seen=new Set();
- let unique=sites.filter(s=>{const k=s.lat.toFixed(6)+','+s.lon.toFixed(6);
+ let unique=sites.filter(s=>{const k=String(s.lat)+','+String(s.lon);
    if(seen.has(k))return false;seen.add(k);return true;});
  if(limit)unique=unique.slice(0,limit);
  const jobs=[];
@@ -108,7 +115,7 @@ async function main(){
    modo:has('--enqueue')?'EN COLA':'SOLO VISTA PREVIA',
    ubicaciones:unique.length,emplazamientos:unique.map(s=>({nombre:s.n,lat:s.lat,lon:s.lon,
       fuente:s.fuente})),perfiles:profiles.length,trabajos:jobs.length,
-   consultas_meteo_unicas_sin_cache:unique.length*(period==='30'?30:1),
+   consultas_meteo_unicas_sin_cache:unique.length*(period==='30'?30:1)*2,
    meteo:'Se requiere licencia comercial. No se calculan zonas entre nodos.'
  },null,2));
  if(!has('--enqueue'))return;
