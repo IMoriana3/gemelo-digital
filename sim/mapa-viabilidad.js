@@ -4,15 +4,21 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-motor-unico-v11';
+var MV_VERSION='viabilidad-2026-11-20-motor-unico-v12';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
 var mv={sites:[],selected:null,map:null,markers:{},busy:false,records:{},custom:[],config:null};
 /* Una conclusión guardada deja de ser vigente si cambia el motor de la página. */
 var MV_ENGINE_HASH=(function(){
-  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesDe,opcionesDelPanel,ejecutaBalanceTCU,calculaControlTCU,
-                 FISICA.consumoTCU,Abanderamiento.prototype.paso];
+  /* La firma también incluye los cálculos auxiliares y los criterios
+     geográficos. Cambiar una eficiencia, una ley de viento o un veredicto
+     invalida resultados antiguos aunque simulate() no cambie de texto. */
+  var functions=[simulate,simulaSeguido,summarize,cuentaReserva,
+    controlesPara,opcionesDe,opcionesDelPanel,ejecutaBalanceTCU,calculaControlTCU,
+    poaAt,etaAtCrate,etaCharger,cRateSafeLFP,hotDerate,motorTrackWh,
+    controlDe,parseOM,fetchOpenMeteoYear,resumenInviernos,peorInvierno,
+    meteoForSite,fullYear,outcome,FISICA.consumoTCU,Abanderamiento.prototype.paso];
   var src=functions.map(function(f){return typeof f==='function'?Function.prototype.toString.call(f):'missing';}).join('|');
   var hash=2166136261;
   for(var i=0;i<src.length;i++){hash^=src.charCodeAt(i);hash=Math.imul(hash,16777619);}
