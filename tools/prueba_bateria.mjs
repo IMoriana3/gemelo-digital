@@ -1314,6 +1314,8 @@ if(evaluated.canCompare){
     const stdMap=record?.results?.find(x=>x.k==='std');
     const stdMain=LAST.controls?.find(x=>x.c.k==='std');
     return {
+      noParallelMotor:document.getElementById('motorTag').textContent.includes('motor único')&&
+        !document.getElementById('out').textContent.includes('Balance del motor'),
       sameArray:LAST.meteo===data.list[0],
       sameProfile:LAST.prof.id==='SP_45W_6Ah',
       sameHours:LAST.meteo.length===8760&&stdMain?.rows?.length===8760,
@@ -1328,7 +1330,7 @@ if(evaluated.canCompare){
       map:{hZero:stdMap?.hZero,socMin:stdMap?.simulador?.socMinPct}
     };
   });
-  ok(compared.sameArray&&compared.sameProfile&&compared.sameHours&&
+  ok(compared.noParallelMotor&&compared.sameArray&&compared.sameProfile&&compared.sameHours&&
     compared.noDifference,
     'paridad REAL mapa→simulador: misma meteo, hardware, SOC y KPIs SIN redondeos',
     JSON.stringify(compared));
