@@ -298,7 +298,17 @@ async function refreshGlobalCoverage(){
       const category=stat==='calculado'?'CALCULADO PARA OTRA CONFIGURACIÓN':
         stat==='en_cola'?'EN COLA':stat==='calculando'?'CALCULANDO':
         stat==='fallido'?'FALLÓ':statusWord(stat);
-      tip.textContent=node.n+' · '+category+' · muestra puntual, sin extrapolación';
+      const w=item.record&&item.record.weather;
+      var climate='';
+      if(w){
+        climate=' · GHI '+(w.ghi_kwh_m2_anio==null?'sin datos':dec(w.ghi_kwh_m2_anio,1)+' kWh/m²/año')+
+          ' · viento '+(w.viento_max_ms==null?'s/d':dec(w.viento_max_ms,2)+' m/s')+
+          ' · racha '+(w.racha_max_ms==null?'s/d':dec(w.racha_max_ms,2)+' m/s')+
+          ' · Tmin '+(w.t_min_c==null?'s/d':dec(w.t_min_c,1)+' °C')+
+          ' · nieve '+(w.nieve_max_m==null?'s/d':dec(w.nieve_max_m,3)+' m');
+        if(item.record.yearsOK!==item.record.yearsAsked)climate+=' · HISTÓRICO INCOMPLETO';
+      }
+      tip.textContent=node.n+' · '+category+climate+' · muestra puntual, sin extrapolación';
       marker.bindTooltip(tip,{direction:'top'});
       marker.on('click',function(){
         const site=siteOf(node.n,node.lat,node.lon,node.id,node.fuente);
