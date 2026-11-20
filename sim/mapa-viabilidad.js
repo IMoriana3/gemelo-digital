@@ -511,6 +511,29 @@ async function evaluateSite(){
     note('No se ha asignado viabilidad: '+String(err&&err.message||err));
   }finally{mv.busy=false;btn.disabled=false;}
 }
+/* Mismo fichero de ubicaciones para visor y cola NAS. No duplicar
+   coordenadas en otro JS. Los sitios con cartera_num ya están presentes
+   en LOCS con las coordenadas originales de Factiun. */
+async function loadPrioritySites(){
+  try{
+    var response=await fetch('nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json',
+      {cache:'no-store'});
+    if(!response.ok)throw new Error('Fichero de casos no disponible');
+    var items=await response.json();
+    if(!Array.isArray(items))throw new Error('Formato de casos no válido');
+    items.forEach(function(item){
+      if(item.cartera_num!=null)return; // San José: la autoridad es CARTERA
+      var lat=num(item.lat),lon=num(item.lon),id=String(item.id||'');
+      if(!id||!coordOK(lat,lon))return;
+      if(mv.sites.some(function(x){return x.id===id||x.lat===lat&&x.lon===lon;}))return;
+      mv.sites.push(siteOf(item.n,lat,lon,id,item.fuente));
+    });
+    drawPins();listSites();
+  }catch(_){
+    /* En file:// la lectura de ficheros puede bloquearse por CORS. El
+       simulador y la cartera permanecen operativos sin casos adicionales. */
+  }
+}
 function initialize(){
   var button=e('mv-open');if(!button||typeof L==='undefined'||typeof LOCS==='undefined')return;
   var all=(Array.isArray(LOCS)?LOCS:[]);
@@ -619,6 +642,7 @@ function initialize(){
   nasButton.textContent='Enviar cálculo al NAS';nasButton.hidden=true;
   nasButton.onclick=sendToNAS;e('mv-evaluate').after(nasButton);
   drawPins();listSites();renderResult();
+  loadPrioritySites();
   refreshNAS();
   setInterval(function(){if(!root.hidden)refreshNAS();},20000);
 }
