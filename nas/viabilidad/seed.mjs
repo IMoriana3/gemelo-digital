@@ -1,31 +1,19 @@
 /* Encola proyectos o rejilla terrestre. Solo escribe si se pasa --enqueue. */
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import {createHash,randomUUID} from 'node:crypto';
 import {existsSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {runInNewContext} from 'node:vm';
 import {fileURLToPath} from 'node:url';
-import {ROOT,DATA,enqueue,normalizeJob} from './service.mjs';
+import {ROOT,DATA,REVISION,requestedYears,enqueue,normalizeJob} from './service.mjs';
+import {worldGrid,inLand,WORLD_LEVELS} from './mundo.mjs';
+export {inLand} from './mundo.mjs';
 const args=process.argv.slice(2);
 const get=(key,fallback='')=>{const i=args.indexOf(key);return i<0?fallback:(args[i+1]||fallback);};
 const has=key=>args.includes(key);
 const profiles=get('--profiles','SP_45W_6Ah,STRING_60W_6Ah,SP_45W_6Ah_LT,STRING_60W_6Ah_LT,TNC_45W_6Ah')
   .split(',').map(s=>s.trim()).filter(Boolean);
 const period=get('--period','30'),limit=Number(get('--limit','0')),step=Number(get('--grid','0'));
-function inRing(x,y,ring){let inside=false;
- for(let i=0,j=ring.length-1;i<ring.length;j=i++){
-   const a=ring[i],b=ring[j];
-   if((a[1]>y)!==(b[1]>y)&&x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0])inside=!inside;
- }return inside;
-}
-function inPolygon(x,y,rings){return rings.length>0&&inRing(x,y,rings[0])&&!rings.slice(1).some(r=>inRing(x,y,r));}
-export function inLand(x,y,collection){
- const features=collection.type==='FeatureCollection'?collection.features:[{geometry:collection.geometry||collection}];
- return features.some(f=>{const g=f.geometry;if(!g)return false;
-   if(g.type==='Polygon')return inPolygon(x,y,g.coordinates);
-   if(g.type==='MultiPolygon')return g.coordinates.some(poly=>inPolygon(x,y,poly));
-   return false;
- });
-}
 async function land(){
  const file=join(DATA,'ne_110m_land.geojson');
  if(!existsSync(file)){
@@ -91,7 +79,88 @@ async function grid(){
    }
  }return res;
 }
+/* El alcance GLOBAL no se reduce a los primeros 20 nodos. Se genera
+   un MANIFIESTO persistente para cada nivel 5° -> 2° -> 1° de toda la
+   tierra reconocida por Natural Earth 1:10m, incluyendo islas pequeñas.
+   El servidor dosifica sus trabajos a la cola según capacidad disponible. */
+async function worldMask(){
+  const dir=join(DATA,'world'),file=join(dir,'ne_10m_land.geojson');
+  if(!existsSync(file)){
+    if(!has('--download-land'))throw Error('Falta máscara mundial de 10m: añade --download-land');
+    const u='https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_land.geojson';
+    const r=await fetch(u,{signal:AbortSignal.timeout(120000)});
+    if(!r.ok)throw Error('Natural Earth 10m: HTTP '+r.status);
+    const value=await r.text();
+    if(value.length<100000||value.length>35000000||
+       JSON.parse(value).type!=='FeatureCollection')
+      throw Error('Máscara mundial Natural Earth 10m inválida');
+    await mkdir(dir,{recursive:true});
+    await writeFile(file,value);
+  }
+  const bytes=await readFile(file,'utf8'),mask=JSON.parse(bytes);
+  if(mask.type!=='FeatureCollection')throw Error('Máscara mundial corrupta');
+  return {mask,sha256:createHash('sha256').update(bytes).digest('hex')};
+}
+async function worldPlan(){
+  const mode=get('--world','');
+  if(!['all','5','2','1'].includes(mode))
+    throw Error('--world admite all, 5, 2 o 1 (grados)');
+  if(get('--sites')||has('--cartera')||step||limit)
+    throw Error('--world no admite --sites, --cartera, --grid ni --limit: no se recorta el planeta');
+  if(has('--enqueue')&&!has('--confirm-world'))
+    throw Error('Para registrar toda la Tierra añade --confirm-world');
+  const {mask,sha256}=await worldMask();
+  const levels=mode==='all'?WORLD_LEVELS:[Number(mode)];
+  const yearRange=requestedYears(period);
+  const profHash=createHash('sha256').update(JSON.stringify(profiles)).digest('hex').slice(0,12);
+  const tasks=[],results=[];
+  for(const level of levels){
+    const geo=worldGrid(mask,level);
+    const count=geo.nodes.length,work=count*profiles.length;
+    const name='plan-'+String(level).replace('.','p')+'-'+REVISION+'-'+yearRange.join('_')+'-'+profHash+'.json';
+    const file=join(DATA,'world',name);
+    const plan={
+      schema:'factiun.world-coverage.v1',revision:REVISION,mask_sha256:sha256,
+      source:'Natural Earth 1:10m land polygons, public domain',
+      step:level,period,yearRange,profiles,sites:geo.nodes,
+      total:work,cursor:0,enabled:true,created_at:new Date().toISOString(),
+      disclaimer:'EXPLORACIÓN GLOBAL: las celdas no están certificadas ni interpoladas'
+    };
+    results.push({step:level,sitios:count,trabajos:work,
+      peticiones_historicas_sin_cache:count*(period==='30'?30:1)*2,
+      comprobaciones_geometricas:geo.candidateChecks,
+      detalle:'Un nodo terrestre por celda con tierra detectable a 1:10m'});
+    tasks.push({file,plan});
+  }
+  if(has('--enqueue')){
+    await mkdir(join(DATA,'world'),{recursive:true});
+    for(const {file,plan} of tasks){
+      if(existsSync(file)){
+        const prev=JSON.parse(await readFile(file,'utf8'));
+        if(prev.schema!==plan.schema||prev.revision!==plan.revision||
+           prev.mask_sha256!==plan.mask_sha256||prev.total!==plan.total||
+           JSON.stringify(prev.profiles)!==JSON.stringify(plan.profiles))
+          throw Error('Plan previo incompatible: no se sobrescribe '+file);
+        continue; // --enqueue idempotente, no reinicia el cursor ni el progreso
+      }
+      const temp=file+'.'+randomUUID()+'.tmp';
+      await writeFile(temp,JSON.stringify(plan)+'\n',{mode:0o600});
+      const {rename}=await import('node:fs/promises');
+      await rename(temp,file);
+    }
+  }
+  console.log(JSON.stringify({
+    modo:has('--enqueue')?'PLAN MUNDIAL REGISTRADO · ejecución NAS automática con licencia':'VISTA PREVIA GLOBAL · sin cálculos',
+    cobertura:'todas las celdas terrestres detectables por Natural Earth 1:10m; no áreas certificadas',
+    mascara_sha256:sha256,periodo:yearRange,perfiles:profiles,
+    etapas:results,
+    total_nodos:results.reduce((n,x)=>n+x.sitios,0),
+    total_trabajos:results.reduce((n,x)=>n+x.trabajos,0),
+    declaracion:'NINGÚN SOC CALCULADO: se requieren licencia, ejecución NAS y revisión de resultados'
+  },null,2));
+}
 async function main(){
+ if(get('--world'))return worldPlan();
  if(!has('--cartera')&&!step&&!get('--sites'))throw Error('Especifica --cartera, --sites archivo.json o --grid 5');
  if(limit&&(!Number.isInteger(limit)||limit<1))throw Error('--limit requiere entero positivo');
  /* Una vista previa NUNCA recupera trabajos running. La recuperación tras
