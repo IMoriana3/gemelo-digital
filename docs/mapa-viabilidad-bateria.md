@@ -11,6 +11,55 @@ El mapa **no calcula por proximidad geográfica**. Los marcadores inicialmente
 aparecen grises; solo se colorean para el perfil, estrategia, periodo y parámetros
 que se han evaluado en ese punto exacto.
 
+## Contrato obligatorio de paridad literal
+
+La vista del mapa **no es otro simulador**. El ejecutor de referencia es
+`calculaControlTCU`, declarado en `bateria.html`, que llama a
+`opcionesDe` y `simulate` o `simulaSeguido`. Tanto `runControls` del
+simulador como la vista geográfica llaman a esa MISMA función, con los mismos
+objetos `meteo`, `prof`, `loc`, `base` y `control`.
+
+**Cómo comparar sin ambigüedad:**
+
+1. Evaluar una ubicación del mapa, con una serie meteorológica completa.
+2. Pulsar **«Usar mismos datos en el simulador»**. Se pasan al panel principal
+   referencias a las **mismas filas horarias**, sin nueva descarga, corrección,
+   interpolación ni cambio de modelo meteorológico.
+3. El panel sincroniza coordenadas exactas, hardware, panel, fuente meteorológica,
+   año/rango, paso horario y modo de SOC inicial. Los demás parámetros físicos,
+   SOH y política se conservan porque ambas vistas leen el mismo formulario.
+4. Ejecutar `Simular` en el panel. La comparación de cifras se realiza sobre
+   los mismos datos y con el mismo motor.
+5. El barrido de 30 años arranca cada tramo en el SOC estacionario propio de su
+   estrategia. Para un año individual ambos leen el SOC inicial del deslizador.
+
+**Qué métricas son comparables:** la serie horaria completa de SOC, posición,
+carga, motor, electrónica, reserva, temperatura, viento y nieve; y cualquier KPI
+calculado sobre el **mismo rango de fechas**. El simulador enseña en su tabla de
+estrategias el invierno que gobierna la **estrategia base**; el mapa enseña
+tanto todo el histórico como, separado, ese mismo invierno y sus KPIs.
+No comparar un porcentaje anual de 30 años con un porcentaje del peor invierno.
+
+**Control de calidad:** `tools/prueba_bateria.mjs` compara con `===` o
+`JSON.stringify` sin redondear las filas y KPIs de los dos caminos para
+Tordesillas, Chorzele, La Joya y Dunedin, cinco modelos de TCU y cuatro
+políticas, con viento, nieve, frío y dos tramos multianuales de prueba. La
+prueba falla ante cualquier diferencia. `tools/prueba_mapa_viabilidad.mjs`
+vigila que no aparezca otra implementación del balance en el mapa.
+
+**CASO NAS:** la petición desde la web incluye una firma completa de escenario
+y todos los valores editables; el NAS rechaza el trabajo **antes de calcular**
+si los ajustes reconstruidos no dan la misma firma. El identificador de cola
+incluye la firma y las coordenadas sin redondearlas. Los trabajos generados por
+`seed.mjs` no llevan firma de usuario: utilizan los valores predeterminados
+de `bateria.html` y solo se muestran en la UI con su firma de resultados.
+No equivalen automáticamente a un estudio manual con parámetros editados.
+
+**No comparables:** estudios NASA POWER 2025 sin ráfaga/nieve, estudios de
+WeatherContract con otra procedencia o series de distinta fecha/año. Ni una
+prueba exacta entre dos vistas demuestra que la física esté calibrada frente
+a campo: la paridad prueba ausencia de divergencia software.
+
 ## Uso
 
 1. Abrir bateria.html y pulsar **Mapa mundial de viabilidad**.
