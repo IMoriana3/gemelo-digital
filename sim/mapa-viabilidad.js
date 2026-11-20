@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-paridad-v7';
+var MV_VERSION='viabilidad-2026-11-20-paridad-v8';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -192,9 +192,17 @@ function renderResult(){
     var div=document.createElement('section');div.className='viab-outcome';
     var h=document.createElement('div');h.appendChild(statusDot(item.status));var b=document.createElement('b');b.textContent=item.name+' · '+statusWord(item.status);h.appendChild(b);div.appendChild(h);
     resultLine(div,'Conclusión',item.conclusion);
-    resultLine(div,'Peor invierno',item.worst||'No determinado');
-    resultLine(div,'Reserva comprometida',item.periodosRes+' episodios, '+dec(item.diasRes,0)+' días');
-    resultLine(div,'Indisponibilidad',dec(item.inactivePct,3)+' %; batería agotada '+dec(item.hZero,1)+' h');
+    resultLine(div,'Peor invierno por estrategia',item.worst||'No determinado');
+    resultLine(div,'Reserva comprometida (histórico completo)',item.periodosRes+' episodios, '+dec(item.diasRes,0)+' días');
+    resultLine(div,'Indisponibilidad (histórico completo)',dec(item.inactivePct,3)+' %; batería agotada '+dec(item.hZero,1)+' h');
+    if(item.simulador){
+      /* El panel compara estrategias en el PEOR INVIERNO DE LA CONFIGURACIÓN
+         PRINCIPAL, no en el peor invierno individual de cada política. */
+      resultLine(div,'Invierno del informe del simulador',item.simulador.invierno);
+      resultLine(div,'SOC mínimo en ese invierno',dec(item.simulador.socMinPct,4)+' %');
+      resultLine(div,'Indisponibilidad en ese invierno',dec(item.simulador.inactivePct,6)+' %');
+      resultLine(div,'Batería agotada en ese invierno',dec(item.simulador.hZero,2)+' h');
+    }
     resultLine(div,'Protección ambiental','Viento '+dec(item.hStow,0)+' h; nieve '+dec(item.hNieve,0)+' h');
     if(item.limitations.length)resultLine(div,'Limitaciones',item.limitations.join('; '));
     holder.appendChild(div);
@@ -400,6 +408,15 @@ async function evaluateSite(){
        anterior; nunca se ofrece equivalencia tras una descarga fallida. */
     window.BAT_METEO_PARIDAD=null;
     var met=await meteoForSite(site,period),rows,results=[],snowPresenceHours=0;
+    /* Mismo criterio del informe de batería: el peor invierno se elige
+       usando la configuración base, no cada estrategia por separado. */
+    var periodoInforme=null;
+    if(met.years.length>1){
+      var baseRows=simulaSeguido(met.tramos,profile,site,cfg.base);
+      var invBase=resumenInviernos(baseRows);
+      periodoInforme=invBase.length?peorInvierno(invBase):null;
+      baseRows=null;
+    }
     /* El riesgo sobre el panel existe incluso con menos de 3 cm: SP3 sólo
        dispara a partir de ese umbral, pero una película de nieve puede tapar
        el panel de alimentación. Se avisa sin inventar su transmisión óptica. */
@@ -434,7 +451,16 @@ async function evaluateSite(){
        }
       if(met.years.length>1){var inv=resumenInviernos(rows);win=inv.length?peorInvierno(inv).label:null;}
       else win=String(met.years[0]);
-      results.push(outcome(s,control,met,derived.o,win,derived.p,{min:tmin,max:tmax},modelBad,snowPresenceHours));rows=null;
+      var item=outcome(s,control,met,derived.o,win,derived.p,{min:tmin,max:tmax},modelBad,snowPresenceHours);
+      if(periodoInforme){
+        var sr=summarize(recorta(rows,periodoInforme.i0,periodoInforme.i1));
+        item.simulador={invierno:periodoInforme.label,socMinPct:sr.socMin*100,
+          inactivePct:sr.inactivePct,hZero:sr.hZero};
+      }else{
+        item.simulador={invierno:String(met.years[0]),socMinPct:s.socMin*100,
+          inactivePct:s.inactivePct,hZero:s.hZero};
+      }
+      results.push(item);rows=null;
     }
     var record={sig:cfg.key,source:met.source,yearsOK:met.ok,yearsAsked:met.years.length,
       missingYears:met.missing,results:results,date:new Date().toLocaleString('es-ES')};
