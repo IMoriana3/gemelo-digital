@@ -1,9 +1,21 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import {normalizeJob,REVISION} from '../nas/viabilidad/service.mjs';
+import {normalizeJob,requestedYears,REVISION} from '../nas/viabilidad/service.mjs';
 import {inLand} from '../nas/viabilidad/seed.mjs';
 const j=normalizeJob({site:{n:'Prueba',lat:41.576342,lon:-0.798139},profileId:'SP_45W_6Ah',period:'30'});
 assert.equal(j.revision,REVISION);
+assert.deepEqual(requestedYears('30',new Date('2026-12-31T23:59:59Z')),[1996,2025]);
+assert.deepEqual(requestedYears('30',new Date('2027-01-01T00:00:00Z')),[1997,2026]);
+assert.deepEqual(requestedYears('2024',new Date('2026-01-01T00:00:00Z')),[2024,2024]);
+assert.throws(()=>requestedYears('2026',new Date('2026-01-01T00:00:00Z')),/Periodo inválido/);
+const atEnd2026=normalizeJob({site:{lat:41.5,lon:-5},period:'30'},
+  new Date('2026-12-31T23:59:59Z'));
+const atStart2027=normalizeJob({site:{lat:41.5,lon:-5},period:'30'},
+  new Date('2027-01-01T00:00:00Z'));
+assert.deepEqual(atEnd2026.yearRange,[1996,2025]);
+assert.deepEqual(atStart2027.yearRange,[1997,2026]);
+assert.notEqual(atEnd2026.id,atStart2027.id,
+  'La cola no puede deduplicar 1996–2025 con 1997–2026');
 assert.equal(j.site.lat,41.576342);
 assert.equal(j.id,normalizeJob({site:{n:'Otro',lat:41.576342,lon:-0.798139},profileId:'SP_45W_6Ah',period:'30'}).id);
 assert.notEqual(j.id,normalizeJob({site:j.site,profileId:'STRING_60W_6Ah',period:'30'}).id);
