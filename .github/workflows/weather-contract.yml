@@ -1,4 +1,7 @@
 name: WeatherContract
+concurrency:
+  group: weather-contract-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
   push:
