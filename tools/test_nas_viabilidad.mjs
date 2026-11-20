@@ -245,6 +245,13 @@ try{
   assert.equal(browserCode.status,200);
   assert.match(await browserCode.text(),/loadPrioritySites/);
   assert.equal((await fetch(url+'/bateria.html')).status,200);
+  const unplanned=await (await fetch(url+
+    '/api/mapa/world?step=5&profile=SP_45W_6Ah&period=30')).json();
+  assert.equal(unplanned.ok,true);
+  assert.equal(unplanned.configured,false);
+  assert.deepEqual(unplanned.nodes,[]);
+  assert.equal((await fetch(url+'/api/mapa/world?step=17')).status,400);
+  assert.equal((await fetch(url+'/api/mapa/world?bounds=89,-180,0,180')).status,400);
   assert.equal((await fetch(url+'/nas/viabilidad/service.mjs')).status,404);
   assert.equal((await fetch(url+'/nas/viabilidad/.env.example')).status,404);
   assert.equal((await fetch(url+'/api/mapa/jobs',{
