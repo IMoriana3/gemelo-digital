@@ -81,10 +81,21 @@ a campo: la paridad prueba ausencia de divergencia software.
 5. Abrir cualquier marcador para ver el resultado y las otras estrategias.
 
 El selector de **30 años** (por defecto) solicita el histórico de los 30 años
-completos anteriores al año actual. Los años se simulan de manera continua
+completos anteriores al año actual (calendario **UTC**, para coincidir
+exactamente entre navegador y NAS). Los años se simulan de manera continua
 dentro de cada tramo disponible, exactamente como en el simulador de batería.
 También hay años individuales para exploraciones rápidas: nunca se presentan
 como disponibilidad certificada.
+
+**Caducidad de cobertura:** una selección de `30` no identifica por sí sola
+un conjunto de datos. El registro y el identificador de la cola NAS incluyen
+los años exactos: `1996–2025` en 2026, `1997–2026` en 2027. El cambio
+de año UTC invalida el marcador antiguo y lo excluye del snapshot NAS,
+aunque el fichero histórico permanezca en `/data/done` para auditoría.
+Un trabajo pendiente de otro periodo no se ejecuta automáticamente con
+fechas nuevas. La regresión de fin de año verifica estas reglas y que
+`simulaSeguido` conserve SOC, temperatura y estado de seguridad al
+cruzar del 31 de diciembre al 1 de enero.
 
 Las nuevas ubicaciones y los **resúmenes de las evaluaciones**, no las series
 meteorológicas, se almacenan en el navegador. Los resultados se invalidan para
