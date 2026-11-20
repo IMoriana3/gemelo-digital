@@ -91,6 +91,11 @@ const VIGILANTES = {
 
 /* ── lo que no es un arnés: módulos y generadores ── */
 const NO_ES_ARNES = {
+  'tools/diagnostico_nasa_cuatro.mjs':
+    'DIAGNÓSTICO puntual, no arnés ni criterio de viabilidad: obtiene NASA POWER 2025 '
+    + 'y ejecuta el simulador real para comparar SOC bajo meteorología parcial. '
+    + 'No hay nieve ni rachas en esa fuente y nunca declara APTO: los valores '
+    + 'son exploratorios, se guardan como artefacto separado y no bloquean CI.',
   'sim/weather-contract-adapter.mjs':
     'MÓDULO consumidor, no banco: convierte WeatherContract v2 a las estructuras de Batería/Winter/Gemelo. Su veredicto vive en tools/test_weather_contract.mjs, que corre en un job bloqueante.',
   'tools/ambito.mjs':
