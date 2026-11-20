@@ -32,7 +32,7 @@ const ctx={
   simulaSeguido:function simulaSeguido(){},
   summarize:function summarize(){},
   controlesPara:function controlesPara(){},
-  opcionesPara:function opcionesPara(){},
+  opcionesDe:function opcionesDe(){},
   enCatalogo:function(){return true;},
 };
 ctx.Abanderamiento.prototype.paso=function(){};
