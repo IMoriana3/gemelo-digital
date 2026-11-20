@@ -1235,6 +1235,105 @@ ok(parity.buttonVisible&&parity.sameReference&&parity.validBefore&&
   'el mapa entrega EL MISMO array horario al simulador y rechaza coordenadas distintas',
   JSON.stringify(parity));
 
+/* ── 17) EXTREMO A EXTREMO: MAPA vs SIMULADOR EN EL MISMO NAVEGADOR ──
+   Sin consultar una API comercial: se simulan respuestas ERA5/ERA5-Land
+   con 8760 horas completas. Se verifican RESULTADOS reales, no sólo que
+   dos funciones puedan llamar una tercera. */
+const t2025=Date.UTC(2025,0,1),horas=8760;
+const hours=Array.from({length:horas},(_,i)=>{
+  const t=new Date(t2025+i*3600000),hr=t.getUTCHours();
+  const sol=Math.max(0,Math.sin(Math.PI*(hr-6)/12));
+  const sun=sol*((i%103)<27?195:790);
+  return {t:t.toISOString().slice(0,16),ghi:sun,dhi:sun*((i%103)<27?0.8:0.24),
+    wind:i%155<21?7.2:3.1,gust:i%155<21?13.5:5.4,
+    temp:2+(i%28)/3,snow:0};
+});
+const atmReply={hourly:{
+  time:hours.map(r=>r.t),shortwave_radiation:hours.map(r=>r.ghi),
+  diffuse_radiation:hours.map(r=>r.dhi),
+  windspeed_10m:hours.map(r=>r.wind),wind_gusts_10m:hours.map(r=>r.gust)
+}};
+const landReply={hourly:{
+  time:hours.map(r=>r.t),temperature_2m:hours.map(r=>r.temp),
+  snow_depth:hours.map(r=>r.snow)
+}};
+let requests=0;
+await pg.route(/^https:\/\/archive-api\.open-meteo\.com\/v1\/archive\?/,async route=>{
+  const model=new URL(route.request().url()).searchParams.get('models');
+  requests++;
+  if(model!=='era5'&&model!=='era5_land'){
+    await route.fulfill({status:400,body:JSON.stringify({error:'modelo no permitido'})});return;
+  }
+  await route.fulfill({status:200,contentType:'application/json',
+    headers:{'access-control-allow-origin':'*'},
+    body:JSON.stringify(model==='era5'?atmReply:landReply)});
+});
+await pg.evaluate(()=>{
+  const e=id=>document.getElementById(id);
+  e('prof').value=String(PROFILES.findIndex(p=>p.id==='SP_45W_6Ah'));
+  e('prof').dispatchEvent(new Event('change'));
+  e('tmin').value='0';
+  e('mv-open').click();
+  e('mv-lat').value='41.50202';e('mv-lon').value='-5.00146';
+  e('mv-name').value='QA Tordesillas físico';e('mv-add').click();
+  e('mv-profile').value='SP_45W_6Ah';
+  e('mv-profile').dispatchEvent(new Event('change'));
+  e('mv-period').value='2025';
+  e('mv-period').dispatchEvent(new Event('change'));
+  e('mv-evaluate').click();
+});
+await pg.waitForFunction(()=>{
+  const msg=document.getElementById('mv-progress').textContent;
+  return /Evaluación terminada|No se ha asignado viabilidad/.test(msg);
+},{timeout:120000});
+const evaluated=await pg.evaluate(()=>{
+  const text=document.getElementById('mv-progress').textContent;
+  const data=window.BAT_METEO_PARIDAD;
+  return {text,year:data?.years?.[0],hours:data?.list?.[0]?.length,
+    canCompare:!document.getElementById('mv-use-same-meteo').hidden};
+});
+ok(evaluated.text.startsWith('Evaluación terminada')&&evaluated.year===2025&&
+  evaluated.hours===8760&&evaluated.canCompare&&requests===2,
+  'el mapa ejecuta 8760 horas sobre ERA5+ERA5-Land y habilita reutilizar la misma meteo',
+  JSON.stringify({...evaluated,requests}));
+if(evaluated.canCompare){
+  await pg.evaluate(()=>{
+    document.getElementById('mv-use-same-meteo').click();
+    document.getElementById('run').click();
+  });
+  await pg.waitForFunction(()=>{
+    const data=window.BAT_METEO_PARIDAD;
+    return data&&window.LAST&&LAST.meteo===data.list[0]&&
+      LAST.loc.lat===data.site.lat&&LAST.loc.lon===data.site.lon;
+  },{timeout:120000});
+  const compared=await pg.evaluate(()=>{
+    const data=window.BAT_METEO_PARIDAD;
+    const all=JSON.parse(localStorage.getItem('bateria_mapa_conclusiones_v1')||'{}');
+    const record=Object.values(all).flat().find(x=>x&&x.sig===data.sig&&
+      x.site?.lat===data.site.lat&&x.site?.lon===data.site.lon);
+    const stdMap=record?.results?.find(x=>x.k==='std');
+    const stdMain=LAST.controls?.find(x=>x.c.k==='std');
+    return {
+      sameArray:LAST.meteo===data.list[0],
+      sameProfile:LAST.prof.id==='SP_45W_6Ah',
+      sameHours:LAST.meteo.length===8760&&stdMain?.rows?.length===8760,
+      noDifference:!!stdMain&&!!stdMap&&
+        Object.is(stdMain.S.hZero,stdMap.hZero)&&
+        Object.is(stdMain.S.inactivePct,stdMap.inactivePct)&&
+        Object.is(stdMain.S.socMin*100,stdMap.simulador.socMinPct)&&
+        Object.is(stdMain.S.periodosRes,stdMap.periodosRes)&&
+        Object.is(stdMain.S.hNieve,stdMap.hNieve)&&
+        Object.is(stdMain.S.hStow,stdMap.hStow),
+      main:{hZero:stdMain?.S.hZero,socMin:stdMain?.S.socMin},
+      map:{hZero:stdMap?.hZero,socMin:stdMap?.simulador?.socMinPct}
+    };
+  });
+  ok(compared.sameArray&&compared.sameProfile&&compared.sameHours&&
+    compared.noDifference,
+    'paridad REAL mapa→simulador: misma meteo, hardware, SOC y KPIs SIN redondeos',
+    JSON.stringify(compared));
+}
+
 await nav.close();
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa, se sabe qué batería basta y la TCU de Track N Co se compara con lo suyo'));
 process.exit(fallos ? 1 : 0);
