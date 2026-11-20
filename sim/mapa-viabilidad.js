@@ -242,8 +242,13 @@ function useSameScenarioInSimulator(){
      reproducir un estudio con tMin manual hay que reponer el valor ORIGINAL. */
   e('tmin').value=String(original.base.tMin);
   e('loc').value='custom';e('loc').dispatchEvent(new Event('change'));
-  e('clat').value=String(site.lat);e('clon').value=String(site.lon);
   e('cname').value=site.n;
+  e('clat').value=String(site.lat);e('clon').value=String(site.lon);
+  /* El marcador del mapa local y su coordenada guardada deben ser los
+     mismos que ve el balance físico, no la posición personalizada anterior. */
+  e('clat').dispatchEvent(new Event('change'));
+  e('clon').dispatchEvent(new Event('change'));
+  if(typeof bmap!=='undefined'&&bmap)bmap.setView([site.lat,site.lon],Math.max(bmap.getZoom(),6));
   var period=e('mv-period').value;
   e('year').value=period==='30'?'worst':period;
   if(e('year').value!==(period==='30'?'worst':period))
