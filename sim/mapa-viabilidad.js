@@ -11,7 +11,7 @@ var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente
 var mv={sites:[],selected:null,map:null,markers:{},busy:false,records:{},custom:[],config:null};
 /* Una conclusión guardada deja de ser vigente si cambia el motor de la página. */
 var MV_ENGINE_HASH=(function(){
-  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesDe,ejecutaBalanceTCU,calculaControlTCU,
+  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesDe,opcionesDelPanel,ejecutaBalanceTCU,calculaControlTCU,
                  FISICA.consumoTCU,Abanderamiento.prototype.paso];
   var src=functions.map(function(f){return typeof f==='function'?Function.prototype.toString.call(f):'missing';}).join('|');
   var hash=2166136261;
