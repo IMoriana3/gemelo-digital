@@ -44,8 +44,32 @@ async function cartera(){
  runInNewContext(await readFile(join(ROOT,'sim/cartera.js'),'utf8'),context);
  let index=0;
  return (context.CARTERA.plantas||[]).filter(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lon))
-   .map(p=>({id:'portfolio:'+(index++),n:context.CARTERA.rotulo(p),lat:p.lat,lon:p.lon,
+   .map(p=>({id:'portfolio:'+(index++),codigo:p.num,n:context.CARTERA.rotulo(p),lat:p.lat,lon:p.lon,
       fuente:p.fuente||'Cartera Factiun'}));
+}
+/* Lotes específicos: admiten coordenadas públicas de ciudad o un código de
+   cartera para tomar la geometría ORIGINAL, sin copiarla a otro catálogo. */
+async function fileSites(){
+ const relative=get('--sites');
+ if(!relative)return [];
+ const path=resolve(ROOT,relative);
+ if(!path.startsWith(ROOT+'/'))throw Error('--sites debe estar dentro del repositorio');
+ const entries=JSON.parse(await readFile(path,'utf8'));
+ if(!Array.isArray(entries)||!entries.length)throw Error('--sites requiere una lista JSON no vacía');
+ const portfolio=await cartera();
+ return entries.map((item,i)=>{
+   if(item.cartera_num!=null){
+     const matches=portfolio.filter(p=>p.codigo===String(item.cartera_num));
+     if(matches.length!==1)throw Error('Código de cartera sin coincidencia única: '+item.cartera_num);
+     const p=matches[0];
+     return {...p,n:item.n||p.n};
+   }
+   const site={id:item.id||'caso:'+i,n:String(item.n||'Emplazamiento '+(i+1)),
+     lat:Number(item.lat),lon:Number(item.lon),
+     fuente:String(item.fuente||'Referencia indicada, sin parcela')};
+   normalizeJob({site,profileId:profiles[0],period}); // validación canónica
+   return site;
+ });
 }
 async function grid(){
  if(!Number.isFinite(step)||step<=0||step>20)throw Error('--grid requiere paso 0–20 grados');
@@ -63,10 +87,11 @@ async function grid(){
  }return res;
 }
 async function main(){
- if(!has('--cartera')&&!step)throw Error('Especifica --cartera o --grid 5');
+ if(!has('--cartera')&&!step&&!get('--sites'))throw Error('Especifica --cartera, --sites archivo.json o --grid 5');
  if(limit&&(!Number.isInteger(limit)||limit<1))throw Error('--limit requiere entero positivo');
  await initStorage();
- const sites=[...(has('--cartera')?await cartera():[]),...(step?await grid():[])];
+ const sites=[...(has('--cartera')?await cartera():[]),...(get('--sites')?await fileSites():[]),
+   ...(step?await grid():[])];
  const seen=new Set();
  let unique=sites.filter(s=>{const k=s.lat.toFixed(6)+','+s.lon.toFixed(6);
    if(seen.has(k))return false;seen.add(k);return true;});
@@ -76,7 +101,8 @@ async function main(){
    jobs.push(normalizeJob({site,profileId,period}));
  console.log(JSON.stringify({
    modo:has('--enqueue')?'EN COLA':'SOLO VISTA PREVIA',
-   ubicaciones:unique.length,perfiles:profiles.length,trabajos:jobs.length,
+   ubicaciones:unique.length,emplazamientos:unique.map(s=>({nombre:s.n,lat:s.lat,lon:s.lon,
+      fuente:s.fuente})),perfiles:profiles.length,trabajos:jobs.length,
    consultas_meteo_unicas_sin_cache:unique.length*(period==='30'?30:1),
    meteo:'Se requiere licencia comercial. No se calculan zonas entre nodos.'
  },null,2));
