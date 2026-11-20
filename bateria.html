@@ -2000,6 +2000,9 @@ function opcionesReferenciaTCU(opts){
 }
 $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
+  /* Las respuestas de un balance opcional anterior no pueden sobrescribir
+     la pantalla del escenario activo (especialmente el modo paridad). */
+  var runId=++MOTOR_RUN_ID;
   var loc=getLoc();
   /* El panel no puede anunciar paridad con un resultado del mapa si alguien
      ha cambiado el SOC, panel, hardware o cualquier ajuste desde ese run. */
@@ -2134,8 +2137,12 @@ $('run').onclick=function(){
       /* En modo paridad el balance que ve el usuario es SOLO el del
          motor compartido de bateria.html. No se añade una tarjeta opcional
          con números del backend antiguo, que tiene otra estrategia. */
-      if($('src').value==='mapa')pintaMotor('paridad');
-      else balanceDelMotor(loc,prof,opts,meteo).then(function(j){ if(j) pintaBalanceMotor(j); });
+      if($('src').value==='mapa'){
+        MOTOR_BAL=null;
+        pintaMotor('paridad');
+      }else balanceDelMotor(loc,prof,opts,meteo,runId).then(function(j){
+        if(j&&runId===MOTOR_RUN_ID&&$('src').value!=='mapa')pintaBalanceMotor(j);
+      });
     });
   }
   job.catch(function(e){
@@ -2157,6 +2164,7 @@ $('run').onclick=function(){
    fueran del servidor es exactamente el malentendido que la etiqueta evita. */
 var MOTOR = new Canon({ url: 'http://127.0.0.1:8765' });
 var MOTOR_BAL = null;          /* última respuesta de /tcubalance, o null */
+var MOTOR_RUN_ID=0;            /* invalida respuestas de otros escenarios */
 
 function pintaMotor(modo, extra) {
   var e = $('motorTag'); if (!e) return;
@@ -2198,7 +2206,7 @@ var PRESET_CORE = {
   /* STRING_60W_3Ah: el core solo publica STRING de 6 Ah. Sin contraparte. */
 };
 
-function balanceDelMotor(loc, prof, opts, meteo) {
+function balanceDelMotor(loc, prof, opts, meteo, runId) {
   if (MOTOR.estado !== 'listo') return Promise.resolve(null);
   var preset = PRESET_CORE[prof && prof.id];
   if (!preset) {
@@ -2214,6 +2222,7 @@ function balanceDelMotor(loc, prof, opts, meteo) {
     dia: 1, dias: Math.min(dias, 365), dt_min: 60,
     preset: preset
   }).then(function (j) {
+    if(runId!==MOTOR_RUN_ID||$('src').value==='mapa')return null;
     MOTOR_BAL = j;
     pintaMotor(j ? 'motor' : 'error', j ? j.motor : MOTOR.detalle);
     return j;
