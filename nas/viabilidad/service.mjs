@@ -40,7 +40,12 @@ const hash=s=>createHash('sha256').update(s).digest('hex');
 /* Los resultados globales NO deben alimentar el snapshot de plantas:
    decenas de miles de JSON en /done saturarían la memoria del navegador. */
 const folders=['pending','running','done','world-done','failed','meteo','world'];
-const jobPath=(folder,id)=>join(DATA,folder,id+'.json');
+/* 170.435 resultados mundiales en una sola carpeta degradarían Btrfs.
+   Distribuirlos por los 256 prefijos SHA sin cambiar su identidad ni su
+   evidencia. Las plantas individuales siguen en /done plano. */
+const jobPath=(folder,id)=>folder==='world-done'
+  ?join(DATA,folder,id.slice(0,2),id+'.json')
+  :join(DATA,folder,id+'.json');
 async function atomic(file,obj){
   const tmp=file+'.'+randomUUID()+'.tmp';
   await writeFile(tmp,JSON.stringify(obj,null,2)+'\n',{mode:0o600});
@@ -325,6 +330,8 @@ async function tick(){
     await rename(jobPath('pending',job.id),jobPath('running',job.id));
     const record=await compute(job);
     if(!record||!record.sig||!Array.isArray(record.results))throw Error('Simulador sin veredicto');
+    if(job.world)await mkdir(join(DATA,'world-done',job.id.slice(0,2)),
+      {recursive:true});
     await atomic(jobPath(job.world?'world-done':'done',job.id),
       {...job,record,completed_at:new Date().toISOString()});
     await unlink(jobPath('running',job.id));
