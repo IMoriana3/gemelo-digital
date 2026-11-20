@@ -4,14 +4,14 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-paridad-v10';
+var MV_VERSION='viabilidad-2026-11-20-motor-unico-v11';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
 var mv={sites:[],selected:null,map:null,markers:{},busy:false,records:{},custom:[],config:null};
 /* Una conclusión guardada deja de ser vigente si cambia el motor de la página. */
 var MV_ENGINE_HASH=(function(){
-  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesDe,calculaControlTCU,
+  var functions=[simulate,simulaSeguido,summarize,controlesPara,opcionesDe,ejecutaBalanceTCU,calculaControlTCU,
                  FISICA.consumoTCU,Abanderamiento.prototype.paso];
   var src=functions.map(function(f){return typeof f==='function'?Function.prototype.toString.call(f):'missing';}).join('|');
   var hash=2166136261;
@@ -421,7 +421,7 @@ async function evaluateSite(){
        usando la configuración base, no cada estrategia por separado. */
     var periodoInforme=null;
     if(met.years.length>1){
-      var baseRows=simulaSeguido(met.tramos,profile,site,cfg.base);
+      var baseRows=ejecutaBalanceTCU(met.tramos,profile,site,cfg.base,{seguido:true});
       var invBase=resumenInviernos(baseRows);
       periodoInforme=invBase.length?peorInvierno(invBase):null;
       baseRows=null;
