@@ -40,11 +40,16 @@ async function land(){
  return JSON.parse(await readFile(file,'utf8'));
 }
 async function cartera(){
- const context={};
+ /* cartera.js expone la autoridad por module.exports/window.CARTERA, no
+    context.CARTERA: la IIFE guarda su var como local. */
+ const context={module:{exports:{}}};
  runInNewContext(await readFile(join(ROOT,'sim/cartera.js'),'utf8'),context);
+ const catalog=context.module.exports;
+ if(!catalog||!Array.isArray(catalog.plantas)||typeof catalog.rotulo!=='function')
+   throw Error('La cartera canónica no se ha podido cargar');
  let index=0;
- return (context.CARTERA.plantas||[]).filter(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lon))
-   .map(p=>({id:'portfolio:'+(index++),codigo:p.num,n:context.CARTERA.rotulo(p),lat:p.lat,lon:p.lon,
+ return catalog.plantas.filter(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lon))
+   .map(p=>({id:'portfolio:'+(index++),codigo:p.num,n:catalog.rotulo(p),lat:p.lat,lon:p.lon,
       fuente:p.fuente||'Cartera Factiun'}));
 }
 /* Lotes específicos: admiten coordenadas públicas de ciudad o un código de
