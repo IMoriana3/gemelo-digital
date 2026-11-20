@@ -116,12 +116,19 @@ a través del lector existente del simulador. Se hace explícitamente así porqu
 un WeatherContract histórico activo podría corresponder a otra ubicación; no
 se reutiliza sin validar su emplazamiento.
 
-El barrido geográfico usa fuentes **explícitas por variable**: `models=era5`
-para GHI, DHI, velocidad media y ráfaga; `models=era5_land` para la
-temperatura y nieve acumulada. Se comprueba que las dos series tengan
-exactamente los mismos índices horarios antes de formar la entrada al
-simulador. ERA5-Land no ofrece la ráfaga de 10 m como variable propia; por
-eso no se solicita todo a un solo modelo.
+El barrido geográfico usa fuentes **explícitas por variable** según
+la documentación oficial de Open-Meteo: `models=era5` para GHI, DHI
+y **viento medio**; `models=era5_land` para temperatura, nieve acumulada
+y **ráfaga de 10 m**. ERA5 no ofrece ráfagas en esta API. Se exige coincidencia
+exacta de todos los instantes horarios de ambos modelos.
+
+**Unidades obligatorias:** ambas peticiones incluyen `wind_speed_unit=ms`
+(el antiguo `windspeed_unit=ms` era inválido). No basta con la URL:
+se verifica `hourly_units.windspeed_10m === 'm/s'` en ERA5 y
+`hourly_units.wind_gusts_10m === 'm/s'` en ERA5-Land. Sin unidades
+verificables el mapa no calcula un veredicto. Esta corrección invalida
+todos los resultados anteriores.
+
 ERA5-Land aporta la componente terrestre a ~0,1° y ERA5 la atmosférica
 a ~0,25°. La coordenada NO identifica una estación meteorológica exacta.
 Dos consultas históricas por año, un solo balance de batería.
