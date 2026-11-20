@@ -22,7 +22,15 @@ assert.match(html,/models=era5_land/);
 assert.match(html,/a\.time\[i\]!==b\.time\[i\]/);
 assert.match(js,/var control=controls\[j\],derived=opcionesDe\(control,profile,cfg.base\)/);
 assert.doesNotMatch(js,/derived=opcionesPara\(control/);
+assert.match(html,/function ejecutaBalanceTCU\(meteoOTramos,prof,loc,opts,conf\)/);
 assert.match(html,/function calculaControlTCU\(meteoOTramos,prof,loc,base,control,conf\)/);
+assert.match(html,/var full=ejecutaBalanceTCU\(tramos,prof,loc,opts,\{seguido:true\}\)/);
+assert.match(html,/var refFull=ejecutaBalanceTCU\(tramos,prof,loc,refOpts,\{seguido:true\}\)/);
+assert.match(html,/var mng=ejecutaBalanceTCU\(meteo,prof,loc,opts,\{soc0:soc0\}\)/);
+assert.match(html,/var ref=ejecutaBalanceTCU\(meteo,prof,loc,refOpts,\{soc0:soc0\}\)/);
+assert.match(html,/var rows=ejecutaBalanceTCU\(meteoOTramos,od.p,loc,od.o,conf\)/);
+assert.match(js,/var baseRows=ejecutaBalanceTCU\(met.tramos,profile,site,cfg.base,\{seguido:true\}\)/);
+assert.doesNotMatch(js,/function ejecutaBalanceTCU\(/);
 assert.match(html,/return calculaControlTCU\(meteo,prof,loc,base,c,\{soc0:soc0\}\)/);
 assert.match(js,/var result=calculaControlTCU\(/);
 assert.match(js,/\{soc0:cfg.soc0\}/);
@@ -41,6 +49,7 @@ const ctx={
   simulate:function simulate(){},
   simulaSeguido:function simulaSeguido(){},
   calculaControlTCU:function calculaControlTCU(){},
+  ejecutaBalanceTCU:function ejecutaBalanceTCU(){},
   summarize:function summarize(){},
   controlesPara:function controlesPara(){},
   opcionesDe:function opcionesDe(){},
