@@ -1251,18 +1251,27 @@ const hours=Array.from({length:horas},(_,i)=>{
 const atmReply={hourly:{
   time:hours.map(r=>r.t),shortwave_radiation:hours.map(r=>r.ghi),
   diffuse_radiation:hours.map(r=>r.dhi),
-  windspeed_10m:hours.map(r=>r.wind),wind_gusts_10m:hours.map(r=>r.gust)
-}};
+  windspeed_10m:hours.map(r=>r.wind)
+},hourly_units:{windspeed_10m:'m/s'}};
 const landReply={hourly:{
   time:hours.map(r=>r.t),temperature_2m:hours.map(r=>r.temp),
-  snow_depth:hours.map(r=>r.snow)
-}};
+  snow_depth:hours.map(r=>r.snow),
+  wind_gusts_10m:hours.map(r=>r.gust)
+},hourly_units:{wind_gusts_10m:'m/s'}};
 let requests=0;
 await pg.route(/^https:\/\/archive-api\.open-meteo\.com\/v1\/archive\?/,async route=>{
-  const model=new URL(route.request().url()).searchParams.get('models');
+  const query=new URL(route.request().url()).searchParams;
+  const model=query.get('models'),vars=query.get('hourly');
   requests++;
-  if(model!=='era5'&&model!=='era5_land'){
-    await route.fulfill({status:400,body:JSON.stringify({error:'modelo no permitido'})});return;
+  /* La API real exige wind_speed_unit=ms. Rechazar el parámetro antiguo
+     para que el banco no apruebe la interpretación errónea de km/h. */
+  const varsOK=model==='era5'
+    ?vars==='shortwave_radiation,diffuse_radiation,windspeed_10m'
+    :model==='era5_land'
+    ?vars==='temperature_2m,snow_depth,wind_gusts_10m'
+    :false;
+  if(!varsOK||query.get('wind_speed_unit')!=='ms'||query.has('windspeed_unit')){
+    await route.fulfill({status:400,body:JSON.stringify({error:'modelo, variable o unidad incorrectos'})});return;
   }
   await route.fulfill({status:200,contentType:'application/json',
     headers:{'access-control-allow-origin':'*'},
