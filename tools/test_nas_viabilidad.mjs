@@ -151,6 +151,10 @@ try{
   assert.deepEqual(previewWorld.etapas.map(e=>e.step),[5,2,1]);
   assert.equal(previewWorld.total_trabajos,
     previewWorld.etapas.reduce((n,e)=>n+e.trabajos,0));
+  assert.equal(previewWorld.peticiones_meteo_sin_cache,
+    previewWorld.etapas.reduce((n,e)=>n+e.peticiones_historicas_sin_cache,0));
+  assert.ok(previewWorld.espera_meteo_teorica_dias_sin_cache>=0);
+  assert.match(previewWorld.advertencia_capacidad,/no incluye descargas/i);
   assert.ok(previewWorld.total_nodos>10);
   assert.equal(readdirSync(join(worldData,'world')).filter(n=>n.startsWith('plan-')).length,0,
     'La vista previa mundial no escribe planes de trabajo');
@@ -273,6 +277,9 @@ try{
   const url='http://127.0.0.1:'+port;
   const health=await (await fetch(url+'/api/mapa/health')).json();
   assert.equal(health.meteorologia,'pendiente_de_licencia');
+  assert.equal(typeof health.almacenamiento.free_gb,'number');
+  assert.equal(health.almacenamiento.min_free_gb,20);
+  assert.equal(typeof health.almacenamiento.paused,'boolean');
   assert.equal(health.counts.done,2);
   const sites=await fetch(url+'/nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json');
   assert.equal(sites.status,200);
