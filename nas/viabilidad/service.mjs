@@ -236,7 +236,7 @@ async function worldPlans(){
   }
   return out.sort((a,b)=>b.plan.step-a.plan.step);
 }
-async function fillWorldQueue(){
+export async function fillWorldQueue(){
   if(!KEY)return;
   let backlog=(await readdir(join(DATA,'pending'))).filter(f=>f.endsWith('.json')).length+
               (await readdir(join(DATA,'running'))).filter(f=>f.endsWith('.json')).length;
