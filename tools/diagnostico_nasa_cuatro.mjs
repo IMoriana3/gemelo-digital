@@ -88,8 +88,10 @@ for(const site of sites){
       tMin:p.tCarga[0],poaMin:0,mountTilt:null};
     for(const c of controlesPara(p).filter(c=>!c.prof)){
       const o=opcionesDe(c,p,options);
-      const rows=simulate(input,o.p,site,socEstacionario(o.o),o.o);
-      const S=summarize(rows);
+      /* Mismo ejecutor que usa la interfaz del simulador y el mapamundi. */
+      const resultado=calculaControlTCU(input,p,site,options,c,
+        {soc0:socEstacionario(o.o)});
+      const S=resultado.S;
       results.push({perfil:id,estrategia:c.k,soc_min_pct:+(100*S.socMin).toFixed(2),
         horas_soc_cero:S.hZero,episodios_sin_reserva:S.periodosRes,
         horas_de_indisponibilidad_pct:+S.inactivePct.toFixed(3),
