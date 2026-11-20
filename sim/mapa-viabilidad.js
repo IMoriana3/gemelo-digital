@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-anios-explicitos-v14';
+var MV_VERSION='viabilidad-2026-11-20-clima-mundial-v15';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -18,7 +18,7 @@ var MV_ENGINE_HASH=(function(){
     controlesPara,opcionesDe,opcionesDelPanel,ejecutaBalanceTCU,calculaControlTCU,
     poaAt,etaAtCrate,etaCharger,cRateSafeLFP,hotDerate,motorTrackWh,
     controlDe,parseOM,fetchOpenMeteoYear,resumenInviernos,peorInvierno,
-    meteoForSite,fullYear,outcome,FISICA.consumoTCU,Abanderamiento.prototype.paso];
+    meteoForSite,meteoSummary,fullYear,outcome,FISICA.consumoTCU,Abanderamiento.prototype.paso];
   var src=functions.map(function(f){return typeof f==='function'?Function.prototype.toString.call(f):'missing';}).join('|');
   var hash=2166136261;
   for(var i=0;i<src.length;i++){hash^=src.charCodeAt(i);hash=Math.imul(hash,16777619);}
@@ -204,6 +204,19 @@ function renderResult(){
   var met=document.createElement('p');met.className='viab-meta';
   met.textContent=record.source+' · '+record.yearsOK+'/'+record.yearsAsked+' años completos · '+record.date;
   holder.appendChild(met);
+  if(record.weather){
+    var w=record.weather;
+    function metric(label,key,units,digits){
+      resultLine(holder,label,w[key]==null?'Sin datos verificables':
+        dec(w[key],digits)+' '+units);
+    }
+    metric('Irradiación GHI media anual','ghi_kwh_m2_anio','kWh/m²/año',1);
+    metric('Viento medio horario máximo','viento_max_ms','m/s',2);
+    metric('Ráfaga máxima','racha_max_ms','m/s',2);
+    metric('Temperatura mínima','t_min_c','°C',2);
+    metric('Temperatura máxima','t_max_c','°C',2);
+    metric('Nieve en suelo máxima','nieve_max_m','m',3);
+  }
   if(record.missingYears.length){var err=document.createElement('p');err.className='viab-note';err.textContent='Años no disponibles: '+record.missingYears.join(', ')+'. La conclusión no se considera certificada.';holder.appendChild(err);}
   record.results.forEach(function(item){
     var div=document.createElement('section');div.className='viab-outcome';
@@ -423,6 +436,45 @@ async function meteoForSite(site,period){
   if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
   return {years:years,list:list,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo · ERA5 (GHI/DHI y viento medio) + ERA5-Land (temperatura, nieve y ráfagas) · m/s comprobados'};
 }
+/* Solo indicadores DESCRIPTIVOS de las filas meteorológicas recibidas.
+   No toca los balances SOC/carga/motor: esos se calculan únicamente desde
+   bateria.html. Los valores del mapa mundial salen del mismo archivo horario
+   ERA5/ERA5-Land que se usó para la batería y con las mismas coordenadas. */
+function meteoSummary(tramos){
+  var total=0,validGhi=0,minT=Infinity,maxT=-Infinity,
+    maxWind=-Infinity,maxGust=-Infinity,maxSnow=-Infinity,
+    missingGust=0,missingSnow=0,years={};
+  tramos.forEach(function(tr){
+    tr.meteo.forEach(function(m){
+      total++;
+      var y=m.t.getUTCFullYear();
+      if(!years[y])years[y]={ghiWhM2:0,h:0};
+      years[y].h++;
+      if(Number.isFinite(m.ghi)&&m.ghi>=0){
+        years[y].ghiWhM2+=m.ghi;
+        validGhi++;
+      }
+      if(Number.isFinite(m.temp)){
+        minT=Math.min(minT,m.temp);maxT=Math.max(maxT,m.temp);
+      }
+      if(Number.isFinite(m.wind))maxWind=Math.max(maxWind,m.wind);
+      if(Number.isFinite(m.gust))maxGust=Math.max(maxGust,m.gust);
+      else missingGust++;
+      if(Number.isFinite(m.snowDepth))maxSnow=Math.max(maxSnow,m.snowDepth);
+      else missingSnow++;
+    });
+  });
+  var yearsCount=Object.keys(years).length,solar=0;
+  Object.keys(years).forEach(function(y){solar+=years[y].ghiWhM2/1000;});
+  function finite(v){return Number.isFinite(v)?v:null;}
+  return {horas:total,anios:yearsCount,
+    ghi_kwh_m2_anio:validGhi===total&&yearsCount?solar/yearsCount:null,
+    t_min_c:finite(minT),t_max_c:finite(maxT),
+    viento_max_ms:finite(maxWind),racha_max_ms:finite(maxGust),
+    nieve_max_m:finite(maxSnow),horas_sin_racha:missingGust,
+    horas_sin_nieve:missingSnow,
+    nota:'Reanálisis de rejilla, no mediciones in situ; sin inferir valores entre nodos'};
+}
 function outcome(S,c,met,opts,worst,profile,thermal,modelBad,snowPresenceHours){
   var issues=[];
   /* Fail-closed: un NaN o Infinity daría APTO con comparaciones «> 0». */
@@ -564,7 +616,8 @@ async function evaluateSite(){
       results.push(item);rows=null;
     }
     var record={sig:cfg.key,site:{lat:site.lat,lon:site.lon},
-      source:met.source,yearsOK:met.ok,yearsAsked:met.years.length,
+      source:met.source,weather:meteoSummary(met.tramos),
+      yearsOK:met.ok,yearsAsked:met.years.length,
       missingYears:met.missing,results:results,date:new Date().toLocaleString('es-ES')};
     var entries=mv.records[site.id],all=Array.isArray(entries)?entries:(entries?[entries]:[]);
     var previous=all.findIndex(function(item){return item.sig===record.sig&&
