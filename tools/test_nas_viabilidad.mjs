@@ -15,4 +15,23 @@ const land={type:'FeatureCollection',features:[{geometry:{type:'Polygon',coordin
 assert.equal(inLand(-2,41,land),true);
 assert.equal(inLand(0.5,41.5,land),false);
 assert.equal(inLand(10,40,land),false);
-console.log('NAS viabilidad: cola, identificación de motor y máscara terrestre OK');
+/* Cuatro ubicaciones reproducibles: San José sale de la CARTERA, no de una
+   coordenada duplicada; las otras tres son puntos urbanos provisionales. */
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+const preview=JSON.parse(execFileSync(process.execPath,[
+  'nas/viabilidad/seed.mjs','--sites',
+  'nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json',
+  '--period','30'
+],{cwd:fileURLToPath(new URL('../',import.meta.url)),encoding:'utf8'}));
+assert.equal(preview.modo,'SOLO VISTA PREVIA');
+assert.equal(preview.ubicaciones,4);
+assert.equal(preview.trabajos,20); // cinco equipos × cuatro ubicaciones
+assert.equal(preview.consultas_meteo_unicas_sin_cache,120);
+assert.equal(preview.emplazamientos[2].lat,-16.5957735);
+assert.equal(preview.emplazamientos[2].lon,-71.8064406);
+assert.match(preview.emplazamientos[2].fuente,/layout:sanjose/);
+assert.match(preview.emplazamientos[0].fuente,/NO parcela/);
+assert.match(preview.emplazamientos[1].fuente,/NO parcela/);
+assert.match(preview.emplazamientos[3].fuente,/NO parcela/);
+console.log('NAS viabilidad: cola, máscara terrestre y lote de cuatro emplazamientos OK');
