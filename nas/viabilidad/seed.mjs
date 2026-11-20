@@ -1,5 +1,5 @@
 /* Encola proyectos o rejilla terrestre. Solo escribe si se pasa --enqueue. */
-import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,rename,unlink} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
 import {existsSync} from 'node:fs';
 import {join,resolve} from 'node:path';
@@ -166,7 +166,30 @@ async function worldPlan(){
     declaracion:'NINGÚN SOC CALCULADO: se requieren licencia, ejecución NAS y revisión de resultados'
   },null,2));
 }
+/* Pausa sin riesgo de perder el cursor: el indicador vive en fichero
+   independiente. El trabajo que ya se está ejecutando termina, pero el
+   servidor no iniciará ni encolará otro mundial hasta reanudar. */
+async function worldPauseControl(){
+  const pause=has('--pause-world'),resume=has('--resume-world');
+  if(pause===resume)throw Error('Selecciona solo --pause-world o --resume-world');
+  if(resume&&!has('--confirm-world'))
+    throw Error('Para reanudar la cobertura mundial añade --confirm-world');
+  const file=join(DATA,'world','PAUSED.json');
+  await mkdir(join(DATA,'world'),{recursive:true});
+  if(pause){
+    const temp=file+'.'+randomUUID()+'.tmp';
+    await writeFile(temp,JSON.stringify({paused_at:new Date().toISOString(),
+      reason:'Pausa manual de operador · los trabajos activos no se cancelan'})+'\n',{mode:0o600});
+    await rename(temp,file);
+  }else await unlink(file).catch(e=>{if(e.code!=='ENOENT')throw e;});
+  console.log(JSON.stringify({
+    accion:pause?'COBERTURA MUNDIAL PAUSADA':'COBERTURA MUNDIAL REANUDADA',
+    pausada:pause,
+    seguridad:'El manifiesto y su cursor no se modifican; no se generan nuevos resultados'
+  },null,2));
+}
 async function main(){
+ if(has('--pause-world')||has('--resume-world'))return worldPauseControl();
  if(get('--world'))return worldPlan();
  if(!has('--cartera')&&!step&&!get('--sites'))throw Error('Especifica --cartera, --sites archivo.json o --grid 5');
  if(limit&&(!Number.isInteger(limit)||limit<1))throw Error('--limit requiere entero positivo');
