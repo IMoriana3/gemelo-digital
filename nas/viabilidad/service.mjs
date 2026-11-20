@@ -132,7 +132,9 @@ export function normalizeJob(input,asOf=new Date()){
 }
 export async function enqueue(input){
   const job=normalizeJob(input);
-  for(const d of ['pending','running','done','world-done']){
+  /* Un nodo fallido no se reencola automáticamente por aparecer también
+     en otra resolución: requiere intervención o una revisión nueva. */
+  for(const d of ['pending','running','done','world-done','failed']){
     if(existsSync(jobPath(d,job.id)))return {job,already:d};
   }
   await atomic(jobPath('pending',job.id),job);
@@ -334,9 +336,15 @@ export async function getWorldCoverage(query){
   for(const site of candidates.slice(0,limit)){
     const job=normalizeJob({site,profileId,period});
     let state='sin_evaluar',record=null;
-    if(existsSync(jobPath('world-done',job.id))){
+    /* Si el mismo emplazamiento/modelo ya se calculó como planta en /done,
+       reutilizamos exactamente esa evidencia; no duplicamos la fórmula ni
+       damos por "sin evaluar" una simulación válida solo por su carpeta. */
+    const resultFile=existsSync(jobPath('world-done',job.id))
+      ?jobPath('world-done',job.id)
+      :jobPath('done',job.id);
+    if(existsSync(resultFile)){
       try{
-        const done=JSON.parse(await readFile(jobPath('world-done',job.id),'utf8'));
+        const done=JSON.parse(await readFile(resultFile,'utf8'));
         if(done.revision===REVISION&&done.record&&
            done.yearRange?.[0]===yrs[0]&&done.yearRange?.[1]===yrs[1]){
           state='calculado';record={sig:done.record.sig,
