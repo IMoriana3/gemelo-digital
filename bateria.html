@@ -208,6 +208,7 @@ table.cmp th{color:var(--tx3)}
         <option value="contract" selected>WeatherContract · compartido (histórico)</option>
         <option value="contractfc">WeatherContract · forecast</option>
         <option value="archive">Open-Meteo histórico · fallback legacy</option>
+        <option value="mapa">Meteo del mapa · mismos registros (paridad exacta)</option>
         <option value="openmeteo">Open-Meteo forecast · fallback legacy</option>
         <option value="pvsyst">CSV horario PVSyst (fichero local)</option>
         <option value="synth">Sintético (cielo claro + nubes)</option>
@@ -1790,8 +1791,8 @@ $('socCrit').addEventListener('input',function(){
   if(+$('socTgt').value<=+this.value){$('socTgt').value=Math.min(100,+this.value+10);$('socTgtV').textContent=$('socTgt').value+'%'}});
 $('src').onchange=function(){
   var v=this.value;
-  $('yearFld').style.display=(v==='archive'||v==='contract')?'':'none';
-  $('sweepFld').style.display=((v==='archive'||v==='contract')&&$('year').value==='worst')?'':'none';
+  $('yearFld').style.display=(v==='archive'||v==='contract'||v==='mapa')?'':'none';
+  $('sweepFld').style.display=((v==='archive'||v==='contract'||v==='mapa')&&$('year').value==='worst')?'':'none';
   $('daysFld').style.display=(v==='openmeteo'||v==='contractfc')?'':'none';
   $('fileFld').style.display=v==='pvsyst'?'':'none';
   $('cloudsFld').style.display=v==='synth'?'':'none';
@@ -1830,8 +1831,30 @@ async function contractOrFallback(loc,kind,year){
     return m;
   }
 }
+/* Datos HORARIOS IDENTICOS usados por el mapa: ninguna nueva petición ni
+   interpolación. Si cambian coordenadas o años, se rechaza en lugar de
+   comparar dos meteorologías distintas bajo el mismo nombre. */
+function meteoExactaMapa(loc,years){
+  var ref=window.BAT_METEO_PARIDAD;
+  if(!ref||!ref.site||!Array.isArray(ref.years)||!Array.isArray(ref.list))
+    throw new Error('Primero calcula este emplazamiento en el mapa de viabilidad');
+  if(loc.lat!==ref.site.lat||loc.lon!==ref.site.lon)
+    throw new Error('Las coordenadas no coinciden exactamente con las del mapa');
+  return years.map(function(y){
+    var i=ref.years.indexOf(y);
+    if(i<0||!Array.isArray(ref.list[i]))
+      throw new Error('El mapa no tiene el año '+y+' con una serie horaria completa');
+    return ref.list[i];
+  });
+}
 function getMeteo(loc){
   var v=$('src').value;
+  if(v==='mapa'){
+    var y=+$('year').value;
+    var m=meteoExactaMapa(loc,[y])[0];
+    $('srcTag').textContent='Meteo IDÉNTICA del mapa · '+loc.n+' · '+y;
+    return Promise.resolve(m);
+  }
   if(v==='contract')
     return contractOrFallback(loc,'historical',$('year').value);
   if(v==='contractfc')
@@ -1957,13 +1980,18 @@ $('run').onclick=function(){
             mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
   var soc0=+$('soc0').value/100;
   var job;
-  if(($('src').value==='archive'||$('src').value==='contract') && $('year').value==='worst'){
+  if(($('src').value==='archive'||$('src').value==='contract'||$('src').value==='mapa') && $('year').value==='worst'){
     /* Barrido multi-año como el Battery Availability Study: simula cada año,
        elige el peor por % tiempo no disponible (desempate: % prod. perdida, SOC mín) */
     var yEnd=new Date().getFullYear()-1;
     var yIni=Math.max(1940,Math.min(+$('sweepFrom').value||(yEnd-29),yEnd-1));
     var years=[]; for(var y=yIni;y<=yEnd;y++)years.push(y);
     var fetchBatched=function(){
+      if($('src').value==='mapa'){
+        var copied=meteoExactaMapa(loc,years);
+        $('srcTag').textContent='Meteo IDÉNTICA del mapa · '+years[0]+'–'+years[years.length-1];
+        return Promise.resolve(copied);
+      }
       if($('src').value==='contract'){
         return import('./sim/weather-contract-adapter.mjs').then(async function(mod){
           try{
