@@ -692,7 +692,10 @@ function parseOM(j){
   Object.defineProperty(out,'mapaQA',{value:qa,enumerable:false});  /* metadatos, no una fila ni serie nueva */
   return out;
 }
-var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m,wind_gusts_10m,snow_depth&windspeed_unit=ms";
+/* Open-Meteo: el nombre documentado es wind_speed_unit, CON guiones bajos.
+   windspeed_unit se ignoraba y la API devolvía km/h por defecto, que el
+   modelo interpretaba erróneamente como m/s. */
+var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m,wind_gusts_10m,snow_depth&wind_speed_unit=ms";
 function fetchOpenMeteo(loc,days){
   var u="https://api.open-meteo.com/v1/forecast?latitude="+loc.lat+"&longitude="+loc.lon+
     "&hourly="+OM_VARS+"&forecast_days="+days+"&timezone=UTC";
@@ -889,26 +892,33 @@ function fetchOpenMeteoYear(loc,year){
   var base="https://archive-api.open-meteo.com/v1/archive?latitude="+loc.lat+"&longitude="+loc.lon+
     "&start_date="+year+"-01-01&end_date="+year+"-12-31&timezone=UTC";
   var load=function(u){return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()});};
-  /* El mapa multianual combina DOS reanálisis, sin cambiar el simulador:
-     ERA5 aporta viento, ráfaga e irradiancias; ERA5-Land aporta temperatura
-     y nieve en suelo. ERA5-Land NO ofrece las ráfagas: pedir todo de un solo
-     modelo devolvería campos inexistentes o series incoherentes. */
+  /* Contrato documentado por Open-Meteo (tabla de variables por modelo):
+     ERA5 aporta irradiancia GHI/DHI y viento MEDIO a 10 m.
+     ERA5-Land aporta temperatura, NIEVE en suelo y RACHA a 10 m.
+     NUNCA se cambia una racha por viento medio sin declararlo y nunca se
+     interpreta una serie en km/h como m/s. */
   if(loc&&loc.meteoMode==='era5_hybrid'){
-    var atm=base+"&hourly=shortwave_radiation,diffuse_radiation,windspeed_10m,wind_gusts_10m"+
-      "&models=era5&windspeed_unit=ms";
-    var land=base+"&hourly=temperature_2m,snow_depth&models=era5_land";
+    var atm=base+"&hourly=shortwave_radiation,diffuse_radiation,windspeed_10m"+
+      "&models=era5&wind_speed_unit=ms";
+    var land=base+"&hourly=temperature_2m,snow_depth,wind_gusts_10m"+
+      "&models=era5_land&wind_speed_unit=ms";
     return Promise.all([load(atm),load(land)]).then(function(pair){
       var a=pair[0].hourly,b=pair[1].hourly;
       if(!a||!b||!Array.isArray(a.time)||!Array.isArray(b.time)||
          a.time.length!==b.time.length||!a.time.length)
         throw new Error("ERA5 / ERA5-Land: cobertura temporal incompatible");
+      /* Verificamos la UNIDAD que devuelve el servidor, no solo la URL.
+         Sin metadatos/valor m/s, no se simula ni se colorea el mapa. */
+      if(!pair[0].hourly_units||pair[0].hourly_units.windspeed_10m!=='m/s'||
+         !pair[1].hourly_units||pair[1].hourly_units.wind_gusts_10m!=='m/s')
+        throw new Error("ERA5 / ERA5-Land: unidad del viento no es m/s verificable");
       for(var i=0;i<a.time.length;i++)if(a.time[i]!==b.time[i])
         throw new Error("ERA5 / ERA5-Land: índices horarios diferentes en "+i);
       return parseOM({hourly:{
         time:a.time,shortwave_radiation:a.shortwave_radiation,
         diffuse_radiation:a.diffuse_radiation,
         temperature_2m:b.temperature_2m,
-        windspeed_10m:a.windspeed_10m,wind_gusts_10m:a.wind_gusts_10m,
+        windspeed_10m:a.windspeed_10m,wind_gusts_10m:b.wind_gusts_10m,
         snow_depth:b.snow_depth}});
     });
   }
