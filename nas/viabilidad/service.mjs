@@ -22,7 +22,9 @@ export const REVISION=createHash('sha256').update(
   .map(f=>readFileSync(join(ROOT,f))).reduce((a,b)=>Buffer.concat([a,b]),Buffer.alloc(0))
 ).digest('hex').slice(0,16);
 const hash=s=>createHash('sha256').update(s).digest('hex');
-const folders=['pending','running','done','failed','meteo','world'];
+/* Los resultados globales NO deben alimentar el snapshot de plantas:
+   decenas de miles de JSON en /done saturarían la memoria del navegador. */
+const folders=['pending','running','done','world-done','failed','meteo','world'];
 const jobPath=(folder,id)=>join(DATA,folder,id+'.json');
 async function atomic(file,obj){
   const tmp=file+'.'+randomUUID()+'.tmp';
@@ -130,7 +132,7 @@ export function normalizeJob(input,asOf=new Date()){
 }
 export async function enqueue(input){
   const job=normalizeJob(input);
-  for(const d of ['pending','running','done']){
+  for(const d of ['pending','running','done','world-done']){
     if(existsSync(jobPath(d,job.id)))return {job,already:d};
   }
   await atomic(jobPath('pending',job.id),job);
@@ -170,6 +172,8 @@ async function historicLicensed(requestUrl){
   }throw Error(error?.message||'Error meteorológico');
 }
 async function compute(job){
+  if(job.revision!==REVISION)
+    throw Error('Trabajo de revisión antigua: reencolar con motor vigente');
   /* No arrancar una cola de 2026 con fecha 2027 ni mezclar resultados
      de periodos distintos en la misma etiqueta. */
   const expected=requestedYears(job.period);
@@ -212,7 +216,7 @@ async function compute(job){
    mediante descargas meteorológicas. Las cuotas 429 y fallos de red sí
    siguen siendo reintentables. */
 export function terminalJobError(message){
-  return /^(?:Trabajo histórico caducado|Diferencia de configuración NAS\/visor|Diferencia de firma al terminar|Perfil NAS no presente|Coordenadas NAS inválidas|Periodo NAS no reconocido)/.test(String(message||''));
+  return /^(?:Trabajo histórico caducado|Trabajo de revisión antigua|Diferencia de configuración NAS\/visor|Diferencia de firma al terminar|Perfil NAS no presente|Coordenadas NAS inválidas|Periodo NAS no reconocido)/.test(String(message||''));
 }
 /* Plan mundial sin limit=20: cola reanudable, con cantidad acotada de
    pendientes. Un plan completo ocupa UN fichero con cursor persistente;
@@ -274,7 +278,8 @@ async function tick(){
     await rename(jobPath('pending',job.id),jobPath('running',job.id));
     const record=await compute(job);
     if(!record||!record.sig||!Array.isArray(record.results))throw Error('Simulador sin veredicto');
-    await atomic(jobPath('done',job.id),{...job,record,completed_at:new Date().toISOString()});
+    await atomic(jobPath(job.world?'world-done':'done',job.id),
+      {...job,record,completed_at:new Date().toISOString()});
     await unlink(jobPath('running',job.id));
     snapshotCache=null;
     console.log('NAS TCU: '+job.site.n+' · '+job.profileId+' · '+record.yearsOK+'/'+record.yearsAsked+' años');
@@ -319,9 +324,9 @@ export async function getWorldCoverage(query){
   for(const site of candidates.slice(0,limit)){
     const job=normalizeJob({site,profileId,period});
     let state='sin_evaluar',record=null;
-    if(existsSync(jobPath('done',job.id))){
+    if(existsSync(jobPath('world-done',job.id))){
       try{
-        const done=JSON.parse(await readFile(jobPath('done',job.id),'utf8'));
+        const done=JSON.parse(await readFile(jobPath('world-done',job.id),'utf8'));
         if(done.revision===REVISION&&done.record&&
            done.yearRange?.[0]===yrs[0]&&done.yearRange?.[1]===yrs[1]){
           state='calculado';record={sig:done.record.sig,
@@ -395,7 +400,8 @@ async function staticFile(res,pathname){
 async function request(req,res){
   const url=new URL(req.url,'http://localhost'),path=url.pathname;
   if(req.method==='GET'&&path==='/api/mapa/health'){
-    const count={};for(const d of ['pending','running','done','failed'])count[d]=(await list(d)).length;
+    const count={};for(const d of ['pending','running','done','failed'])
+      count[d]=(await readdir(join(DATA,d))).filter(x=>x.endsWith('.json')).length;
     const world=(await worldPlans()).map(x=>({step:x.plan.step,
       nodes:x.plan.sites.length,total_jobs:x.plan.total,
       assigned_jobs:x.plan.cursor,year_range:x.plan.yearRange}));
