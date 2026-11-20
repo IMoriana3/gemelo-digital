@@ -1336,6 +1336,32 @@ if(evaluated.canCompare){
     JSON.stringify(compared));
 }
 
+/* ── 18) COORDENADAS EXACTAS: dos parcelas a 1e-7° no son una ── */
+const precision = await pg.evaluate(() => {
+  const e=id=>document.getElementById(id);
+  e('mv-open').click();
+  const initial=Number.parseInt(e('mv-count').textContent,10);
+  function add(name,lat,lon){
+    e('mv-name').value=name;
+    e('mv-lat').value=String(lat);
+    e('mv-lon').value=String(lon);
+    e('mv-add').click();
+    return {selected:e('mv-selected').textContent,lat:e('mv-lat').value,
+      count:Number.parseInt(e('mv-count').textContent,10)};
+  }
+  const a=add('QA precisión A',-33.456781,-70.651239);
+  const b=add('QA precisión B',-33.4567811,-70.651239);
+  const duplicate=add('QA precisión B repetida',-33.4567811,-70.651239);
+  e('mv-close').click();
+  return {initial,a,b,duplicate};
+});
+ok(precision.a.count===precision.initial+1&&
+   precision.b.count===precision.initial+2&&
+   precision.duplicate.count===precision.initial+2&&
+   precision.b.lat==='-33.4567811',
+   'dos emplazamientos separados 1e-7° conservan coordenadas y marcadores distintos',
+   JSON.stringify(precision));
+
 await nav.close();
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa, se sabe qué batería basta y la TCU de Track N Co se compara con lo suyo'));
 process.exit(fallos ? 1 : 0);
