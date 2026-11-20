@@ -1325,11 +1325,26 @@ function opcionesDe(c,prof,base){
   if(c.tMin!=null)o.tMin=c.tMin;                /* la columna de EQUIPO trae su propio suelo de carga */
   return {o:o,p:c.prof||prof};
 }
+/* AUTORIDAD ÚNICA DE EJECUCIÓN PARA PANEL Y MAPA.
+   Devuelve exactamente las filas de simulate/simulaSeguido. No calcula
+   nuevas potencias, SOC, ángulos ni reglas meteorológicas. El modo anual
+   respeta el SOC inicial del panel; el barrido multianual, igual que el
+   informe, arranca cada tramo en el objetivo de SU estrategia. */
+function calculaControlTCU(meteoOTramos,prof,loc,base,control,conf){
+  var od=opcionesDe(control,prof,base);
+  var seguido=!!(conf&&conf.seguido);
+  var soc0=seguido||(conf&&conf.soc0==null)||!conf
+    ?socEstacionario(od.o):conf.soc0;
+  if(!Number.isFinite(soc0)||soc0<0||soc0>1)
+    throw new Error('SOC inicial del control fuera de 0…1');
+  var rows=seguido
+    ?simulaSeguido(meteoOTramos,od.p,loc,od.o)
+    :simulate(meteoOTramos,od.p,loc,soc0,od.o);
+  return {c:control,rows:rows,S:summarize(rows),soc0:soc0,prof:od.p};
+}
 function runControls(meteo,prof,loc,soc0,base){
   return controlesPara(prof).map(function(c){
-    var od=opcionesDe(c,prof,base), o=od.o, p=od.p, s0=soc0==null?socEstacionario(o):soc0;
-    var rows=simulate(meteo,p,loc,s0,o);
-    return {c:c,rows:rows,S:summarize(rows),soc0:s0,prof:p};
+    return calculaControlTCU(meteo,prof,loc,base,c,{soc0:soc0});
   });
 }
 /* El «más favorable» del informe. Antes ordenaba sólo por % no disponible, y
@@ -2001,8 +2016,10 @@ $('run').onclick=function(){
       var refFull=simulaSeguido(tramos,prof,loc,refOpts);
       var ref=recorta(refFull,peor.i0,peor.i1), refTotal=cuentaReserva(refFull,1); refFull=null;
       var ctrlW=$('cmp').checked?controlesPara(prof).map(function(c){
-        var od=opcionesDe(c,prof,opts), f=simulaSeguido(tramos,od.p,loc,od.o), rows=recorta(f,peor.i0,peor.i1);
-        return {c:c,rows:rows,S:summarize(rows),soc0:socEstacionario(od.o),prof:od.p,S30:cuentaReserva(f,1)};
+        var result=calculaControlTCU(tramos,prof,loc,opts,c,{seguido:true});
+        var rows=recorta(result.rows,peor.i0,peor.i1);
+        return {c:c,rows:rows,S:summarize(rows),soc0:result.soc0,prof:result.prof,
+                S30:cuentaReserva(result.rows,1)};
       }):null;
       var wMeteo=meteoSeguido.slice(peor.i0,peor.i1); meteoSeguido=null;
       var catalogo=null, capMin=null;
