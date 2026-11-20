@@ -13,11 +13,19 @@ que se han evaluado en ese punto exacto.
 
 ## Contrato obligatorio de paridad literal
 
-La vista del mapa **no es otro simulador**. El ejecutor de referencia es
-`calculaControlTCU`, declarado en `bateria.html`, que llama a
-`opcionesDe` y `simulate` o `simulaSeguido`. Tanto `runControls` del
-simulador como la vista geográfica llaman a esa MISMA función, con los mismos
-objetos `meteo`, `prof`, `loc`, `base` y `control`.
+La vista del mapa **no es otro simulador**. La fórmula de energía, SOC,
+movimiento, límites de carga, viento y nieve existe **una sola vez** en
+`simulate()` de `bateria.html`; `simulaSeguido()` reutiliza `simulate()`
+para encadenar años sin reiniciar el estado. El único punto de ejecución de
+ambas interfaces es `ejecutaBalanceTCU()`, también en `bateria.html`.
+El panel principal y su referencia utilizan este ejecutor directamente;
+las estrategias de ambas vistas pasan por `calculaControlTCU()`, que llama
+a `opcionesDe()` y a `ejecutaBalanceTCU()`. El mapa no copia ninguna
+ecuación energética: solo selecciona coordenadas, datos, parámetros, muestra
+los indicadores del simulador y añade avisos conservadores de calidad de datos.
+
+La prueba de paridad no sustituye a la implementación única: sirve para evitar
+que alguien introduzca posteriormente otro algoritmo o desvíe un parámetro.
 
 **Cómo comparar sin ambigüedad:**
 
