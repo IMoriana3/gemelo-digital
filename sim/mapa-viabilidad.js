@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-motor-unico-v12';
+var MV_VERSION='viabilidad-2026-11-20-meteorologia-verificada-v13';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -66,7 +66,7 @@ function signature(){
     stowMotor:typeof K_STOW_MOTOR==='number'?K_STOW_MOTOR:null,
     stringFull:typeof POA_STRING_FULL==='number'?POA_STRING_FULL:null};
   return {key:JSON.stringify({v:MV_VERSION,engine:MV_ENGINE_HASH,p:p&&p.id,w:p&&p.chgW,
-    period:period,meteo:'ERA5+ERA5-Land',soc0:soc0,base:base,physics:physics,specs:specs}),
+    period:period,meteo:'ERA5 GHI/DHI/media + ERA5-Land racha/nieve/T; m/s',soc0:soc0,base:base,physics:physics,specs:specs}),
     base:base,profile:p,soc0:soc0};
 }
 function selectedPageProfile(){
@@ -334,7 +334,7 @@ async function meteoForSite(site,period){
   });
   var tramos=tramosContinuos(list,years);
   if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
-  return {years:years,list:list,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo histórico · ERA5 (irradiancia, viento y ráfaga) + ERA5-Land (temperatura y nieve)'};
+  return {years:years,list:list,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo · ERA5 (GHI/DHI y viento medio) + ERA5-Land (temperatura, nieve y ráfagas) · m/s comprobados'};
 }
 function outcome(S,c,met,opts,worst,profile,thermal,modelBad,snowPresenceHours){
   var issues=[];
