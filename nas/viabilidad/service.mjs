@@ -49,12 +49,18 @@ const profiles=new Set(['SP_45W_3Ah','SP_45W_6Ah','SP_60W_6Ah',
   'TNC_60W_3.8Ah','TNC_60W_6Ah','TNC_60W_8Ah']);
 export function normalizeJob(input){
   if(!input||typeof input!=='object')throw Error('Trabajo vacío');
-  const src=input.site||input,lat=Number(src.lat),lon=Number(src.lon);
+  const src=input.site||input;
+  /* Number(null)==0 y Number('')==0: sin esta puerta, una planta sin
+     coordenadas se convierte en 0,0 y aparenta un emplazamiento real. */
+  if(src.lat==null||src.lon==null||
+     String(src.lat).trim()===''||String(src.lon).trim()==='')
+    throw Error('Coordenadas ausentes: no se puede asignar 0,0');
+  const lat=Number(src.lat),lon=Number(src.lon);
   if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>89||Math.abs(lon)>180)
     throw Error('Coordenadas no válidas');
   const profileId=String(input.profileId||'SP_45W_6Ah');
   if(!profiles.has(profileId))throw Error('Modelo de TCU desconocido');
-  const period=String(input.period||'30');
+  const period=String(input.period==null?'30':input.period);
   const year=Number(period);
   if(period!=='30'&&(!Number.isInteger(year)||year<1940||year>=new Date().getUTCFullYear()))
     throw Error('Periodo inválido');
