@@ -340,6 +340,8 @@ export async function getWorldCoverage(query){
         if(done.revision===REVISION&&done.record&&
            done.yearRange?.[0]===yrs[0]&&done.yearRange?.[1]===yrs[1]){
           state='calculado';record={sig:done.record.sig,
+            weather:done.record.weather||null,
+            yearsOK:done.record.yearsOK,yearsAsked:done.record.yearsAsked,
             result:done.record.results?.find(x=>x.k===control)||null};
         }
       }catch(_){}
