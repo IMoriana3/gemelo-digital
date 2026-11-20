@@ -17,6 +17,7 @@ services:
       FACTIUN_MAPA_TOKEN: "${FACTIUN_MAPA_TOKEN:-}"
       ENABLE_UI_QUEUE: "${ENABLE_UI_QUEUE:-0}"
       METEO_GAP_MS: "${METEO_GAP_MS:-2500}"
+      WORLD_QUEUE_BUFFER: "${WORLD_QUEUE_BUFFER:-12}"
     volumes:
       - "${NAS_DATA_DIR:-/volume1/docker/factiun-mapa-tcu/data}:/data"
     shm_size: "512m"
