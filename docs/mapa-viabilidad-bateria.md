@@ -59,12 +59,16 @@ a través del lector existente del simulador. Se hace explícitamente así porqu
 un WeatherContract histórico activo podría corresponder a otra ubicación; no
 se reutiliza sin validar su emplazamiento.
 
-En el barrido geográfico se fija **ERA5-Land** (parámetro `models=era5_land`)
-para evitar que el modo «Best Match» mezcle IFS, ERA5 y ERA5-Land de distintas
-épocas. ERA5-Land aporta variables terrestres a unos 0,1° (~11 km), mientras que
-el viento y la irradiancia proceden de variables atmosféricas forzantes de ERA5,
-de escala más gruesa. La coordenada de entrada NO identifica una estación
-meteorológica exacta; los datos son una representación de rejilla espacial.
+El barrido geográfico usa fuentes **explícitas por variable**: `models=era5`
+para GHI, DHI, velocidad media y ráfaga; `models=era5_land` para la
+temperatura y nieve acumulada. Se comprueba que las dos series tengan
+exactamente los mismos índices horarios antes de formar la entrada al
+simulador. ERA5-Land no ofrece la ráfaga de 10 m como variable propia; por
+eso no se solicita todo a un solo modelo.
+ERA5-Land aporta la componente terrestre a ~0,1° y ERA5 la atmosférica
+a ~0,25°. La coordenada NO identifica una estación meteorológica exacta.
+Dos consultas históricas por año, un solo balance de batería.
+La selección evita que «Best Match» cambie de modelo entre décadas.
 La nieve de `snow_depth` es profundidad **sobre el suelo**, y el proveedor
 advierte que puede estar sobreestimada. Fuente primaria:
 https://open-meteo.com/en/docs/historical-weather-api
