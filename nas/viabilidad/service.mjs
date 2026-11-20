@@ -296,6 +296,15 @@ async function tick(){
 /* Cobertura mundial por ventana, nunca porcentajes inventados:
    las celdas sin evaluación son grises; los resultados solo se colorean
    con la MISMA firma que el simulador que los consulta. */
+async function activeWorldCounts(){
+  const alive=(await list('pending')).concat(await list('running'));
+  const counts=new Map();
+  for(const job of alive){
+    const plan=job.world?.plan;
+    if(plan)counts.set(plan,(counts.get(plan)||0)+1);
+  }
+  return counts;
+}
 export async function getWorldCoverage(query){
   const step=Number(query.get('step')||5),profileId=query.get('profile')||'SP_45W_6Ah';
   const period=query.get('period')||'30',control=query.get('control')||'std';
@@ -308,12 +317,13 @@ export async function getWorldCoverage(query){
      raw[1]>=raw[3]||raw[0]<-90||raw[2]>90||raw[1]<-180||raw[3]>180)
     throw Error('Ventana mundial fuera de rango');
   const yrs=requestedYears(period);
-  const plans=await worldPlans();
+  const plans=await worldPlans(),active=await activeWorldCounts();
   const selected=plans.find(x=>x.plan.step===step&&
     x.plan.period===period&&x.plan.profiles.includes(profileId));
   const stages=plans.map(x=>({step:x.plan.step,cells:x.plan.sites.length,
     jobs:x.plan.total,assigned:x.plan.cursor,
-    finished:x.plan.finished||0,errors:x.plan.errors||0,
+    pending:(active.get(x.name)||0),
+    closed:Math.max(0,x.plan.cursor-(active.get(x.name)||0)),
     years:x.plan.yearRange}));
   if(!selected)return {ok:true,configured:false,step,stages,nodes:[],
     note:'La cobertura global no está registrada todavía; no se inventan estados'};
@@ -402,9 +412,12 @@ async function request(req,res){
   if(req.method==='GET'&&path==='/api/mapa/health'){
     const count={};for(const d of ['pending','running','done','failed'])
       count[d]=(await readdir(join(DATA,d))).filter(x=>x.endsWith('.json')).length;
+    const alive=await activeWorldCounts();
     const world=(await worldPlans()).map(x=>({step:x.plan.step,
       nodes:x.plan.sites.length,total_jobs:x.plan.total,
-      assigned_jobs:x.plan.cursor,year_range:x.plan.yearRange}));
+      assigned_jobs:x.plan.cursor,
+      closed_jobs:Math.max(0,x.plan.cursor-(alive.get(x.name)||0)),
+      year_range:x.plan.yearRange}));
     return json(res,200,{ok:true,revision:REVISION,meteorologia:KEY?'licenciada':'pendiente_de_licencia',
       puede_encolar:UI_QUEUE&&!!TOKEN,counts:count,
       cobertura_mundial:{registrada:world.length>0,etapas:world}});
