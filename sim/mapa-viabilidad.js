@@ -4,7 +4,7 @@
    No hay otro balance energético ni se publican zonas extrapoladas. */
 (function(){
 'use strict';
-var MV_VERSION='viabilidad-2026-11-20-paridad-v6';
+var MV_VERSION='viabilidad-2026-11-20-paridad-v7';
 var MV_CUSTOM='bateria_mapa_puntos_v1';
 var MV_RESULTS='bateria_mapa_conclusiones_v1';
 var MV_COLORS={apto:'#36d399',condicionado:'#e8b451',no_apto:'#e46569',pendiente:'#8392a2'};
@@ -138,7 +138,7 @@ function selectSite(site,fly){
   e('mv-lat').value=site.lat;
   e('mv-lon').value=site.lon;
   if(mv.map&&fly)mv.map.setView([site.lat,site.lon],Math.max(mv.map.getZoom(),5),{animate:true});
-  drawPins();listSites();renderResult();
+  drawPins();listSites();renderResult();updateParityButton();
 }
 function listSites(){
   var search=cleanName(e('mv-search').value).toLocaleLowerCase('es-ES');
@@ -200,9 +200,50 @@ function renderResult(){
     holder.appendChild(div);
   });
 }
+function parityAvailable(){
+  var data=window.BAT_METEO_PARIDAD,s=mv.selected;
+  return !!(data&&s&&data.site&&
+    data.site.lat===s.lat&&data.site.lon===s.lon&&
+    data.period===e('mv-period').value);
+}
+function updateParityButton(){
+  var btn=e('mv-use-same-meteo');
+  if(btn)btn.hidden=!parityAvailable();
+}
 function updateView(){
   if(!mv.map)return;
-  drawPins();listSites();renderResult();
+  drawPins();listSites();renderResult();updateParityButton();
+}
+function useSameScenarioInSimulator(){
+  if(!parityAvailable()){note('Primero calcula el emplazamiento exacto en el mapa.');return;}
+  var site=mv.selected,p=activeProfile(),data=window.BAT_METEO_PARIDAD;
+  var i=PROFILES.findIndex(function(q){return q.id===e('mv-profile').value;});
+  if(i<0||!p)throw new Error('La TCU del mapa ya no existe en el simulador');
+  /* La vista principal leerá los MISMOS arrays de meteorología, sin
+     descargas. Se conservan sus controles físicos, SOH y estrategia. */
+  e('prof').value=String(i);
+  e('prof').dispatchEvent(new Event('change'));
+  if(!p.string){
+    e('panel').value=String(p.chgW);
+    e('panel').dispatchEvent(new Event('change'));
+  }
+  e('loc').value='custom';e('loc').dispatchEvent(new Event('change'));
+  e('clat').value=String(site.lat);e('clon').value=String(site.lon);
+  e('cname').value=site.n;
+  var period=e('mv-period').value;
+  e('year').value=period==='30'?'worst':period;
+  if(e('year').value!==(period==='30'?'worst':period))
+    throw new Error('Año no disponible en el selector de batería');
+  if(period==='30')e('sweepFrom').value=String(data.years[0]);
+  e('step').value='auto';
+  e('cmp').checked=true;
+  e('src').value='mapa';e('src').dispatchEvent(new Event('change'));
+  e('year').dispatchEvent(new Event('change'));
+  e('mv-close').click();
+  e('srcTag').textContent='DATOS HORARIOS IDÉNTICOS al mapa: '+site.n+
+    ' · '+data.years[0]+'–'+data.years[data.years.length-1]+
+    ' · Pulsa Simular para comparar';
+  e('run').focus();
 }
 function addLocation(name,lat,lon){
   if(!coordOK(lat,lon))throw new Error('Introduce coordenadas válidas: latitud −89…89, longitud −180…180.');
@@ -271,7 +312,7 @@ async function meteoForSite(site,period){
   });
   var tramos=tramosContinuos(list,years);
   if(!tramos.length)throw new Error('No hay años completos de meteorología en este punto.');
-  return {years:years,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo histórico · ERA5 (irradiancia, viento y ráfaga) + ERA5-Land (temperatura y nieve)'};
+  return {years:years,list:list,tramos:tramos,missing:missing,ok:ok,qa:qa,source:'Open-Meteo histórico · ERA5 (irradiancia, viento y ráfaga) + ERA5-Land (temperatura y nieve)'};
 }
 function outcome(S,c,met,opts,worst,profile,thermal,modelBad,snowPresenceHours){
   var issues=[];
@@ -355,6 +396,9 @@ async function evaluateSite(){
   if(!controls.length){note('Este perfil no tiene estrategia disponible.');return;}
   var btn=e('mv-evaluate');btn.disabled=true;mv.busy=true;
   try{
+    /* Una evaluación nueva invalida el enlace a datos de una evaluación
+       anterior; nunca se ofrece equivalencia tras una descarga fallida. */
+    window.BAT_METEO_PARIDAD=null;
     var met=await meteoForSite(site,period),rows,results=[],snowPresenceHours=0;
     /* El riesgo sobre el panel existe incluso con menos de 3 cm: SP3 sólo
        dispara a partir de ese umbral, pero una película de nieve puede tapar
@@ -400,7 +444,14 @@ async function evaluateSite(){
     all.push(record);
     /* Varias TCUs por ubicación, pero solo resúmenes: nunca las 262.800 filas */
     mv.records[site.id]=all.slice(-32);
-    persist();updateView();
+    persist();
+    /* Guardamos SOLO las referencias a las mismas series, una ubicación a la
+       vez. El simulador podrá reutilizarlas byte a byte en esta sesión. */
+    if(met.missing.length===0){
+      window.BAT_METEO_PARIDAD={site:{lat:site.lat,lon:site.lon},
+        years:met.years.slice(),list:met.list,period:period,source:met.source};
+    }
+    updateView();
     note('Evaluación terminada para '+site.n+'. Los resultados proceden del simulador de batería.');
   }catch(err){
     /* Si el usuario pide recalcular y falla la fuente o el motor, no dejamos
@@ -451,6 +502,7 @@ function initialize(){
         '<div class="viab-field"><label for="mv-control">Control mostrado en el mapa</label><select id="mv-control"></select></div>',
         '<div class="viab-field"><label for="mv-period">Histórico meteorológico</label><select id="mv-period"></select></div>',
         '<button class="viab-act" id="mv-evaluate" type="button">Calcular conclusiones del punto</button>',
+        '<button class="viab-act viab-secondary" id="mv-use-same-meteo" type="button" hidden>Usar mismos datos en el simulador</button>',
         '<p class="viab-progress" id="mv-progress" role="status">Selecciona un punto y evalúalo.</p>',
         '<h3 class="viab-section">Emplazamientos</h3><p class="viab-meta" id="mv-count"></p>',
         '<div class="viab-list" id="mv-sites"></div>',
@@ -518,6 +570,7 @@ function initialize(){
   e('mv-control').onchange=updateView;
   e('mv-period').onchange=updateView;
   e('mv-evaluate').onclick=evaluateSite;
+  e('mv-use-same-meteo').onclick=useSameScenarioInSimulator;
   var nasButton=document.createElement('button');nasButton.id='mv-nas-submit';
   nasButton.type='button';nasButton.className='viab-act viab-secondary';
   nasButton.textContent='Enviar cálculo al NAS';nasButton.hidden=true;
