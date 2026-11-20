@@ -44,7 +44,7 @@ assert.equal(inLand(0.5,41.5,land),false);
 assert.equal(inLand(10,40,land),false);
 /* Cuatro ubicaciones reproducibles: San José sale de la CARTERA, no de una
    coordenada duplicada; las otras tres son puntos urbanos provisionales. */
-import {execFileSync} from 'node:child_process';
+import {execFileSync,spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {mkdtempSync,mkdirSync,writeFileSync,existsSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -84,4 +84,55 @@ try {
   assert.equal(existsSync(join(scratch,'pending')),false,
     'La preview tampoco debe crear carpetas de cola');
 } finally {rmSync(scratch,{recursive:true,force:true});}
-console.log('NAS viabilidad: vista previa sin mutaciones, 4 sitios, 240 peticiones y cola OK');
+/* Smoke HTTP real: servidor de Synology sin clave ni API externa.
+   El JSON canónico de casos es legible en el mapa, pero el código de
+   servicio y los ejemplos de secretos no son públicos. */
+import {createServer} from 'node:http';
+const srvData=mkdtempSync(join(tmpdir(),'factiun-nas-http-'));
+const probe=createServer();
+await new Promise((ok,fail)=>{probe.once('error',fail);probe.listen(0,'127.0.0.1',ok);});
+const port=probe.address().port;
+await new Promise(ok=>probe.close(ok));
+const child=spawn(process.execPath,['nas/viabilidad/service.mjs'],{
+  cwd:fileURLToPath(new URL('../',import.meta.url)),
+  env:{...process.env,FACTIUN_MAPA_DATA:srvData,PORT:String(port),
+    OPEN_METEO_API_KEY:'',ENABLE_UI_QUEUE:'0',FACTIUN_MAPA_TOKEN:''},
+  stdio:['ignore','pipe','pipe']
+});
+let logs='';
+child.stdout.on('data',x=>{logs+=String(x).slice(-1500);});
+child.stderr.on('data',x=>{logs+=String(x).slice(-1500);});
+try{
+  let ready=false;
+  for(let n=0;n<50;n++){
+    if(child.exitCode!==null)break;
+    try{const r=await fetch('http://127.0.0.1:'+port+'/api/mapa/health');
+      if(r.ok){ready=true;break;}}catch(_){}
+    await new Promise(ok=>setTimeout(ok,100));
+  }
+  assert.equal(ready,true,'Servicio no arranca: '+logs);
+  const url='http://127.0.0.1:'+port;
+  const health=await (await fetch(url+'/api/mapa/health')).json();
+  assert.equal(health.meteorologia,'pendiente_de_licencia');
+  assert.equal(health.counts.done,0);
+  const sites=await fetch(url+'/nas/viabilidad/casos-tordesillas-chorzele-joya-dunedin.json');
+  assert.equal(sites.status,200);
+  assert.equal((await sites.json()).length,4);
+  const browserCode=await fetch(url+'/sim/mapa-viabilidad.js');
+  assert.equal(browserCode.status,200);
+  assert.match(await browserCode.text(),/loadPrioritySites/);
+  assert.equal((await fetch(url+'/bateria.html')).status,200);
+  assert.equal((await fetch(url+'/nas/viabilidad/service.mjs')).status,404);
+  assert.equal((await fetch(url+'/nas/viabilidad/.env.example')).status,404);
+  assert.equal((await fetch(url+'/api/mapa/jobs',{
+    method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({site:{lat:41.5,lon:-5},profileId:'SP_45W_6Ah'})
+  })).status,403);
+  const snapshot=await (await fetch(url+'/api/mapa/snapshot')).json();
+  assert.deepEqual(snapshot.items,[]);
+}finally{
+  child.kill('SIGTERM');
+  if(child.exitCode===null)await new Promise(ok=>child.once('exit',ok));
+  rmSync(srvData,{recursive:true,force:true});
+}
+console.log('NAS viabilidad: HTTP, permisos, previews y 4 emplazamientos OK');
