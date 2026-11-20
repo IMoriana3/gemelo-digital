@@ -57,6 +57,9 @@ assert.doesNotMatch(js,/rows=simulate\(/);
 assert.doesNotMatch(js,/function simulate\(/);
 assert.doesNotMatch(js,/synthMeteo\(/);
 assert.match(js,/if\(!fullYear\(m,years\[i\]\)\)/);
+assert.match(js,/var years=historicalYears\(period\)/);
+assert.match(js,/years:\[years\[0\],years\[years\.length-1\]\],nYears:years\.length/);
+assert.match(js,/var year=new Date\(\)\.getUTCFullYear\(\)-1/);
 
 const ctx={
   document:{readyState:'loading',addEventListener(){}},
@@ -87,10 +90,23 @@ const ctx={
 ctx.Abanderamiento.prototype.paso=function(){};
 vm.createContext(ctx);
 const code=js.replace("if(document.readyState==='loading')",
-  'globalThis.__mapTests={fullYear,outcome};\nif(document.readyState===\'loading\')');
+  'globalThis.__mapTests={fullYear,outcome,historicalYears};\nif(document.readyState===\'loading\')');
 assert.notEqual(code,js,'No se ha encontrado el punto de inyección de pruebas');
 vm.runInContext(code,ctx,{filename:'sim/mapa-viabilidad.js'});
-const {fullYear,outcome}=ctx.__mapTests;
+const {fullYear,outcome,historicalYears}=ctx.__mapTests;
+/* Año 2027: `30` ya no significa 1996–2025, sino 1997–2026.
+   La firma de caché debe contener ese rango y caducar automáticamente. */
+const roll2026=Array.from(historicalYears('30',new Date(Date.UTC(2026,11,31,23,59))));
+const roll2027=Array.from(historicalYears('30',new Date(Date.UTC(2027,0,1))));
+assert.equal(roll2026.length,30);
+assert.equal(roll2026[0],1996);
+assert.equal(roll2026.at(-1),2025);
+assert.equal(roll2027[0],1997);
+assert.equal(roll2027.at(-1),2026);
+assert.notDeepEqual(roll2026,roll2027);
+assert.deepEqual(Array.from(historicalYears('2024',new Date(Date.UTC(2026,0,1)))),[2024]);
+assert.throws(()=>historicalYears('2026',new Date(Date.UTC(2026,0,1))),/fuera de periodo/);
+assert.throws(()=>historicalYears('30a',new Date(Date.UTC(2026,0,1))),/fuera de periodo/);
 
 // Año completo verificable, sin saltos ni datos de otro año.
 const y=2025,rows=Array.from({length:8760},(_,i)=>({t:new Date(Date.UTC(y,0,1)+i*3600000)}));
