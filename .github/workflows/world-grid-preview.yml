@@ -1,0 +1,54 @@
+name: Rejilla terrestre mundial · sin SOC
+concurrency:
+  group: world-grid-${{ github.ref }}
+  cancel-in-progress: true
+on:
+  push:
+    branches: [feat/mapa-mundial-viabilidad-tcu]
+    paths:
+      - nas/viabilidad/mundo.mjs
+      - nas/viabilidad/seed.mjs
+      - nas/viabilidad/service.mjs
+      - sim/mapa-viabilidad.js
+      - bateria.html
+      - sim/fisica.js
+      - sim/viento.js
+      - sim/canon.js
+      - sim/cartera.js
+      - pines.json
+      - .github/workflows/world-grid-preview.yml
+  workflow_dispatch:
+jobs:
+  global:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      FACTIUN_MAPA_DATA: /tmp/factiun-world
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Construir todos los nodos terrestres 5°, 2°, 1°
+        run: |
+          set -euo pipefail
+          node nas/viabilidad/seed.mjs --world all --download-land --enqueue --confirm-world > /tmp/mundo-factiun.json
+          node -e '
+            const fs=require("node:fs"),r=JSON.parse(fs.readFileSync("/tmp/mundo-factiun.json","utf8"));
+            if(r.etapas.length!==3||r.etapas.some(x=>x.sitios<20)||
+               !(r.etapas[0].sitios<r.etapas[1].sitios&&r.etapas[1].sitios<r.etapas[2].sitios))
+              throw Error("Cobertura terrestre mundial incompleta o sin tres niveles");
+            console.log("Nodos globales:",r.total_nodos,"trabajos calculables:",r.total_trabajos);
+            r.etapas.forEach(x=>console.log(x.step+"°",x.sitios,"nodos",x.trabajos,"trabajos"));
+          '
+          cp /tmp/mundo-factiun.json "${FACTIUN_MAPA_DATA}/world/resumen-mundial.json"
+          echo "Git SHA: $(git rev-parse HEAD)"
+          echo "Firma del código y año incluidos en el nombre de los planes; no usar con otra revisión"
+      - name: Guardar geometría mundial y manifiestos, SIN simulaciones inventadas
+        uses: actions/upload-artifact@v4
+        with:
+          name: factiun-mundo-5-2-1-geografico-no-calculado
+          path: |
+            /tmp/factiun-world/world/plan-*.json
+            /tmp/factiun-world/world/resumen-mundial.json
+          retention-days: 30

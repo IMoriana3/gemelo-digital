@@ -29,6 +29,12 @@
 
 name: arneses
 
+# La PR se revisa por HEAD, no por estados obsoletos. Cancelar ejecuciones
+# antiguas solo en pull_request; nunca cancelar una comprobación de main.
+concurrency:
+  group: arneses-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
@@ -259,6 +265,24 @@ jobs:
       - run: node tools/inventario_arneses.mjs
       - name: WeatherContract v2 · batería, winter y gemelo
         run: node tools/test_weather_contract.mjs
+      - name: Mapa mundial · series completas, veredictos conservadores
+        run: node tools/prueba_mapa_viabilidad.mjs
+      - name: NAS Synology · validación de trabajos y rejilla (sin simulaciones)
+        run: node tools/test_nas_viabilidad.mjs
+      - name: NAS Synology · compose coherente y sin puerto público
+        run: |
+          set -euo pipefail
+          docker compose -f nas/viabilidad/compose.yaml config -q
+          docker compose -f nas/viabilidad/compose.yaml config --format json | node -e '
+            const fs=require("node:fs");const j=JSON.parse(fs.readFileSync(0,"utf8"));
+            const svc=j.services["viabilidad-tcu"];
+            if(!svc)throw Error("Falta el servicio de viabilidad");
+            const ports=svc.ports||[];
+            if(ports.length!==1||ports[0].host_ip!=="127.0.0.1")
+              throw Error("Puerto del NAS no restringido a loopback por defecto");
+            if((svc.security_opt||[]).indexOf("no-new-privileges:true")<0)
+              throw Error("Falta no-new-privileges");
+          '
 
   # ─────────────────────────────────────────────────────────────────────────
   # NO BLOQUEA, y es una decisión. Perder de vista que el hermano evoluciona es

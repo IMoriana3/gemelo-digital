@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0E1826">
 <link rel="icon" href="favicon.svg">
+<link rel="stylesheet" href="sim/mapa-viabilidad.css">
 <title>Simulador de batería — Factiun</title>
 <!-- Gráficas en canvas 2D sin librerías. Leaflet LOCAL (lib/) solo para elegir emplazamiento. -->
 <link rel="stylesheet" href="lib/leaflet.css">
@@ -143,6 +144,7 @@ table.cmp th{color:var(--tx3)}
   <div class="brand"><span class="dot"></span>Factiun · <b>Gestión de Batería TCU</b></div>
   <a href="index.html">← Gemelo Seguidor + TCU</a>
   <a href="simulador.html">Planta + Modbus →</a>
+  <button type="button" id="mv-open" class="viab-nav" title="Conclusiones de viabilidad por emplazamiento">Mapa mundial de viabilidad</button>
   <div class="right"><span id="motorTag" title="Quién ha calculado el balance que estás viendo" style="margin-right:10px;padding:2px 8px;border-radius:8px;border:1px solid var(--line2);font-size:12px;color:var(--warn)">— comprobando motor</span><span id="srcTag">—</span><span id="clock"></span></div>
 </nav>
 <div class="main">
@@ -206,6 +208,7 @@ table.cmp th{color:var(--tx3)}
         <option value="contract" selected>WeatherContract · compartido (histórico)</option>
         <option value="contractfc">WeatherContract · forecast</option>
         <option value="archive">Open-Meteo histórico · fallback legacy</option>
+        <option value="mapa">Meteo del mapa · mismos registros (paridad exacta)</option>
         <option value="openmeteo">Open-Meteo forecast · fallback legacy</option>
         <option value="pvsyst">CSV horario PVSyst (fichero local)</option>
         <option value="synth">Sintético (cielo claro + nubes)</option>
@@ -657,20 +660,42 @@ function cRateSafeLFP(t){
 /* ═══════════ Meteo — filas {t, ghi, dhi, temp, wind, poa?, phi?, el?, az?} ═══════════ */
 function parseOM(j){
   var H=j.hourly, out=[];
+  /* Metadatos de calidad: el mapa nunca puede llamar "apto" a una serie
+     cuyas entradas meteorológicas esenciales fueron sustituidas por defaults. */
+  var qa={sin_irradiancia:0,sin_temperatura:0,sin_viento:0};
   for(var i=0;i<H.time.length;i++){
+    /* NaN y negativos también son FALTANTES: antes se convertían en cero,
+       que equivale a inventar cielo oscuro, ausencia de viento o de nieve. */
+    var ghi=H.shortwave_radiation&&H.shortwave_radiation[i],
+        dhi=H.diffuse_radiation&&H.diffuse_radiation[i],
+        temp=H.temperature_2m&&H.temperature_2m[i],
+        wind=H.windspeed_10m&&H.windspeed_10m[i],
+        gust=H.wind_gusts_10m&&H.wind_gusts_10m[i],
+        snow=H.snow_depth&&H.snow_depth[i];
+    var badG=!Number.isFinite(ghi)||ghi<0,
+        badD=!Number.isFinite(dhi)||dhi<0,
+        badT=!Number.isFinite(temp),
+        badW=!Number.isFinite(wind)||wind<0;
+    if(badG||badD)qa.sin_irradiancia++;
+    if(badT)qa.sin_temperatura++;
+    if(badW)qa.sin_viento++;
     out.push({t:new Date(H.time[i]+"Z"),
-      ghi:Math.max(0,H.shortwave_radiation[i]||0),
-      dhi:Math.max(0,(H.diffuse_radiation&&H.diffuse_radiation[i])||0),
-      temp:(H.temperature_2m[i]==null?15:H.temperature_2m[i]),
-      wind:(H.windspeed_10m&&H.windspeed_10m[i])||0,
-      /* null, NO 0, cuando la fuente no los trae: un 0 abandera nunca y nieva nunca
-         sin que nada lo diga. El simulador cuenta las horas sin ellos y el informe lo declara. */
-      gust:(H.wind_gusts_10m&&H.wind_gusts_10m[i]!=null)?Math.max(0,H.wind_gusts_10m[i]):null,
-      snowDepth:(H.snow_depth&&H.snow_depth[i]!=null)?Math.max(0,H.snow_depth[i]):null});
+      ghi:badG?0:ghi,
+      dhi:badD?0:dhi,
+      temp:badT?15:temp,
+      wind:badW?0:wind,
+      /* Datos inválidos de racha/nieve se dejan en null; la serie los
+         contabiliza y bloquea la conclusión geográfica «apto». */
+      gust:Number.isFinite(gust)&&gust>=0?gust:null,
+      snowDepth:Number.isFinite(snow)&&snow>=0?snow:null});
   }
+  Object.defineProperty(out,'mapaQA',{value:qa,enumerable:false});  /* metadatos, no una fila ni serie nueva */
   return out;
 }
-var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m,wind_gusts_10m,snow_depth&windspeed_unit=ms";
+/* Open-Meteo: el nombre documentado es wind_speed_unit, CON guiones bajos.
+   windspeed_unit se ignoraba y la API devolvía km/h por defecto, que el
+   modelo interpretaba erróneamente como m/s. */
+var OM_VARS="shortwave_radiation,diffuse_radiation,temperature_2m,windspeed_10m,wind_gusts_10m,snow_depth&wind_speed_unit=ms";
 function fetchOpenMeteo(loc,days){
   var u="https://api.open-meteo.com/v1/forecast?latitude="+loc.lat+"&longitude="+loc.lon+
     "&hourly="+OM_VARS+"&forecast_days="+days+"&timezone=UTC";
@@ -864,9 +889,40 @@ function clasificaBarrido(list,years,simYear){
   return {res:res,caidos:caidos};
 }
 function fetchOpenMeteoYear(loc,year){
-  var u="https://archive-api.open-meteo.com/v1/archive?latitude="+loc.lat+"&longitude="+loc.lon+
-    "&start_date="+year+"-01-01&end_date="+year+"-12-31&hourly="+OM_VARS+"&timezone=UTC";
-  return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(parseOM);
+  var base="https://archive-api.open-meteo.com/v1/archive?latitude="+loc.lat+"&longitude="+loc.lon+
+    "&start_date="+year+"-01-01&end_date="+year+"-12-31&timezone=UTC";
+  var load=function(u){return fetch(u).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()});};
+  /* Contrato documentado por Open-Meteo (tabla de variables por modelo):
+     ERA5 aporta irradiancia GHI/DHI y viento MEDIO a 10 m.
+     ERA5-Land aporta temperatura, NIEVE en suelo y RACHA a 10 m.
+     NUNCA se cambia una racha por viento medio sin declararlo y nunca se
+     interpreta una serie en km/h como m/s. */
+  if(loc&&loc.meteoMode==='era5_hybrid'){
+    var atm=base+"&hourly=shortwave_radiation,diffuse_radiation,windspeed_10m"+
+      "&models=era5&wind_speed_unit=ms";
+    var land=base+"&hourly=temperature_2m,snow_depth,wind_gusts_10m"+
+      "&models=era5_land&wind_speed_unit=ms";
+    return Promise.all([load(atm),load(land)]).then(function(pair){
+      var a=pair[0].hourly,b=pair[1].hourly;
+      if(!a||!b||!Array.isArray(a.time)||!Array.isArray(b.time)||
+         a.time.length!==b.time.length||!a.time.length)
+        throw new Error("ERA5 / ERA5-Land: cobertura temporal incompatible");
+      /* Verificamos la UNIDAD que devuelve el servidor, no solo la URL.
+         Sin metadatos/valor m/s, no se simula ni se colorea el mapa. */
+      if(!pair[0].hourly_units||pair[0].hourly_units.windspeed_10m!=='m/s'||
+         !pair[1].hourly_units||pair[1].hourly_units.wind_gusts_10m!=='m/s')
+        throw new Error("ERA5 / ERA5-Land: unidad del viento no es m/s verificable");
+      for(var i=0;i<a.time.length;i++)if(a.time[i]!==b.time[i])
+        throw new Error("ERA5 / ERA5-Land: índices horarios diferentes en "+i);
+      return parseOM({hourly:{
+        time:a.time,shortwave_radiation:a.shortwave_radiation,
+        diffuse_radiation:a.diffuse_radiation,
+        temperature_2m:b.temperature_2m,
+        windspeed_10m:a.windspeed_10m,wind_gusts_10m:b.wind_gusts_10m,
+        snow_depth:b.snow_depth}});
+    });
+  }
+  return load(base+"&hourly="+OM_VARS).then(parseOM);
 }
 /* Sintético: cielo claro atenuado por nubes + temperatura estacional/diurna */
 function synthMeteo(loc,days,doy0,clouds){
@@ -1280,11 +1336,34 @@ function opcionesDe(c,prof,base){
   if(c.tMin!=null)o.tMin=c.tMin;                /* la columna de EQUIPO trae su propio suelo de carga */
   return {o:o,p:c.prof||prof};
 }
+/* UN ÚNICO EJECUTOR ENERGÉTICO: lo llaman el panel, los controles
+   comparados y el mapa. La física sólo vive en simulate() y simulaSeguido().
+   Esta función no tiene fórmulas propias de potencia, batería ni movimiento.
+   No añade un summarize() global al barrido de 30 años: sería costoso y
+   alteraría el flujo de memoria del informe original. */
+function ejecutaBalanceTCU(meteoOTramos,prof,loc,opts,conf){
+  var seguido=!!(conf&&conf.seguido);
+  var soc0=seguido||!conf||conf.soc0==null
+    ?socEstacionario(opts):conf.soc0;
+  if(!Number.isFinite(soc0)||soc0<0||soc0>1)
+    throw new Error('SOC inicial del control fuera de 0…1');
+  return seguido
+    ?simulaSeguido(meteoOTramos,prof,loc,opts)
+    :simulate(meteoOTramos,prof,loc,soc0,opts);
+}
+/* La transformación de política es también única (opcionesDe), incluida la
+   química y el SOH; aquí sólo se escoge qué control ya definido se ejecuta. */
+function calculaControlTCU(meteoOTramos,prof,loc,base,control,conf){
+  var od=opcionesDe(control,prof,base);
+  var seguido=!!(conf&&conf.seguido);
+  var soc0=seguido||!conf||conf.soc0==null
+    ?socEstacionario(od.o):conf.soc0;
+  var rows=ejecutaBalanceTCU(meteoOTramos,od.p,loc,od.o,conf);
+  return {c:control,rows:rows,S:summarize(rows),soc0:soc0,prof:od.p};
+}
 function runControls(meteo,prof,loc,soc0,base){
   return controlesPara(prof).map(function(c){
-    var od=opcionesDe(c,prof,base), o=od.o, p=od.p, s0=soc0==null?socEstacionario(o):soc0;
-    var rows=simulate(meteo,p,loc,s0,o);
-    return {c:c,rows:rows,S:summarize(rows),soc0:s0,prof:p};
+    return calculaControlTCU(meteo,prof,loc,base,c,{soc0:soc0});
   });
 }
 /* El «más favorable» del informe. Antes ordenaba sólo por % no disponible, y
@@ -1612,7 +1691,10 @@ PROFILES.forEach(function(P,i){if(!P.variante)$('prof').add(new Option(P.n,i))})
 /* — Emplazamiento personalizado: Leaflet local + Nominatim (mismo patrón que index.html) — */
 var bmap=null, bmarker=null;
 function setPick(la,lo,name){
-  $('clat').value=(+la).toFixed(3); $('clon').value=(+lo).toFixed(3);
+  /* No redondear a tres decimales (~111 m en latitud): eso mueve el
+     emplazamiento respecto a la parcela seleccionada y altera el sol local.
+     Conservar el valor numérico completo de Leaflet/Nominatim. */
+  $('clat').value=String(Number(la)); $('clon').value=String(Number(lo));
   if(name)$('cname').value=name;
   if(bmap){bmarker.setLatLng([la,lo]);}
   try{localStorage.setItem('bateria_customLoc',JSON.stringify({lat:+la,lon:+lo,n:$('cname').value}))}catch(e){}
@@ -1730,8 +1812,8 @@ $('socCrit').addEventListener('input',function(){
   if(+$('socTgt').value<=+this.value){$('socTgt').value=Math.min(100,+this.value+10);$('socTgtV').textContent=$('socTgt').value+'%'}});
 $('src').onchange=function(){
   var v=this.value;
-  $('yearFld').style.display=(v==='archive'||v==='contract')?'':'none';
-  $('sweepFld').style.display=((v==='archive'||v==='contract')&&$('year').value==='worst')?'':'none';
+  $('yearFld').style.display=(v==='archive'||v==='contract'||v==='mapa')?'':'none';
+  $('sweepFld').style.display=((v==='archive'||v==='contract'||v==='mapa')&&$('year').value==='worst')?'':'none';
   $('daysFld').style.display=(v==='openmeteo'||v==='contractfc')?'':'none';
   $('fileFld').style.display=v==='pvsyst'?'':'none';
   $('cloudsFld').style.display=v==='synth'?'':'none';
@@ -1770,8 +1852,30 @@ async function contractOrFallback(loc,kind,year){
     return m;
   }
 }
+/* Datos HORARIOS IDENTICOS usados por el mapa: ninguna nueva petición ni
+   interpolación. Si cambian coordenadas o años, se rechaza en lugar de
+   comparar dos meteorologías distintas bajo el mismo nombre. */
+function meteoExactaMapa(loc,years){
+  var ref=window.BAT_METEO_PARIDAD;
+  if(!ref||!ref.site||!Array.isArray(ref.years)||!Array.isArray(ref.list))
+    throw new Error('Primero calcula este emplazamiento en el mapa de viabilidad');
+  if(loc.lat!==ref.site.lat||loc.lon!==ref.site.lon)
+    throw new Error('Las coordenadas no coinciden exactamente con las del mapa');
+  return years.map(function(y){
+    var i=ref.years.indexOf(y);
+    if(i<0||!Array.isArray(ref.list[i]))
+      throw new Error('El mapa no tiene el año '+y+' con una serie horaria completa');
+    return ref.list[i];
+  });
+}
 function getMeteo(loc){
   var v=$('src').value;
+  if(v==='mapa'){
+    var y=+$('year').value;
+    var m=meteoExactaMapa(loc,[y])[0];
+    $('srcTag').textContent='Meteo IDÉNTICA del mapa · '+loc.n+' · '+y;
+    return Promise.resolve(m);
+  }
   if(v==='contract')
     return contractOrFallback(loc,'historical',$('year').value);
   if(v==='contractfc')
@@ -1883,27 +1987,65 @@ $('btnCanon').onclick=function(){
 };
 pintaParams();
 
+/* Un solo lector de parámetros editables. El mapa NO reconstruye estos
+   11 campos: pide al simulador las opciones del hardware seleccionado. */
+function opcionesDelPanel(prof){
+  var pageProf=PROFILES[$('prof').value],panelW=+$('panel').value;
+  var pageHardware=pageProf?(pageProf.string?pageProf:conPanel(pageProf,panelW)):null;
+  var same=!!(prof&&pageHardware&&
+    prof.id===pageHardware.id&&prof.chgW===pageHardware.chgW&&
+    prof.wh===pageHardware.wh);
+  var mm=$('motor').value;
+  mm=(mm==='factiun'||mm==='curva')?mm:+mm;
+  return {
+    motorModel:mm,soh:$('aged').checked?SOH_FIN_VIDA:1,
+    vientoStow:$('vientoStow').value,winter:$('winter').checked,
+    strategy:true,socTgt:+$('socTgt').value,socCrit:+$('socCrit').value,
+    fcDays:+$('fc').value,
+    tMin:(same||!prof||!prof.tCarga)?+$('tmin').value:prof.tCarga[0],
+    poaMin:+$('poaMin').value,
+    mountTilt:$('mount').value==='fix'?+$('tilt').value:null
+  };
+}
+function opcionesReferenciaTCU(opts){
+  return Object.assign({},opts,{strategy:false,winter:false,
+    socTgt:100,socCrit:0,fcDays:5});
+}
 $('run').onclick=function(){
   var btn=this;btn.disabled=true;btn.textContent='⏳ Simulando…';
-  var loc=getLoc(), prof=conPanel(PROFILES[$('prof').value],+$('panel').value);
-  var mm=$('motor').value; mm=(mm==='factiun'||mm==='curva')?mm:+mm;
-  var soh=$('aged').checked?SOH_FIN_VIDA:1;
-  var opts={motorModel:mm, soh:soh, vientoStow:$('vientoStow').value, winter:$('winter').checked, strategy:true,
-            socTgt:+$('socTgt').value, socCrit:+$('socCrit').value,
-            fcDays:+$('fc').value, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
-            mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
-  var refOpts={motorModel:mm, soh:soh, vientoStow:$('vientoStow').value, winter:false, strategy:false,
-            socTgt:100, socCrit:0, fcDays:5, tMin:+$('tmin').value, poaMin:+$('poaMin').value,
-            mountTilt:$('mount').value==='fix'?+$('tilt').value:null};
+  /* Las respuestas de un balance opcional anterior no pueden sobrescribir
+     la pantalla del escenario activo (especialmente el modo paridad). */
+  var runId=++MOTOR_RUN_ID;
+  var loc=getLoc();
+  /* El panel no puede anunciar paridad con un resultado del mapa si alguien
+     ha cambiado el SOC, panel, hardware o cualquier ajuste desde ese run. */
+  if($('src').value==='mapa'){
+    var check=window.FACTIUN_MAPA_PARIDAD&&
+      window.FACTIUN_MAPA_PARIDAD.validate(loc);
+    if(!check||!check.ok){
+      $('srcTag').textContent='PARIDAD BLOQUEADA: '+
+        (check&&check.motivo||'No está disponible el mapa de referencia');
+      btn.disabled=false;btn.textContent='▶ Simular';
+      return;
+    }
+  }
+  var prof=conPanel(PROFILES[$('prof').value],+$('panel').value);
+  var opts=opcionesDelPanel(prof);
+  var refOpts=opcionesReferenciaTCU(opts);
   var soc0=+$('soc0').value/100;
   var job;
-  if(($('src').value==='archive'||$('src').value==='contract') && $('year').value==='worst'){
+  if(($('src').value==='archive'||$('src').value==='contract'||$('src').value==='mapa') && $('year').value==='worst'){
     /* Barrido multi-año como el Battery Availability Study: simula cada año,
        elige el peor por % tiempo no disponible (desempate: % prod. perdida, SOC mín) */
     var yEnd=new Date().getFullYear()-1;
     var yIni=Math.max(1940,Math.min(+$('sweepFrom').value||(yEnd-29),yEnd-1));
     var years=[]; for(var y=yIni;y<=yEnd;y++)years.push(y);
     var fetchBatched=function(){
+      if($('src').value==='mapa'){
+        var copied=meteoExactaMapa(loc,years);
+        $('srcTag').textContent='Meteo IDÉNTICA del mapa · '+years[0]+'–'+years[years.length-1];
+        return Promise.resolve(copied);
+      }
       if($('src').value==='contract'){
         return import('./sim/weather-contract-adapter.mjs').then(async function(mod){
           try{
@@ -1949,15 +2091,17 @@ $('run').onclick=function(){
       var tramos=tramosContinuos(list,years);
       if(!tramos.length)throw new Error('Sin datos históricos (¿sin red?)'+(cl.caidos.length?' · '+cl.caidos[0].year+': '+cl.caidos[0].motivo:''));
       var meteoSeguido=[]; tramos.forEach(function(t){for(var k=0;k<t.meteo.length;k++)meteoSeguido.push(t.meteo[k])});
-      var full=simulaSeguido(tramos,prof,loc,opts);
+      var full=ejecutaBalanceTCU(tramos,prof,loc,opts,{seguido:true});
       var inv=resumenInviernos(full), peor=peorInvierno(inv);
       var total=cuentaReserva(full,1), gob=periodoQueGobierna(full,opts,peor.i0,peor.i1);
       var mng=recorta(full,peor.i0,peor.i1); full=null;            /* suelta las 262 800 filas */
-      var refFull=simulaSeguido(tramos,prof,loc,refOpts);
+      var refFull=ejecutaBalanceTCU(tramos,prof,loc,refOpts,{seguido:true});
       var ref=recorta(refFull,peor.i0,peor.i1), refTotal=cuentaReserva(refFull,1); refFull=null;
       var ctrlW=$('cmp').checked?controlesPara(prof).map(function(c){
-        var od=opcionesDe(c,prof,opts), f=simulaSeguido(tramos,od.p,loc,od.o), rows=recorta(f,peor.i0,peor.i1);
-        return {c:c,rows:rows,S:summarize(rows),soc0:socEstacionario(od.o),prof:od.p,S30:cuentaReserva(f,1)};
+        var result=calculaControlTCU(tramos,prof,loc,opts,c,{seguido:true});
+        var rows=recorta(result.rows,peor.i0,peor.i1);
+        return {c:c,rows:rows,S:summarize(rows),soc0:result.soc0,prof:result.prof,
+                S30:cuentaReserva(result.rows,1)};
       }):null;
       var wMeteo=meteoSeguido.slice(peor.i0,peor.i1); meteoSeguido=null;
       var catalogo=null, capMin=null;
@@ -1997,14 +2141,21 @@ $('run').onclick=function(){
     job=getMeteo(loc).then(function(meteo){
       meteo=applyStep(meteo);
       if(STEP_NOTE)$('srcTag').textContent+=STEP_NOTE;
-      var mng=simulate(meteo,prof,loc,soc0,opts);
-      var ref=simulate(meteo,prof,loc,soc0,refOpts);
+      var mng=ejecutaBalanceTCU(meteo,prof,loc,opts,{soc0:soc0});
+      var ref=ejecutaBalanceTCU(meteo,prof,loc,refOpts,{soc0:soc0});
       var ctrl=$('cmp').checked?runControls(meteo,prof,loc,soc0,opts):null;
       LAST={meteo:meteo,mng:mng,ref:ref,prof:prof,loc:loc,opts:opts,soc0:soc0,socModo:'panel',sweep:null,controls:ctrl,
         weatherContract:meteo.contract||null,weatherFallback:meteo.contractFallback||null};
       render(meteo,mng,ref,prof,loc,opts,null,null,ctrl);
-      /* y, si hay motor, el balance de referencia lo firma él */
-      balanceDelMotor(loc,prof,opts,meteo).then(function(j){ if(j) pintaBalanceMotor(j); });
+      /* En modo paridad el balance que ve el usuario es SOLO el del
+         motor compartido de bateria.html. No se añade una tarjeta opcional
+         con números del backend antiguo, que tiene otra estrategia. */
+      if($('src').value==='mapa'){
+        MOTOR_BAL=null;
+        pintaMotor('paridad');
+      }else balanceDelMotor(loc,prof,opts,meteo,runId).then(function(j){
+        if(j&&runId===MOTOR_RUN_ID&&$('src').value!=='mapa')pintaBalanceMotor(j);
+      });
     });
   }
   job.catch(function(e){
@@ -2026,11 +2177,15 @@ $('run').onclick=function(){
    fueran del servidor es exactamente el malentendido que la etiqueta evita. */
 var MOTOR = new Canon({ url: 'http://127.0.0.1:8765' });
 var MOTOR_BAL = null;          /* última respuesta de /tcubalance, o null */
+var MOTOR_RUN_ID=0;            /* invalida respuestas de otros escenarios */
 
 function pintaMotor(modo, extra) {
   var e = $('motorTag'); if (!e) return;
   var txt, col;
-  if (modo === 'motor') {
+  if (modo === 'paridad') {
+    txt = '✓ motor único · mapa + batería'; col = 'var(--ok)';
+    e.title = 'Mapa y simulador: mismos datos, mismos parámetros y una única implementación energética en bateria.html.';
+  } else if (modo === 'motor') {
     txt = '⚙ motor /tcubalance'; col = 'var(--ok)';
     e.title = 'El balance lo ha calculado ' + (extra || 'run_tcu_sim') + ' en el motor local.';
   } else if (modo === 'local') {
@@ -2064,7 +2219,7 @@ var PRESET_CORE = {
   /* STRING_60W_3Ah: el core solo publica STRING de 6 Ah. Sin contraparte. */
 };
 
-function balanceDelMotor(loc, prof, opts, meteo) {
+function balanceDelMotor(loc, prof, opts, meteo, runId) {
   if (MOTOR.estado !== 'listo') return Promise.resolve(null);
   var preset = PRESET_CORE[prof && prof.id];
   if (!preset) {
@@ -2080,6 +2235,7 @@ function balanceDelMotor(loc, prof, opts, meteo) {
     dia: 1, dias: Math.min(dias, 365), dt_min: 60,
     preset: preset
   }).then(function (j) {
+    if(runId!==MOTOR_RUN_ID||$('src').value==='mapa')return null;
     MOTOR_BAL = j;
     pintaMotor(j ? 'motor' : 'error', j ? j.motor : MOTOR.detalle);
     return j;
@@ -3020,5 +3176,6 @@ function render(meteo,mng,ref,prof,loc,opts,sweep,zoom,controls){
   out.appendChild(c5);
 }
 </script>
+<script src="sim/mapa-viabilidad.js"></script>
 </body>
 </html>

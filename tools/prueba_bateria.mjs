@@ -1080,6 +1080,342 @@ ok(tn.seg.n > 0 && tn.seg.este > 0 && tn.seg.bien, 'en modo seguridad va al fina
 ok(tn.mezcla.length === 0, 'el informe de una Track no mezcla: ni IED, ni P4Q, ni PS26002, ni la TCU 33', 'aparece: ' + tn.mezcla.join(', '));
 ok(tn.dice.length === 0 && tn.nota, 'y dice de dónde sale cada dato suyo, lo que es inferencia y que su calefactor no se modela', 'falta: ' + tn.dice.join(', '));
 
+/* ── 15) MAPA MUNDIAL DE VIABILIDAD: interacción real, sin red ni veredictos inventados ── */
+const mv = await pg.evaluate(() => {
+  const $id = (id) => document.getElementById(id);
+  const btn = $id('mv-open');
+  if (!btn) return {visible:false};
+  btn.click();
+  const root = $id('mv-root');
+  const abierto = !root.hidden;
+  const conocidos = [...$id('mv-sites').querySelectorAll('button:not(:disabled)')].length;
+  const sinEvaluar = $id('mv-result').textContent.includes('SIN EVALUAR');
+  $id('mv-lat').value = '-33,456789';
+  $id('mv-lon').value = '-70,651234';
+  $id('mv-name').value = 'QA Santiago temporal';
+  $id('mv-add').click();
+  const coordenadas = $id('mv-selected').textContent === 'QA Santiago temporal' &&
+    $id('mv-lat').value.includes('-33.456789') &&
+    $id('mv-lon').value.includes('-70.651234');
+  $id('mv-search').value = 'QA Santiago';
+  $id('mv-search').dispatchEvent(new Event('input',{bubbles:true}));
+  const encontrados = [...$id('mv-sites').querySelectorAll('button:not(:disabled)')]
+    .filter((b) => b.textContent.includes('QA Santiago')).length;
+  $id('mv-profile').value = 'TNC_45W_6Ah';
+  $id('mv-profile').dispatchEvent(new Event('change',{bubbles:true}));
+  const firmware = $id('mv-control').value === 'tnc';
+  const sigueSinEvaluar = $id('mv-result').textContent.includes('SIN EVALUAR');
+  $id('mv-close').click();
+  return {visible:true,abierto,conocidos,sinEvaluar,coordenadas,encontrados,firmware,
+    sigueSinEvaluar,cerrado:root.hidden};
+});
+ok(mv.visible&&mv.abierto&&mv.conocidos>0&&mv.cerrado,
+  'el mapa abre/cierra en la página y muestra ubicaciones del catálogo',
+  JSON.stringify(mv));
+ok(mv.sinEvaluar&&mv.sigueSinEvaluar,
+  'ninguna TCU se marca apta por defecto: sin ejecutar la meteo queda SIN EVALUAR');
+ok(mv.coordenadas&&mv.encontrados===1,
+  'se puede seleccionar por coordenadas con coma decimal y recuperar el lugar por nombre');
+ok(mv.firmware,
+  'la selección Track N Co muestra SU firmware y no las estrategias de SUNNER');
+
+
+/* ── 16) PARIDAD LITERAL: MISMO motor, misma entrada, cero diferencia ──
+   Compara filas HORARIAS sin redondear: SOC, posición, consumo, carga, stow,
+   nieve, reservas, temperatura, KPIs. Se fuerza viento/nieve/frío. */
+const parity = await pg.evaluate(async () => {
+  const sites=[
+    {n:'Tordesillas QA',lat:41.50202,lon:-5.00146},
+    {n:'Chorzele QA',lat:53.26105,lon:20.9},
+    {n:'La Joya QA',lat:-16.5957735,lon:-71.8064406},
+    {n:'Dunedin QA',lat:-45.86666667,lon:170.5},
+  ];
+  const make=(y,day,n,month=0)=>Array.from({length:n},(_,i)=>{
+    const hour=i%24,rad=(hour-6)*Math.PI/12,solar=Math.max(0,Math.sin(rad));
+    const g=solar*(i%43<12?180:930);
+    return {t:new Date(Date.UTC(y,month,day)+i*3600000),ghi:g,dhi:g*(i%43<12?.84:.22),
+      temp:i%57<22?-23+(i%6):i%31<6?43:10+(i%8),
+      wind:i%37<8?17.8:4.0,gust:i%37<8?24:7,
+      snowDepth:i%73<18?.06:0};
+  });
+  const base={motorModel:'curva',soh:0.8,vientoStow:'racha',
+    winter:false,strategy:true,socTgt:80,socCrit:30,
+    fcDays:5,tMin:0,poaMin:0,mountTilt:null};
+  const profiles=['SP_45W_6Ah','SP_45W_6Ah_LT','STRING_60W_6Ah',
+    'STRING_60W_6Ah_LT','TNC_45W_6Ah'];
+  let count=0,diff=0,invalid=0,variants=0;
+  const same=(a,b)=>{
+    if(JSON.stringify(a)!==JSON.stringify(b))diff++;
+  };
+  for(const site of sites){
+    const meteo=make(2025,10,240);
+    for(const id of profiles){
+      const prof=PROFILES.find(p=>p.id===id),tmin=prof.tCarga[0];
+      const opts={...base,tMin:tmin};
+      const fromPage=runControls(meteo,prof,site,0.5,opts);
+      const wanted=controlesPara(prof).filter(c=>!c.prof);
+      for(const c of wanted){
+        const left=fromPage.find(x=>x.c.k===c.k);
+        const right=calculaControlTCU(meteo,prof,site,opts,c,{soc0:0.5});
+        same(left.rows,right.rows);
+        same(left.S,right.S);
+        same(left.soc0,right.soc0);
+        same(left.prof.id,right.prof.id);
+        for(const r of right.rows){
+          if(!['soc','pos','motor','chg','net','eLib','tCell'].every(k=>Number.isFinite(r[k])))invalid++;
+        }
+        if(c.k==='winter')variants++;
+        count++;
+      }
+      const tramos=[{years:[2024],meteo:make(2024,29,168,11)},
+                   {years:[2025],meteo:make(2025,27,168,5)}];
+      for(const c of wanted){
+        const od=opcionesDe(c,prof,opts);
+        const reference=simulaSeguido(tramos,od.p,site,od.o);
+        const fromMap=calculaControlTCU(tramos,prof,site,opts,c,{seguido:true});
+        same(reference,fromMap.rows);
+        same(summarize(reference),fromMap.S);
+        same(fromMap.soc0,socEstacionario(od.o));
+        count++;
+      }
+    }
+  }
+
+  /* AÑO NUEVO: el SOC y la temperatura NO se reinician el 1 de enero.
+     Caso oscuro sin generación para que el arnés detecte un reinicio falso.
+     Un tramo real puede contener dos años; dividirlos sería físicamente
+     inventar un SOC nuevo en Nochevieja. */
+  const borderSite=sites[1],p0=PROFILES.find(p=>p.id==='SP_45W_6Ah');
+  const bord=make(2025,28,240,11).map(r=>({...r,ghi:0,dhi:0,
+    wind:0,gust:0,snowDepth:0,temp:-4}));
+  const split=bord.findIndex(r=>r.t.getUTCFullYear()===2026);
+  if(!(split>0&&split<bord.length))throw Error('El ensayo no cruza Año Nuevo');
+  const borderOpts={...base,tMin:p0.tCarga[0]};
+  const full=simulaSeguido([{years:[2025,2026],meteo:bord}],p0,borderSite,borderOpts);
+  const direct=simulate(bord,p0,borderSite,socEstacionario(borderOpts),borderOpts);
+  const fields=['t','soc','pos','chg','motor','base','net','tCell','eLib','seg','stow','nieve'];
+  let borderDiff=0;
+  for(let i=0;i<full.length;i++){
+    for(const key of fields){
+      const left=key==='t'?+full[i][key]:full[i][key];
+      const right=key==='t'?+direct[i][key]:direct[i][key];
+      if(!Object.is(left,right))borderDiff++;
+    }
+  }
+  const wrong=simulaSeguido([
+    {years:[2025],meteo:bord.slice(0,split)},
+    {years:[2026],meteo:bord.slice(split)}
+  ],p0,borderSite,borderOpts);
+  const resetDetected=wrong[split].soc!==full[split].soc;
+  const yearsInWinter=porInviernos(full).map(x=>x.label);
+  const continuous=borderDiff===0&&resetDetected&&yearsInWinter.length===1&&
+    yearsInWinter[0]==='2025/26';
+  if(!continuous)invalid++;
+  /* Paso del MISMO array de meteo del mapa al panel: cero redescargas. */
+  const site=sites[2],m=make(2025,1,240);
+  const byId=id=>document.getElementById(id);
+  byId('mv-open').click();
+  byId('mv-lat').value=String(site.lat);
+  byId('mv-lon').value=String(site.lon);
+  byId('mv-name').value=site.n;
+  byId('mv-add').click();
+  byId('mv-profile').value='SP_45W_6Ah';
+  byId('mv-profile').dispatchEvent(new Event('change'));
+  /* tMin personalizado debe sobrevivir al sincronizado entre vistas. */
+  byId('prof').value=String(PROFILES.findIndex(p=>p.id==='SP_45W_6Ah'));
+  byId('prof').dispatchEvent(new Event('change'));
+  byId('panel').value='45';
+  byId('tmin').value='-15';
+  byId('mv-period').value='2025';
+  window.BAT_METEO_PARIDAD={site:{lat:site.lat,lon:site.lon},years:[2025],
+    list:[m],period:'2025',source:'fixture de paridad, sin red',
+    sig:window.FACTIUN_MAPA_PARIDAD.currentSignature()};
+  byId('mv-period').dispatchEvent(new Event('change'));
+  const buttonVisible=!byId('mv-use-same-meteo').hidden;
+  byId('mv-use-same-meteo').click();
+  const selected={src:byId('src').value,lat:getLoc().lat,lon:getLoc().lon,
+    profile:PROFILES[Number(byId('prof').value)].id,year:byId('year').value,
+    tmin:Number(byId('tmin').value)};
+  const actual=await getMeteo(getLoc());
+  const sameReference=actual===m;
+  const validBefore=window.FACTIUN_MAPA_PARIDAD.validate(getLoc()).ok;
+  const socOriginal=byId('soc0').value;
+  byId('soc0').value='55';
+  const rejectChangedSOC=!window.FACTIUN_MAPA_PARIDAD.validate(getLoc()).ok;
+  byId('soc0').value=socOriginal;
+  let guard=false;
+  try{meteoExactaMapa({...site,lon:site.lon+0.00001},[2025]);}
+  catch(_){guard=true;}
+  let nasRefused=false;
+  try{await window.FACTIUN_MAPA_NAS.run({site,
+    profileId:'SP_45W_6Ah',period:'2025',signature:'firma-deliberadamente-distinta'});}
+  catch(e){nasRefused=/Diferencia de configuración/.test(String(e.message||e));}
+  return {count,diff,invalid,variants,continuous,borderDiff,resetDetected,
+    yearsInWinter,buttonVisible,sameReference,validBefore,
+    rejectChangedSOC,guard,nasRefused,
+    selected,expectedSite:site,closed:byId('mv-root').hidden};
+});
+ok(parity.count>=136&&parity.diff===0&&parity.invalid===0&&parity.variants>=4,
+  'PARIDAD LITERAL: serie completa y KPIs idénticos en cuatro sitios, 5 TCUs, 4 políticas y tramos; 0 diferencias',
+  JSON.stringify(parity));
+ok(parity.buttonVisible&&parity.sameReference&&parity.validBefore&&
+   parity.rejectChangedSOC&&parity.guard&&parity.nasRefused&&parity.closed&&
+   parity.selected.src==='mapa'&&parity.selected.profile==='SP_45W_6Ah'&&
+   parity.selected.year==='2025'&&parity.selected.tmin===-15&&
+   parity.selected.lat===parity.expectedSite.lat&&parity.selected.lon===parity.expectedSite.lon,
+  'el mapa entrega EL MISMO array horario al simulador y rechaza coordenadas distintas',
+  JSON.stringify(parity));
+
+/* ── 17) EXTREMO A EXTREMO: MAPA vs SIMULADOR EN EL MISMO NAVEGADOR ──
+   Sin consultar una API comercial: se simulan respuestas ERA5/ERA5-Land
+   con 8760 horas completas. Se verifican RESULTADOS reales, no sólo que
+   dos funciones puedan llamar una tercera. */
+const t2025=Date.UTC(2025,0,1),horas=8760;
+const hours=Array.from({length:horas},(_,i)=>{
+  const t=new Date(t2025+i*3600000),hr=t.getUTCHours();
+  const sol=Math.max(0,Math.sin(Math.PI*(hr-6)/12));
+  const sun=sol*((i%103)<27?195:790);
+  return {t:t.toISOString().slice(0,16),ghi:sun,dhi:sun*((i%103)<27?0.8:0.24),
+    wind:i%155<21?7.2:3.1,gust:i%155<21?13.5:5.4,
+    temp:2+(i%28)/3,snow:0};
+});
+const atmReply={hourly:{
+  time:hours.map(r=>r.t),shortwave_radiation:hours.map(r=>r.ghi),
+  diffuse_radiation:hours.map(r=>r.dhi),
+  windspeed_10m:hours.map(r=>r.wind)
+},hourly_units:{windspeed_10m:'m/s'}};
+const landReply={hourly:{
+  time:hours.map(r=>r.t),temperature_2m:hours.map(r=>r.temp),
+  snow_depth:hours.map(r=>r.snow),
+  wind_gusts_10m:hours.map(r=>r.gust)
+},hourly_units:{wind_gusts_10m:'m/s'}};
+let requests=0;
+await pg.route(/^https:\/\/archive-api\.open-meteo\.com\/v1\/archive\?/,async route=>{
+  const query=new URL(route.request().url()).searchParams;
+  const model=query.get('models'),vars=query.get('hourly');
+  requests++;
+  /* La API real exige wind_speed_unit=ms. Rechazar el parámetro antiguo
+     para que el banco no apruebe la interpretación errónea de km/h. */
+  const varsOK=model==='era5'
+    ?vars==='shortwave_radiation,diffuse_radiation,windspeed_10m'
+    :model==='era5_land'
+    ?vars==='temperature_2m,snow_depth,wind_gusts_10m'
+    :false;
+  if(!varsOK||query.get('wind_speed_unit')!=='ms'||query.has('windspeed_unit')){
+    await route.fulfill({status:400,body:JSON.stringify({error:'modelo, variable o unidad incorrectos'})});return;
+  }
+  await route.fulfill({status:200,contentType:'application/json',
+    headers:{'access-control-allow-origin':'*'},
+    body:JSON.stringify(model==='era5'?atmReply:landReply)});
+});
+await pg.evaluate(()=>{
+  const e=id=>document.getElementById(id);
+  e('prof').value=String(PROFILES.findIndex(p=>p.id==='SP_45W_6Ah'));
+  e('prof').dispatchEvent(new Event('change'));
+  e('tmin').value='0';
+  e('vientoStow').value='racha';
+  e('mv-open').click();
+  e('mv-lat').value='41.50202';e('mv-lon').value='-5.00146';
+  e('mv-name').value='QA Tordesillas físico';e('mv-add').click();
+  e('mv-profile').value='SP_45W_6Ah';
+  e('mv-profile').dispatchEvent(new Event('change'));
+  e('mv-period').value='2025';
+  e('mv-period').dispatchEvent(new Event('change'));
+  e('mv-evaluate').click();
+});
+await pg.waitForFunction(()=>{
+  const msg=document.getElementById('mv-progress').textContent;
+  return /Evaluación terminada|No se ha asignado viabilidad/.test(msg);
+},null,{timeout:120000});
+const evaluated=await pg.evaluate(()=>{
+  const text=document.getElementById('mv-progress').textContent;
+  const data=window.BAT_METEO_PARIDAD;
+  return {text,year:data?.years?.[0],hours:data?.list?.[0]?.length,
+    canCompare:!document.getElementById('mv-use-same-meteo').hidden};
+});
+ok(evaluated.text.startsWith('Evaluación terminada')&&evaluated.year===2025&&
+  evaluated.hours===8760&&evaluated.canCompare&&requests===2,
+  'el mapa ejecuta 8760 horas sobre ERA5+ERA5-Land y habilita reutilizar la misma meteo',
+  JSON.stringify({...evaluated,requests}));
+if(evaluated.canCompare){
+  await pg.evaluate(()=>{
+    document.getElementById('mv-use-same-meteo').click();
+    document.getElementById('run').click();
+  });
+  await pg.waitForFunction(()=>{
+    const data=window.BAT_METEO_PARIDAD;
+    return data&&window.LAST&&LAST.meteo===data.list[0]&&
+      LAST.loc.lat===data.site.lat&&LAST.loc.lon===data.site.lon;
+  },null,{timeout:120000});
+  const compared=await pg.evaluate(()=>{
+    const data=window.BAT_METEO_PARIDAD;
+    const all=JSON.parse(localStorage.getItem('bateria_mapa_conclusiones_v1')||'{}');
+    const record=Object.values(all).flat().find(x=>x&&x.sig===data.sig&&
+      x.site?.lat===data.site.lat&&x.site?.lon===data.site.lon);
+    const stdMap=record?.results?.find(x=>x.k==='std');
+    const stdMain=LAST.controls?.find(x=>x.c.k==='std');
+    return {
+      noParallelMotor:document.getElementById('motorTag').textContent.includes('motor único')&&
+        !document.getElementById('out').textContent.includes('Balance del motor'),
+      sameArray:LAST.meteo===data.list[0],
+      correctWindUnits:LAST.meteo.some(r=>r.wind===7.2&&r.gust===13.5),
+      gustsPresent:stdMain?.S.hSinRacha===0,
+      snowDataPresent:stdMain?.S.hSinNieve===0,
+      windStowObserved:stdMain?.S.hStow>0,
+      sameProfile:LAST.prof.id==='SP_45W_6Ah',
+      sameMarker:!!bmarker&&bmarker.getLatLng().lat===data.site.lat&&
+        bmarker.getLatLng().lng===data.site.lon,
+      sameHours:LAST.meteo.length===8760&&stdMain?.rows?.length===8760,
+      noDifference:!!stdMain&&!!stdMap&&
+        Object.is(stdMain.S.hZero,stdMap.hZero)&&
+        Object.is(stdMain.S.inactivePct,stdMap.inactivePct)&&
+        Object.is(stdMain.S.socMin*100,stdMap.simulador.socMinPct)&&
+        Object.is(stdMain.S.periodosRes,stdMap.periodosRes)&&
+        Object.is(stdMain.S.hNieve,stdMap.hNieve)&&
+        Object.is(stdMain.S.hStow,stdMap.hStow),
+      main:{hZero:stdMain?.S.hZero,socMin:stdMain?.S.socMin},
+      map:{hZero:stdMap?.hZero,socMin:stdMap?.simulador?.socMinPct}
+    };
+  });
+  ok(compared.noParallelMotor&&compared.sameArray&&compared.correctWindUnits&&
+    compared.gustsPresent&&compared.snowDataPresent&&compared.windStowObserved&&
+    compared.sameProfile&&compared.sameMarker&&
+    compared.sameHours&&
+    compared.noDifference,
+    'paridad REAL mapa→simulador: misma meteo, hardware, SOC y KPIs SIN redondeos',
+    JSON.stringify(compared));
+}
+
+/* ── 18) COORDENADAS EXACTAS: dos parcelas a 1e-7° no son una ── */
+const precision = await pg.evaluate(() => {
+  const e=id=>document.getElementById(id);
+  e('mv-open').click();
+  const initial=Number.parseInt(e('mv-count').textContent,10);
+  function add(name,lat,lon){
+    e('mv-name').value=name;
+    e('mv-lat').value=String(lat);
+    e('mv-lon').value=String(lon);
+    e('mv-add').click();
+    return {selected:e('mv-selected').textContent,lat:e('mv-lat').value,
+      count:Number.parseInt(e('mv-count').textContent,10)};
+  }
+  const a=add('QA precisión A',-33.456781,-70.651239);
+  const b=add('QA precisión B',-33.4567811,-70.651239);
+  const duplicate=add('QA precisión B repetida',-33.4567811,-70.651239);
+  e('mv-close').click();
+  /* El mapa original de batería nunca debe redondear a 3 decimales. */
+  setPick(41.502021234,-5.001461234,'QA ubicación exacta');
+  const original={lat:Number(e('clat').value),lon:Number(e('clon').value)};
+  return {initial,a,b,duplicate,original};
+});
+ok(precision.a.count===precision.initial+1&&
+   precision.b.count===precision.initial+2&&
+   precision.duplicate.count===precision.initial+2&&
+   precision.b.lat==='-33.4567811'&&
+   precision.original.lat===41.502021234&&precision.original.lon===-5.001461234,
+   'dos emplazamientos separados 1e-7° conservan coordenadas y marcadores distintos',
+   JSON.stringify(precision));
+
 await nav.close();
 console.log('\n' + (fallos ? '✗ ' + fallos + ' fallo(s)' : '✓ bateria.html abre, el espejo no derrama, su poaAt es Perez, sus 19 canónicos salen del espejo, el informe no se contradice, una TCU muerta no sigue al sol, la -LT es una química, el panel es un eje propio, el mapa de dimensionado es la misma simulación, el modelo nombra la batería, el catálogo cuadra con la ficha SUNNER ninguna estrategia sigue al sol sin reserva para ponerse a salvo los treinta años corren seguidos y se abandera por racha y por nieve como la casa, se sabe qué batería basta y la TCU de Track N Co se compara con lo suyo'));
 process.exit(fallos ? 1 : 0);

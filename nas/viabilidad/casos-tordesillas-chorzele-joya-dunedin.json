@@ -1,0 +1,27 @@
+[
+  {
+    "id": "ciudad:tordesillas",
+    "n": "Tordesillas · Valladolid · ES",
+    "lat": 41.50202,
+    "lon": -5.00146,
+    "fuente": "PARES/INE · centro de Tordesillas; NO parcela de planta"
+  },
+  {
+    "id": "ciudad:chorzele",
+    "n": "Chorzele · Mazowieckie · PL",
+    "lat": 53.26105,
+    "lon": 20.9,
+    "fuente": "OSM/Mapcarta · centro de Chorzele; NO parcela de planta"
+  },
+  {
+    "cartera_num": "24019",
+    "n": "San José · La Joya · Arequipa · PE"
+  },
+  {
+    "id": "ciudad:dunedin",
+    "n": "Dunedin · Otago · NZ",
+    "lat": -45.86666667,
+    "lon": 170.5,
+    "fuente": "UNGEGN · centro de Dunedin; NO parcela de planta"
+  }
+]

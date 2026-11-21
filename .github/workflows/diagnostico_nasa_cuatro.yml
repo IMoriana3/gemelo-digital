@@ -1,0 +1,30 @@
+name: diagnostico-nasa-cuatro
+on:
+  push:
+    branches: [feat/mapa-mundial-viabilidad-tcu]
+    paths:
+      - tools/diagnostico_nasa_cuatro.mjs
+      - .github/workflows/diagnostico_nasa_cuatro.yml
+  workflow_dispatch:
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Chromium para ejecutar el simulador existente
+        run: |
+          npm i --no-audit --no-fund --no-save playwright@1.62.1
+          npx playwright install --with-deps chromium
+      - name: Diagnóstico parcial NASA POWER 2025 · cuatro sitios
+        run: node tools/diagnostico_nasa_cuatro.mjs
+      - name: Guardar resultados (NO certificado)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostico-nasa-2025-no-certificado
+          path: outputs/diagnostico_nasa_2025_cuatro.json
+          if-no-files-found: warn

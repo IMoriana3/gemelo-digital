@@ -1,0 +1,15 @@
+# Excluir secretos y datos locales del contexto de build del NAS
+.git
+.git/**
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/node_modules/**
+.nas-map-data
+.nas-map-data/**
+data/viabilidad
+data/viabilidad/**
+**/*.log
+**/__pycache__
+**/.DS_Store
