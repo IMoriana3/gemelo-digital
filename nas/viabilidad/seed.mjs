@@ -101,8 +101,8 @@ async function worldMask(){
   if(mask.type!=='FeatureCollection')throw Error('Máscara mundial corrupta');
   return {mask,sha256:createHash('sha256').update(bytes).digest('hex')};
 }
-// IRENA 2026: capacidad fotovoltaica acumulada a cierre de 2025.
-const PV_PRIORITY=['CHN','USA','IND','DEU','JPN','BRA','ESP','AUS','ITA','KOR'];
+// Primera tanda elegida por Factiun. Después se retoma el orden IRENA 2026.
+const PV_PRIORITY=['ITA','ESP','CHL','MEX','IND','CHN','USA','DEU','JPN','BRA','AUS','KOR'];
 function priorityCountries(geo){
   if(geo.type!=='FeatureCollection')throw Error('Límites de países inválidos');
   return PV_PRIORITY.map(code=>{
@@ -165,7 +165,8 @@ async function worldPlan(){
       schema:'factiun.world-coverage.v1',revision:REVISION,mask_sha256:sha256,
       source:'Natural Earth 1:10m land polygons, public domain',
       step:level,period,yearRange,profiles,sites,
-      country_mask_sha256,pv_priority:PV_PRIORITY,pv_capacity_year:2025,
+      country_mask_sha256,pv_priority:PV_PRIORITY,
+      pv_priority_first_batch:'Factiun',pv_capacity_year:2025,
       pv_capacity_source:'https://ourworldindata.org/grapher/solar-pv-cumulative-capacity',
       total:work,cursor:0,enabled:true,created_at:new Date().toISOString(),
       disclaimer:'EXPLORACIÓN GLOBAL: las celdas no están certificadas ni interpoladas'
@@ -199,7 +200,7 @@ async function worldPlan(){
   console.log(JSON.stringify({
     modo:has('--enqueue')?'PLAN MUNDIAL REGISTRADO · ejecución NAS automática con licencia':'VISTA PREVIA GLOBAL · sin cálculos',
     cobertura:'todas las celdas terrestres detectables por Natural Earth 1:10m; no áreas certificadas',
-    mascara_sha256:sha256,prioridad_fv_2025:PV_PRIORITY,periodo:yearRange,perfiles:profiles,
+    mascara_sha256:sha256,prioridad_paises:PV_PRIORITY,periodo:yearRange,perfiles:profiles,
     etapas:results,
     total_nodos:results.reduce((n,x)=>n+x.sitios,0),
     total_trabajos:results.reduce((n,x)=>n+x.trabajos,0),
